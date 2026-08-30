@@ -18,7 +18,7 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 
 ## Procédures opérationnelles
 
-Procédures pas à pas dérivées du [plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf). Elles sont publiées au fur et à mesure de leur validation en pratique.
+Procédures pas à pas dérivées du [plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf). Elles seront publiées au fur et à mesure de leur validation en pratique.
 
 → [Voir toutes les procédures](docs/)
 
@@ -36,6 +36,6 @@ Scripts Python du pipeline RAG local (VM-RAG-LAB, Ubuntu Server 24.04, Docker Co
 
 Ce repo est maintenu dans le cadre de la documentation publiée sur [doit4everyone.github.io](https://doit4everyone.github.io).
 
-Les procédures publiées ici correspondent aux phases du plan d'apprentissage RAG local. Elles sont ajoutées progressivement à mesure que les phases sont travaillées en pratique, pas avant.
+Les procédures publiées ici correspondent aux phases du plan d'apprentissage RAG local. Elles seront ajoutées progressivement à mesure que les phases seront travaillées et mise en pratique, pas avant.
 
 Les guides au format `.docx` et `.pdf` sont dans le répertoire [`guides/`](guides/). Les procédures en markdown sont dans [`docs/`](docs/). Les scripts Python sont dans [`scripts/`](scripts/).
