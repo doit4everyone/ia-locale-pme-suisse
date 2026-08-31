@@ -10,7 +10,7 @@ Chaque procédure correspond à une phase du plan d'apprentissage et est publié
 
 ## Procédures disponibles
 
-*Aucune procédure publiée pour l'instant. Les premières seront ajoutées après l'obtention de la certification AI-901 et le démarrage du plan d'apprentissage.*
+*Aucune procédure publiée pour l'instant. Les premières seront ajoutées au démarrage du plan d'apprentissage.*
 
 ---
 
