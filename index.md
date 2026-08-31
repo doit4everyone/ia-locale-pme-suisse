@@ -13,12 +13,14 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 | Document | Format | Date |
 |---|---|---|
 | [IA locale pour PME suisse : guide décisionnel 2026](guides/gpu-ia-pme-suisse-2026.pdf) | PDF | Août 2026 |
+| [Plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf) | PDF | Août 2026 |
 
 ---
 
 ## Procédures opérationnelles
 
-Procédures pas à pas dérivées du [plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf). Ce plan est un premier jet non encore validé en pratique. Les procédures seront publiées au fur et à mesure de leur validation terrain.
+Procédures pas à pas dérivées du plan d'apprentissage RAG local. Ce plan est un premier jet non encore validé en pratique. Les procédures seront publiées au fur et à mesure de leur validation terrain.
+
 → [Voir toutes les procédures](docs/)
 
 ---
@@ -34,7 +36,5 @@ Scripts Python du pipeline RAG local (VM-RAG-LAB, Ubuntu Server 24.04, Docker Co
 ## À propos
 
 Ce repo est maintenu dans le cadre de la documentation publiée sur [doit4everyone.github.io](https://doit4everyone.github.io).
-
-Les procédures publiées ici correspondent aux phases du plan d'apprentissage RAG local. Elles seront ajoutées progressivement à mesure que les phases seront travaillées et mise en pratique, pas avant.
 
 Les guides au format `.docx` et `.pdf` sont dans le répertoire [`guides/`](guides/). Les procédures en markdown sont dans [`docs/`](docs/). Les scripts Python sont dans [`scripts/`](scripts/).
