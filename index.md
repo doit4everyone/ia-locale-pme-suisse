@@ -18,8 +18,7 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 
 ## Procédures opérationnelles
 
-Procédures pas à pas dérivées du [plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf). Elles seront publiées au fur et à mesure de leur validation en pratique.
-
+Procédures pas à pas dérivées du [plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf). Ce plan est un premier jet non encore validé en pratique. Les procédures seront publiées au fur et à mesure de leur validation terrain.
 → [Voir toutes les procédures](docs/)
 
 ---
