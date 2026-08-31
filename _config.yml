@@ -1,0 +1,9 @@
+title: "IA locale pour PME suisse — Guide décisionnel et procédures"
+description: "Architectures IA locales pour PME suisses : RTX Spark, DGX Spark, RTX PRO 6000, H100. TCO réel, ingénierie RAG, conformité nLPD. Procédures opérationnelles publiées progressivement."
+url: "https://doit4everyone.github.io"
+baseurl: "/ia-locale-pme-suisse"
+lang: fr
+theme: jekyll-theme-minimal
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap

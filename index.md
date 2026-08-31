@@ -1,3 +1,10 @@
+---
+title: "IA locale pour PME suisse — Guide décisionnel 2026 | DoIt4Everyone"
+description: "RTX Spark, DGX Spark, RTX PRO 6000, H100 : architectures IA locales pour PME suisses. TCO réel sur 3 ans en CHF, performances d'inférence mesurées, ingénierie RAG, sécurité et conformité nLPD. Procédures opérationnelles publiées progressivement."
+lang: fr
+permalink: /
+---
+
 # IA locale pour PME suisse
 
 Documentation technique et procédures opérationnelles sur le déploiement de systèmes IA locaux dans un contexte PME suisse.
