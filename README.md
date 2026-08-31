@@ -20,5 +20,4 @@ ia-locale-pme-suisse/
 ```
 
 ## Licence
-
-Documentation publiée sous [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.fr) — utilisation libre à des fins non commerciales avec attribution.
+Documentation publiée sous licence [MIT](https://opensource.org/licenses/MIT).
