@@ -1,4 +1,4 @@
-# ia-locale-pme-suisse
+# Ia-locale-pme-suisse
 
 Documentation technique et procédures opérationnelles sur le déploiement de systèmes IA locaux dans un contexte PME suisse.
 
