@@ -1,10 +1,33 @@
-# Procédures opérationnelles
+---
+title: "IA locale pour PME suisse — Procédures opérationnelles | DoIt4Everyone"
+description: "Procédures pas à pas pour le déploiement d'un pipeline RAG local sur VM Ubuntu Server 24.04. LlamaIndex, Qdrant, FastAPI, Onyx, permissions NTFS, sécurité nLPD."
+---
 
-Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf).
+<style>
+  header, footer { display: none !important; }
+  .wrapper {
+    max-width: 900px !important;
+    margin: 0 auto !important;
+    float: none !important;
+    position: relative !important;
+    padding: 40px 20px !important;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+    font-size: 1.1em !important;
+  }
+  section {
+    width: 100% !important;
+    float: none !important;
+    margin: 0 !important;
+  }
+  h1, h2 { text-align: center; }
+  table { width: 100%; display: table; margin: 20px 0; }
+</style>
 
-Chaque procédure correspond à une phase du plan d'apprentissage et est publiée après validation en pratique. L'ordre suit la progression du plan.
+# Procédures opérationnelles 🤖
 
-**Environnement de référence :** LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB (Ubuntu Server 24.04, Docker Compose).
+**Pipeline RAG local — VM-RAG-LAB (Ubuntu Server 24.04 + Docker Compose)**
+
+*Environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB*
 
 ---
 
@@ -16,7 +39,7 @@ Chaque procédure correspond à une phase du plan d'apprentissage et est publié
 
 ## Structure prévue
 
-Les procédures seront publiées dans cet ordre, en suivant les phases du plan :
+Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf). Chaque procédure correspond à une phase et est publiée après validation en pratique.
 
 | Phase | Procédure | Statut |
 |---|---|---|
@@ -35,4 +58,14 @@ Les procédures seront publiées dans cet ordre, en suivant les phases du plan :
 
 ---
 
+## ☕ Soutenir le projet
+
+Ces guides représentent des centaines d'heures de travail de lab et de documentation.
+
+👉 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/R5R31YHNIB)
+
+---
+
 ← [Retour à l'accueil](../)
+
+ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*
