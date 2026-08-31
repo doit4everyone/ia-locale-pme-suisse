@@ -1,8 +1,3 @@
----
-title: "IA locale pour PME suisse — Procédures opérationnelles | DoIt4Everyone"
-description: "Procédures pas à pas pour le déploiement d'un pipeline RAG local sur VM Ubuntu Server 24.04. LlamaIndex, Qdrant, FastAPI, Onyx, permissions NTFS, sécurité nLPD."
----
-
 <style>
   header, footer { display: none !important; }
   .wrapper {
