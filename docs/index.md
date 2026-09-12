@@ -1,28 +1,10 @@
-<style>
-  header, footer { display: none !important; }
-  .wrapper {
-    max-width: 900px !important;
-    margin: 0 auto !important;
-    float: none !important;
-    position: relative !important;
-    padding: 40px 20px !important;
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
-    font-size: 1.1em !important;
-  }
-  section {
-    width: 100% !important;
-    float: none !important;
-    margin: 0 !important;
-  }
-  h1, h2 { text-align: center; }
-  table { width: 100%; display: table; margin: 20px 0; }
-</style>
+# Procédures opérationnelles
 
-# Procédures opérationnelles 🤖
+Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf).
 
-**Pipeline RAG local — VM-RAG-LAB (Ubuntu Server 24.04 + Docker Compose)**
+Chaque procédure correspond à une phase du plan d'apprentissage et est publiée après validation en pratique. L'ordre suit la progression du plan.
 
-*Environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB*
+**Environnement de référence :** LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB (Ubuntu Server 24.04, Docker Compose).
 
 ---
 
@@ -34,9 +16,15 @@ Guide complet de déploiement d'un pipeline RAG local nLPD-compliant sur VM Ubun
 
 ---
 
-## Procédures par phase
+## Procédures disponibles
 
-Procédures dérivées du [plan d'apprentissage RAG local](/ia-locale-pme-suisse/guides/plan-apprentissage-rag-2026.pdf). Chaque procédure correspond à une phase et est publiée après validation en pratique.
+*Procédures unitaires par phase du plan d'apprentissage, publiées après validation en pratique.*
+
+---
+
+## Structure prévue
+
+Les procédures seront publiées dans cet ordre, en suivant les phases du plan :
 
 | Phase | Procédure | Statut |
 |---|---|---|
@@ -55,14 +43,4 @@ Procédures dérivées du [plan d'apprentissage RAG local](/ia-locale-pme-suisse
 
 ---
 
-## ☕ Soutenir le projet
-
-Ces guides représentent des centaines d'heures de travail de lab et de documentation.
-
-👉 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/R5R31YHNIB)
-
----
-
 ← [Retour à l'accueil](../)
-
-ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*
