@@ -1,6 +1,6 @@
 ---
-title: "Guide de déploiement stack IA locale | DoIt4Everyone"
-description: "Déployer une stack RAG locale sur Ubuntu Server 26.04 avec Onyx, Qdrant et Ollama. Validé en lab sur VM Ubuntu + LABO-G9, sans GPU."
+title: "Guide de déploiement : stack IA locale sur VM Ubuntu Server | DoIt4Everyone"
+description: "Déploiement complet d'un pipeline RAG local nLPD-compliant : Open WebUI, RAG API FastAPI, Qdrant, Ollama, cloisonnement ACL NTFS, authentification LDAP AD, journalisation nLPD."
 ---
 <style>
   header, footer { display: none !important; }
@@ -8,8 +8,7 @@ description: "Déployer une stack RAG locale sur Ubuntu Server 26.04 avec Onyx, 
   section { width: 100% !important; float: none !important; margin: 0 !important; }
   h1, h2, h3 { text-align: center; }
   table { width: 100%; display: table; margin: 20px 0; }
-  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.95em; }
-  pre { background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
   blockquote { border-left: 4px solid #2563A8; margin: 20px 0; padding: 10px 20px; background: #f0f4ff; }
 </style>
 
@@ -21,43 +20,41 @@ description: "Déployer une stack RAG locale sur Ubuntu Server 26.04 avec Onyx, 
 
 ## §0 Objet, périmètre et avertissements
 
-### Objet et architecture
+### Architecture validée en lab
 
-Ce guide documente le déploiement d'une stack RAG locale pour PME, validée en lab sur matériel CPU sans GPU. L'architecture en service :
+Ce guide documente le déploiement d'une stack RAG locale pour PME, validée en lab sur matériel CPU sans GPU. L'architecture en service à l'issue de ce guide :
 
 ```
-Utilisateur → Onyx (VM-RAG-LAB, Ubuntu 26.04, 16 Go)
-                 ├→ OpenSearch (index documentaire)
-                 └→ Ollama qwen2.5:14b (LABO-G9, hôte Windows)
+Utilisateur → Open WebUI (VM-RAG-LAB, port 3001, authentification LDAP AD)
+                  └→ RAG API FastAPI (port 8080)
+                       ├→ auth.py : résolution groupes AD (LDAP, svc-rag)
+                       ├→ Qdrant : index vectoriel + ACL NTFS (autorises[])
+                       └→ Ollama qwen2.5:14b (LABO-G9, hôte Windows)
 ```
 
-vLLM est documenté dans ce guide comme cible de production sur DGX Spark. Ce n'est pas le backend en service dans la configuration décrite.
+Onyx CE est déployé dans §4 comme étape de validation de l'indexation et du backend Ollama. Il est ensuite remplacé par Open WebUI + RAG API FastAPI qui constituent la stack finale, avec le cloisonnement documentaire réel.
 
-### Périmètre : permissions
+vLLM est documenté dans §2 comme cible de production sur DGX Spark. Ce n'est pas le backend en service dans la configuration décrite : Ollama sur LABO-G9 assure l'inférence.
 
-**Dans la configuration décrite par ce guide, tout utilisateur d'Onyx accède à l'intégralité du contenu indexé, quels que soient ses droits sur les fichiers d'origine. Onyx Community Edition ne filtre pas les résultats par permissions.**
+### Périmètre : cloisonnement documentaire
 
-Ce guide est valide pour un corpus dont l'ensemble des utilisateurs peut légitimement consulter tous les documents : documentation technique, procédures internes, base de connaissances. N'indexez pas un partage contenant des données à accès restreint.
+Ce guide documente un déploiement avec cloisonnement documentaire réel basé sur les ACL NTFS du file server Windows. Chaque utilisateur connecté via LDAP AD ne voit que les documents auxquels ses groupes AD donnent accès sur le partage source.
 
-Pour un corpus à droits différenciés, voir la Partie 2 de ce guide, consacrée à la RAG API avec filtrage ACL.
+Ce guide est adapté aux organisations dont les utilisateurs ont des droits différenciés sur les documents : données RH, financières, clients, direction.
 
-### Ce que ce guide ne couvre pas
+Pour un corpus sans restriction d'accès (base de connaissances commune, documentation technique interne), le cloisonnement peut être désactivé en retirant le filtre Qdrant dans `main.py`.
 
-- Le filtrage des résultats par permissions utilisateur, traité en Partie 2
-- Les documents chiffrés par Purview : indexés mais illisibles, voir §4.7 et la Partie 2
-- Le déploiement DGX Spark : documentaire, non validé sur matériel réel
+### Avertissements
 
-### Avertissements de sécurité
+> Tous les secrets présents dans ce guide sont en `changeme-*`. n8n est configuré en authentification basique sans TLS, les services sont exposés en HTTP. C'est une configuration de lab. Ne pas transposer telle quelle en production sans avoir appliqué §9.
 
-Le serveur RAG concentre le contenu de plusieurs partages sans les ACL d'origine. Ses sauvegardes deviennent aussi sensibles que les sources. À traiter comme un actif de valeur, pas comme une VM de service ordinaire.
-
-Tous les secrets présents dans les sections de ce guide sont en `changeme-*`, n8n est configuré en authentification basique sans TLS, Onyx est exposé en HTTP. C'est une configuration de lab. Ne pas transposer telle quelle en production.
+> Le serveur RAG concentre le contenu de plusieurs partages sans les ACL d'origine. Ses sauvegardes deviennent aussi sensibles que les sources. À traiter comme un actif de valeur, pas comme une VM de service ordinaire.
 
 ### Convention de statut
 
 Chaque section porte en tête une de ces trois lignes :
 
-- **Statut :** validé sur VM-RAG-LAB, septembre 2026
+- **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026
 - **Statut :** validé partiellement, voir les réserves en fin de section
 - **Statut :** documentaire, non validé sur matériel
 
@@ -82,11 +79,6 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
 
-
----
-
-**Partie 2 :** document distinct, consacré à la RAG API FastAPI avec filtrage ACL NTFS. Destiné aux déploiements locaux sur corpus à droits différenciés.
-
 ---
 
 ## Partie 3 : connecteurs Microsoft 365 (à venir)
@@ -95,4 +87,8 @@ La Partie 3 documentera l'intégration de la stack RAG avec Microsoft 365 : conn
 
 ---
 
-*Rédigé à titre documentaire, sans dépendance à aucun constructeur, revendeur ou intégrateur cité. Aucune prestation commerciale n'est associée à ce guide.*
+← [Retour aux procédures](../)
+
+---
+
+ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*
