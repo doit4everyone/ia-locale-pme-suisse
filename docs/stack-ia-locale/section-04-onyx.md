@@ -158,9 +158,9 @@ Dans **Settings → Admin → Authentication → LDAP** :
 
 **Premier connexion d'un compte LDAP :** Open WebUI bloque le compte en attente de validation admin. L'administrateur doit activer le compte dans **Settings → Admin → Users**.
 
-**Pré-provisionnement via import CSV :** pour éviter l'activation manuelle, les comptes peuvent être pré-créés avant le déploiement. Dans **Settings → Admin → Users → Import CSV**, le fichier attend 4 colonnes dans l'ordre : `Name, Email, Password, Role`. Pour les comptes LDAP, le mot de passe du CSV n'est pas utilisé à la connexion (l'authentification passe par LDAP), mais le champ est requis dans le format.
+En production, c'est le comportement recommandé : chaque nouvel accès est validé explicitement par un administrateur avant d'être actif. C'est cohérent avec une politique nLPD qui exige le contrôle des accès aux données.
 
-> **Import CSV non validé en lab.** La procédure est documentée à partir de l'interface Open WebUI mais n'a pas été testée avec des comptes LDAP. À valider avant déploiement en production.
+En lab, pour accélérer les tests, activer le compte dès réception de la demande de connexion dans le panneau admin.
 
 ### §4.2.5 Publication du modèle rag-api
 
