@@ -26,15 +26,17 @@
 
 ---
 
-## Procédures disponibles
+## Guide de déploiement stack IA locale
 
-*Aucune procédure publiée pour l'instant. Les premières seront ajoutées au démarrage du plan d'apprentissage.*
+Guide complet de déploiement d'un pipeline RAG local nLPD-compliant sur VM Ubuntu Server 24.04, avec cloisonnement documentaire par ACL NTFS, authentification LDAP AD et journalisation nLPD.
+
+→ [Guide de déploiement stack IA locale](stack-ia-locale/index.md)
 
 ---
 
-## Structure prévue
+## Procédures par phase
 
-Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf). Chaque procédure correspond à une phase et est publiée après validation en pratique.
+Procédures dérivées du [plan d'apprentissage RAG local](/ia-locale-pme-suisse/guides/plan-apprentissage-rag-2026.pdf). Chaque procédure correspond à une phase et est publiée après validation en pratique.
 
 | Phase | Procédure | Statut |
 |---|---|---|
