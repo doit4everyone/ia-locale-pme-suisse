@@ -1,8 +1,3 @@
----
-title: "IA locale pour PME suisse — Guide décisionnel et procédures | DoIt4Everyone"
-description: "RTX Spark, DGX Spark, RTX PRO 6000, H100 : architectures IA locales pour PME suisses. TCO réel sur 3 ans en CHF, performances d'inférence mesurées, ingénierie RAG, sécurité et conformité nLPD. Procédures opérationnelles publiées progressivement."
----
-
 <style>
   header, footer { display: none !important; }
   .wrapper {
@@ -23,46 +18,40 @@ description: "RTX Spark, DGX Spark, RTX PRO 6000, H100 : architectures IA locale
   table { width: 100%; display: table; margin: 20px 0; }
 </style>
 
-# IA locale pour PME suisse 🤖
+# Procédures opérationnelles 🤖
 
-**Documentation technique et procédures opérationnelles sur le déploiement de systèmes IA locaux dans un contexte PME suisse.**
+**Pipeline RAG local — VM-RAG-LAB (Ubuntu Server 24.04 + Docker Compose)**
 
-*Rédigé à titre documentaire, sans dépendance à aucun constructeur, revendeur ou intégrateur cité. Aucune prestation commerciale n'est associée à ces publications.*
+*Environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB*
 
 ---
 
-## Guides décisionnels
+## Guide de déploiement stack IA locale
 
-Documents de référence destinés aux décideurs et aux consultants IT.
+Guide complet de déploiement d'un pipeline RAG local nLPD-compliant sur VM Ubuntu Server 24.04, avec cloisonnement documentaire par ACL NTFS, authentification LDAP AD et journalisation nLPD.
 
-| Document | Format | Date |
+→ [Guide de déploiement stack IA locale](stack-ia-locale/)
+
+---
+
+## Procédures par phase
+
+Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf). Chaque procédure correspond à une phase et est publiée après validation en pratique.
+
+| Phase | Procédure | Statut |
 |---|---|---|
-| [IA locale pour PME suisse : guide décisionnel 2026](guides/gpu-ia-pme-suisse-2026.pdf) | PDF | Août 2026 |
-| [Plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf) | PDF | Août 2026 |
-
----
-
-## Procédures opérationnelles
-
-Procédures pas à pas dérivées du plan d'apprentissage RAG local. Ce plan est un premier jet non encore validé en pratique. Les procédures seront publiées au fur et à mesure de leur validation terrain.
-
-→ [Voir toutes les procédures](docs/)
-
----
-
-## Scripts
-
-Scripts Python du pipeline RAG local (VM-RAG-LAB, Ubuntu Server 24.04, Docker Compose).
-
-→ [Voir les scripts](scripts/)
-
----
-
-## À propos
-
-Ce repo est maintenu dans le cadre de la documentation publiée sur [doit4everyone.github.io](https://doit4everyone.github.io).
-
-Les guides au format `.docx` et `.pdf` sont dans le répertoire [`guides/`](guides/). Les procédures en markdown sont dans [`docs/`](docs/). Les scripts Python sont dans [`scripts/`](scripts/).
+| 1 | Créer la VM-RAG-LAB et valider la connectivité Ollama | À venir |
+| 2 | Premier pipeline RAG avec LlamaIndex | À venir |
+| 3 | Parsing des documents et stratégies de chunking | À venir |
+| 4 | Qdrant : persistance, métadonnées et snapshot | À venir |
+| 5 | Retrieval hybride et reranker BGE | À venir |
+| 6 | Prompt strict, citations et groundedness check | À venir |
+| 7 | Permissions NTFS : filtrage par identité AD | À venir |
+| 8 | API FastAPI et service complet | À venir |
+| 9 | Sécurité du pipeline : injection, durcissement, journalisation | À venir |
+| 10 | Synchronisation et monitoring | À venir |
+| 11 | Onyx : plateforme vs pipeline custom | À venir |
+| 12 | Projet de synthèse sur cas réel | À venir |
 
 ---
 
@@ -73,5 +62,7 @@ Ces guides représentent des centaines d'heures de travail de lab et de document
 👉 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/R5R31YHNIB)
 
 ---
+
+← [Retour à l'accueil](../)
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*
