@@ -85,7 +85,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 ---
 
-**Partie 2 :** document distinct, consacré à la RAG API FastAPI avec filtrage ACL NTFS et permissions Entra ID. Destiné aux déploiements sur corpus à droits différenciés.
+**Partie 2 :** document distinct, consacré à la RAG API FastAPI avec filtrage ACL NTFS. Destiné aux déploiements locaux sur corpus à droits différenciés.
 
 ---
 
