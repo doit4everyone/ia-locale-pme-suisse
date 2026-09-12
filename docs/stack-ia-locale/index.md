@@ -76,11 +76,14 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§3 Infrastructure : Qdrant, n8n, squelette RAG API](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API squelette | Publié |
 | [§4 Onyx et backend Ollama](section-04-onyx.md) | Déploiement Onyx CE, connexion Ollama, embedding, corpus de test | Publié |
 | [§5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | Montage SMB, ACL NTFS, résolution LDAP, filtrage Qdrant par identité | Publié |
-| [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié (indépendant de §5) |
+| [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié |
 | [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, Teams et OCR (documentaire) | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
+
+
+---
 
 **Partie 2 :** document distinct, consacré à la RAG API FastAPI avec filtrage ACL NTFS et permissions Entra ID. Destiné aux déploiements sur corpus à droits différenciés.
 
