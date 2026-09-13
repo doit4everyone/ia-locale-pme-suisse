@@ -47,16 +47,16 @@ sudo ufw allow 22/tcp
 
 # Services RAG : depuis les subnets internes uniquement
 # Adapter aux subnets de l'organisation
-sudo ufw allow from 10.100.1.0/24 to any port 8080   # RAG API
-sudo ufw allow from 10.100.1.0/24 to any port 3001   # Open WebUI
-sudo ufw allow from 10.100.1.0/24 to any port 5678   # n8n
-sudo ufw allow from 10.100.1.0/24 to any port 6333   # Qdrant
+sudo ufw allow from <SUBNET-SITE-1>/24 to any port 8080   # RAG API
+sudo ufw allow from <SUBNET-SITE-1>/24 to any port 3001   # Open WebUI
+sudo ufw allow from <SUBNET-SITE-1>/24 to any port 5678   # n8n
+sudo ufw allow from <SUBNET-SITE-1>/24 to any port 6333   # Qdrant
 
 # Second subnet si nécessaire
-sudo ufw allow from 10.100.2.0/24 to any port 8080
-sudo ufw allow from 10.100.2.0/24 to any port 3001
-sudo ufw allow from 10.100.2.0/24 to any port 5678
-sudo ufw allow from 10.100.2.0/24 to any port 6333
+sudo ufw allow from <SUBNET-SITE-2>/24 to any port 8080
+sudo ufw allow from <SUBNET-SITE-2>/24 to any port 3001
+sudo ufw allow from <SUBNET-SITE-2>/24 to any port 5678
+sudo ufw allow from <SUBNET-SITE-2>/24 to any port 6333
 ```
 
 ### §9.1.3 Réseau Docker interne
@@ -82,10 +82,10 @@ sudo ufw status verbose
 Status: active
 To                         Action      From
 22/tcp                     ALLOW IN    Anywhere
-8080                       ALLOW IN    10.100.1.0/24
-3001                       ALLOW IN    10.100.1.0/24
-5678                       ALLOW IN    10.100.1.0/24
-6333                       ALLOW IN    10.100.1.0/24
+8080                       ALLOW IN    <SUBNET-SITE-1>/24
+3001                       ALLOW IN    <SUBNET-SITE-1>/24
+5678                       ALLOW IN    <SUBNET-SITE-1>/24
+6333                       ALLOW IN    <SUBNET-SITE-1>/24
 8080                       ALLOW IN    172.18.0.0/16
 6333                       ALLOW IN    172.18.0.0/16
 ```
@@ -96,8 +96,8 @@ En production, restreindre SSH aux subnets internes :
 
 ```bash
 sudo ufw delete allow 22/tcp
-sudo ufw allow from 10.100.1.0/24 to any port 22
-sudo ufw allow from 10.100.2.0/24 to any port 22
+sudo ufw allow from <SUBNET-SITE-1>/24 to any port 22
+sudo ufw allow from <SUBNET-SITE-2>/24 to any port 22
 ```
 
 ---
@@ -122,7 +122,7 @@ docker logs rag-api 2>&1 | grep "TLS\|CERT"
 
 Un AD peut avoir une Root CA seule, ou une Root CA avec une ou plusieurs Sub CA intermédiaires. Il faut identifier quelle autorité signe le certificat présenté par le DC avant d'exporter.
 
-Sur GEST-SRV (PowerShell) :
+Sur <NOM-FILESERVER> (PowerShell) :
 
 ```powershell
 # Lister les autorités intermédiaires du domaine
@@ -136,7 +136,7 @@ La Sub CA dont le nom correspond à l'émetteur (`Issuer`) du certificat du DC e
 
 ### §9.2.3 Exporter la chaîne de certificats
 
-Sur GEST-SRV :
+Sur <NOM-FILESERVER> :
 
 ```powershell
 # Exporter la Sub CA (remplacer le thumbprint)
@@ -249,7 +249,7 @@ Chaque requête RAG est journalisée dans `/var/log/rag/rag-queries.jsonl` :
 ```json
 {
   "timestamp": "2026-09-11T16:49:07Z",
-  "user_id": "blaise@bsculier.ch",
+  "user_id": "admin@domaine.ch",
   "question_hash": "85136820969d55d3",
   "sources_accessed": [
     "RH/POLITIQUE RH/10_Politique_RH_Axonix_v3.1.docx",
@@ -421,16 +421,16 @@ Plus simple et plus robuste que PAM : pas d'activation irréversible de feature 
 ```
 n8n Schedule (toutes les heures)
     ↓
-HTTP Request → WinRM GEST-SRV
+HTTP Request → WinRM <NOM-FILESERVER>
     Enable-ADAccount -Identity svc-rag
     ↓
 POST /admin/sync
     ↓
-HTTP Request → WinRM GEST-SRV (toujours exécuté, même si sync échoue)
+HTTP Request → WinRM <NOM-FILESERVER> (toujours exécuté, même si sync échoue)
     Disable-ADAccount -Identity svc-rag
 ```
 
-Prérequis : WinRM actif sur GEST-SRV (`Get-Service WinRM`). L'implémentation complète du pipeline n8n est documentée dans §7 (à venir).
+Prérequis : WinRM actif sur <NOM-FILESERVER> (`Get-Service WinRM`). L'implémentation complète du pipeline n8n est documentée dans §7 (à venir).
 
 **Option C : pas de JIT**
 
@@ -479,10 +479,10 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 
 ### §9.7.2 Cycle complet validé en lab
 
-1. Fichier déplacé sur GEST-SRV : `CLIENTS/ClientA/contrat.docx` → `DIRECTION/contrat.docx`
+1. Fichier déplacé sur <NOM-FILESERVER> : `CLIENTS/ClientA/contrat.docx` → `DIRECTION/contrat.docx`
 2. Passe `acl_resolver.py` : ancien source détecté orphelin, 7 chunks supprimés
 3. Passe `indexer.py` : fichier réindexé sous `DIRECTION/contrat.docx` avec les droits DIRECTION
-4. Passe `acl_resolver.py` : `autorises[]` mis à jour avec `GRP-Direction-Purview`
+4. Passe `acl_resolver.py` : `autorises[]` mis à jour avec `GRP-Direction`
 5. Résultat : aucun chunk orphelin, cloisonnement cohérent
 
 ---

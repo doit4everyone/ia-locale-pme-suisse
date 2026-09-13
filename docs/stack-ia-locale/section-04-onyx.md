@@ -49,7 +49,7 @@ Variables minimales à configurer :
 # LLM
 GEN_AI_MODEL_PROVIDER=ollama
 GEN_AI_MODEL_VERSION=qwen2.5:14b
-GEN_AI_API_ENDPOINT=http://192.168.1.198:11434
+GEN_AI_API_ENDPOINT=http://<IP-OLLAMA>:11434
 
 # Embedding
 DOCUMENT_ENCODER_MODEL=nomic-ai/nomic-embed-text-v1
@@ -189,4 +189,4 @@ Le cloisonnement documentaire est opérationnel de bout en bout depuis l'interfa
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, AD BSCULIER.CH, Open WebUI v0.11.3, septembre 2026.*
+*Validé en lab sur VM-RAG-LAB, AD DOMAINE.CH, Open WebUI v0.11.3, septembre 2026.*

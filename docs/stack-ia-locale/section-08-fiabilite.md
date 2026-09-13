@@ -55,7 +55,7 @@ Toutes les données sont exactes et vérifiables dans le document source.
 ### Cas 2 : hallucination par analogie ("fais pareil")
 
 **Question posée immédiatement après :**
-> Fais pareil pour l'Étude Rochat
+> Fais pareil pour l'ClientB
 
 **Comportement observé :** le document `03_Contrat_Maintenance_Etude_Rochat.docx` existe dans le corpus. Onyx ne l'a pas trouvé lors de la recherche. Le modèle a produit une réponse en reprenant la structure du Cas 1 et en inventant les données.
 
@@ -147,7 +147,7 @@ Ces contrôles ont été testés sur le corpus Axonix SA en septembre 2026 :
 | Question | ancree | Sources retournées | Contrôle déclenchant |
 |---|---|---|---|
 | Conditions contrat Baumont Industries | `true` | `21_Contrat_Maintenance_Baumont_Industries.docx` (×2) | Aucun |
-| Conditions contrat Étude Rochat | `true` | `03_Contrat_Maintenance_Etude_Rochat.docx` (×2) | Aucun |
+| Conditions contrat ClientB | `true` | `03_Contrat_Maintenance_Etude_Rochat.docx` (×2) | Aucun |
 | Chiffrage migration Azure Sarrasin | `true` | `04_Reponse_AO_Migration_Azure_Sarrasin.docx` (×3) | Aucun |
 | "Fais pareil pour Baumont" (hors contexte) | `false` | Aucun chunk Baumont pertinent | Contrôle 4 : réponse sans citation |
 
@@ -228,7 +228,7 @@ La formation est la première ligne de défense, gratuite et sans développement
 
 | Formulation dangereuse | Formulation correcte |
 |---|---|
-| "Fais pareil pour l'Étude Rochat" | "Quelles sont les conditions du contrat de maintenance avec l'Étude Rochat ?" |
+| "Fais pareil pour l'ClientB" | "Quelles sont les conditions du contrat de maintenance avec l'ClientB ?" |
 | "Même chose pour Sarrasin" | "Quel est le chiffrage de la migration Azure pour Sarrasin Fiduciaire ?" |
 | "Compare les deux contrats" | "Quelles sont les différences de SLA entre le contrat Baumont et le contrat Rochat ?" |
 

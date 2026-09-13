@@ -46,6 +46,8 @@ La première décision architecturale est de séparer clairement les deux types 
 
 La structure du file server conditionne la qualité du cloisonnement. Une organisation par département est la plus courante dans une PME.
 
+> **`<NOM-FILESERVER>`** désigne dans ce guide un serveur membre du domaine AD, distinct du contrôleur de domaine. Il héberge les partages SMB et gère les ACL NTFS. Dans un déploiement typique, c'est un Windows Server 2019 ou 2022 joint au domaine. Ne pas installer le rôle file server sur le contrôleur de domaine.
+
 ```
 D:\FileService\
 ├── CLIENTS\          → partage SMB "CLIENTS"
