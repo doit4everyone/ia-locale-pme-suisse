@@ -391,7 +391,7 @@ docker logs rag-api 2>&1 | grep "Groupes résolus" | tail -1
 
 ### §9.5.2 Activation JIT du compte svc-rag (option avancée)
 
-Par défaut, `svc-rag` est membre permanent des groupes départementaux. Pour réduire la fenêtre d'exposition, trois approches sont possibles selon l'environnement.
+Par défaut, `svc-rag` est membre permanent des groupes départementaux. Pour réduire la fenêtre d'exposition, deux approches sont possibles selon l'environnement.
 
 **Option A : JIT via AD PAM**
 
@@ -414,27 +414,13 @@ Add-ADGroupMember -Identity "GRP-Clients" -Members "svc-rag" `
 
 > **Attention :** l'activation de PAM est irréversible et modifie le comportement de Kerberos dans toute la forêt. Ne pas activer en production sans avoir lu la documentation Microsoft sur les implications. Si la synchronisation dure plus longtemps que le TTL, `svc-rag` perd ses droits en pleine passe et l'indexeur échoue silencieusement.
 
-**Option B : Enable/Disable via n8n et WinRM (recommandée)**
+**Option B : pas de JIT (approche retenue dans ce guide)**
 
-Plus simple et plus robuste que PAM : pas d'activation irréversible de feature AD, pas de problème de TTL. Le pipeline n8n active `svc-rag` avant la synchronisation et le désactive après, même en cas d'erreur.
+Garder `svc-rag` actif en permanence et concentrer la sécurité sur la rotation du mot de passe (§9.5.1) et la restriction réseau (port SMB accessible uniquement depuis VM-RAG-LAB). C'est l'approche pragmatique retenue dans ce guide pour un lab PME avec un corpus stable.
 
-```
-n8n Schedule (toutes les heures)
-    ↓
-HTTP Request → WinRM <NOM-FILESERVER>
-    Enable-ADAccount -Identity svc-rag
-    ↓
-POST /admin/sync
-    ↓
-HTTP Request → WinRM <NOM-FILESERVER> (toujours exécuté, même si sync échoue)
-    Disable-ADAccount -Identity svc-rag
-```
+> **Pourquoi le mécanisme Enable/Disable via n8n a été abandonné :** une approche initialement envisagée consistait à désactiver `svc-rag` en dehors des fenêtres de synchronisation et à l'activer via WinRM uniquement pendant la passe horaire. Testée en lab, cette approche s'est révélée non viable : `svc-rag` assure deux rôles simultanés, le bind LDAP pour l'authentification des utilisateurs Open WebUI (continu, 24h/24) et la lecture SMB pour l'indexation (horaire). Désactiver le compte coupe immédiatement l'authentification de tous les utilisateurs avec une erreur HTTP 403, indépendamment de la synchronisation. Les deux usages sur un même compte sont incompatibles avec un mécanisme d'activation temporaire.
 
-Prérequis : WinRM actif sur <NOM-FILESERVER> (`Get-Service WinRM`). L'implémentation complète du pipeline n8n est documentée dans §7 (à venir).
-
-**Option C : pas de JIT**
-
-Garder `svc-rag` dans les groupes en permanence et concentrer la sécurité sur la rotation du mot de passe (§9.5.1) et la restriction réseau (port SMB accessible uniquement depuis VM-RAG-LAB). Approche pragmatique pour un lab PME avec un corpus stable.
+> **Avertissement : ne jamais désactiver `svc-rag` pendant une synchronisation n8n.** Si le compte est désactivé au moment où la passe horaire tourne, l'indexeur réécrit les chunks sans les métadonnées ACL (`autorises[]`, `interdits[]`). Le cloisonnement documentaire tombe silencieusement : tous les utilisateurs obtiennent `sources_accessed: []` et une réponse "Cette information ne figure pas dans les documents disponibles", sans message d'erreur explicite. Pour restaurer l'état correct : réactiver `svc-rag`, puis relancer `acl_resolver.py` manuellement pour repeupler les ACL dans Qdrant.
 
 ---
 
@@ -509,4 +495,4 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026. §9.5.2 (JIT AD PAM) est documentaire.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026. §9.5.2 Option A (JIT AD PAM) est documentaire, non validé sur matériel.*
