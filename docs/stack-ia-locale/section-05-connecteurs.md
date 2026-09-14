@@ -17,7 +17,7 @@ description: "Connecteur file server Windows SMB, lecture des ACL NTFS, résolut
 
 [Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur](section-04-onyx.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
 
 ---
 
@@ -220,6 +220,9 @@ ls /mnt/fileservice-root/
 # Le répertoire DfsrPrivate est un répertoire système de réplication DFS,
 # ainsi que System Volume Information et $RECYCLE.BIN.
 # Ces répertoires sont dans EXCLUDE_PATTERNS d'indexer.py et ne sont pas indexés.
+# Formats indexés : .docx, .pdf, .pptx, .txt, .md
+# Les PDF scannés sans couche texte produisent un avertissement et tombent en quarantaine.
+# Les tables et SmartArt PowerPoint ne sont pas extraits.
 ```
 
 Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab` :
@@ -361,23 +364,12 @@ La résolution se fait en deux étapes : trouver le compte par son `userPrincipa
 
 ### §5.5.2 Installation
 
+`auth.py`, `ldap3`, et le `Dockerfile` complet sont décrits en §3. La stack déployée en §3 inclut déjà tout le nécessaire. Aucune modification manuelle du `requirements.txt` n'est nécessaire si §3 a été suivi.
+
+Pour vérifier que `ldap3` est bien dans l'image en place :
+
 ```bash
-# Ajouter ldap3 dans les dépendances de la RAG API
-echo "ldap3" >> /root/rag-stack/api/requirements.txt
-```
-
-Copier `auth.py` dans `/root/rag-stack/api/`.
-
-Mettre à jour le `Dockerfile` pour inclure `auth.py` :
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
-COPY auth.py .
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+docker exec rag-api python3 -c "import ldap3; print('ldap3 OK')"
 ```
 
 ### §5.5.3 Variables d'environnement

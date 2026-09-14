@@ -122,9 +122,11 @@ httpx
 python-dotenv
 ldap3
 python-docx
+pdfplumber
+python-pptx
 ```
 
-`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx` est requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync`.
+`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`.
 
 **api/Dockerfile**
 
