@@ -584,7 +584,7 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 
 ---
 
-[Suite : §10 Validation et benchmarks](section-10-benchmarks.md) *(à venir)*
+§10 Validation et benchmarks *(à venir)*
 
 ---
 

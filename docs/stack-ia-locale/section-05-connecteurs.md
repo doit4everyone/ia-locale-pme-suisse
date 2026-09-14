@@ -15,7 +15,7 @@ description: "Connecteur file server Windows SMB, lecture des ACL NTFS, résolut
 
 # §5 Connecteurs SMB et cloisonnement documentaire
 
-[Retour au sommaire](index.md) | [Section précédente : §4 Configuration Onyx](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur](section-04-onyx.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
 
