@@ -513,7 +513,7 @@ for r in results:
 
 La fonction `check_access()` dans `auth.py` implémente la logique NTFS : accès accordé si `(user_groups ∩ autorises != ∅) AND (user_groups ∩ interdits == ∅)`.
 
-> **Le chemin DENY n'a pas été testé en lab.** L'implémentation est en place dans le code, mais aucun cas de validation ne l'exerce. À tester avant déploiement en production sur des données sensibles : créer un fichier avec un DENY explicite sur un groupe, vérifier que les membres de ce groupe ne voient pas les chunks correspondants même si leur groupe figure dans `autorises[]`.
+> **Chemin DENY validé en lab, septembre 2026.** Voir §9.4.5 pour les résultats complets. En résumé : `test-client`, membre de `GRP-Clients` (dans `autorises[]`) mais visé par un ACE de refus nominatif (dans `interdits[]`), ne voit pas `test-deny-explicite.docx`, alors qu'un compte sans DENY dans le même groupe y accède normalement. Le DENY nominatif l'emporte sur l'autorisation par groupe, y compris sur le chemin d'extension de contexte.
 
 ---
 
@@ -564,7 +564,7 @@ Les suggestions de suivi portaient uniquement sur les contrats clients, confirma
 
 Ce cas confirme que le filtre ne renvoie pas systématiquement zéro chunk : il renvoie exactement les documents autorisés, ni plus ni moins.
 
-> **Tests non encore réalisés en lab :** le chemin DENY explicite (§5.7.2) et la résolution des groupes imbriqués multi-niveaux n'ont pas été exercés par des cas de validation dédiés. Ces tests sont à planifier avant un déploiement en production sur des données sensibles.
+> **Tests validés en lab, septembre 2026.** Le chemin DENY explicite (§5.7.2) et la résolution des groupes imbriqués multi-niveaux ont été exercés par des cas de validation dédiés. Les résultats sont documentés en §9.4.5.
 
 ---
 

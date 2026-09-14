@@ -17,7 +17,7 @@ description: "Détecter et prévenir les hallucinations dans un pipeline RAG : c
 
 [Retour au sommaire](index.md) | [Section précédente : §7 Pipelines n8n](section-07-n8n.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB avec corpus Axonix SA, RAG API et Open WebUI, septembre 2026. Les cas de test documentés ont été reproduits en session avec le même modèle et le même corpus, à l'exception du contrôle 3 (voir §8.4).
+**Statut :** validé en lab sur VM-RAG-LAB avec corpus Axonix SA, RAG API et Open WebUI, septembre 2026. Tous les cas de test documentés ont été reproduits en session, y compris le contrôle 3 (format de citation confirmé, voir §8.4).
 
 ---
 
@@ -151,7 +151,7 @@ Ces contrôles ont été testés sur le corpus Axonix SA en septembre 2026 :
 | Chiffrage migration Azure Sarrasin | `true` | `04_Reponse_AO_Migration_Azure_Sarrasin.docx` (×3) | Aucun |
 | "Fais pareil pour Baumont" (hors contexte) | `false` | Aucun chunk Baumont pertinent | Contrôle 4 : réponse sans citation |
 
-> **Contrôle 3 non exercé en lab.** Aucune des questions ci-dessus n'a produit une citation de document inexistant, le contrôle 3 n'a donc pas déclenché. L'hallucination documentée en §8.2 (citation de `22_Contrat_Maintenance_Étude_Rochat.docx`) a été observée dans Onyx CE, pas dans la RAG API avec les contrôles actifs. Le contrôle 3 est implémenté dans `verifier_citations()` et son comportement est cohérent avec le code, mais il n'a pas été exercé par un cas de test dédié. À tester avant déploiement en production : poser une question qui pousse le modèle à citer une source absente des chunks, vérifier que le champ `sources_inventees` est non vide dans la réponse.
+> **Format de citation confirmé en lab, septembre 2026.** Le modèle produit des citations entre crochets du type `[CLIENTS/test-deny-explicite.docx]`, format que `verifier_citations()` sait lire. Le contrôle 3 est donc fonctionnel sur ce format. Il n'a pas déclenché lors des sessions de test car aucune réponse n'a cité de document inexistant : les réponses incorrectes ont été interceptées par le contrôle 1 (aucun chunk récupéré) ou par le contrôle 4 (réponse longue sans citation). L'hallucination documentée en §8.2 a été observée dans Onyx CE, pas dans la RAG API avec les contrôles actifs.
 
 ---
 
