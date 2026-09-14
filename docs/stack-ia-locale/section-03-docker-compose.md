@@ -1,6 +1,6 @@
 ---
 title: "§3 Docker Compose : stack complète | Guide de déploiement stack IA locale"
-description: "Déploiement de Qdrant, n8n et la RAG API FastAPI via Docker Compose sur VM-RAG-LAB."
+description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via Docker Compose sur VM-RAG-LAB."
 ---
 <style>
   header, footer { display: none !important; }
@@ -17,65 +17,100 @@ description: "Déploiement de Qdrant, n8n et la RAG API FastAPI via Docker Compo
 
 [Retour au sommaire](index.md) | [Section précédente : §2 vLLM](section-02-vllm.md)
 
-**Statut :** validé sur VM-RAG-LAB, septembre 2026. La RAG API est un squelette de validation : elle ne fait pas de RAG à ce stade, voir l'encadré de cadrage en tête de §3.
+**Statut :** validé sur VM-RAG-LAB, septembre 2026. La RAG API complète (avec authentification OIDC et filtrage ACL) fait l'objet de la Partie 2 : ce guide déploie la version production sans cloisonnement fin, valide pour un corpus homogène.
 
 ---
 
-> **Ce que cette section déploie et ce qu'elle ne déploie pas**
+> **Ce que cette section déploie**
 >
-> Cette section déploie trois composants via Docker Compose : Qdrant (vector store), n8n (orchestration) et une RAG API FastAPI. Onyx n'est pas dans cette stack : il dispose de sa propre stack Docker Compose déployée séparément en §4.
+> Quatre composants via Docker Compose : Qdrant (vector store), n8n (orchestration des pipelines), la RAG API FastAPI (retrieval, génération, journalisation nLPD) et Open WebUI (interface utilisateur). Onyx n'est pas dans cette stack : il dispose de sa propre stack déployée séparément en §4, uniquement pour la phase de validation.
 >
-> La RAG API déployée ici est un **squelette de validation**. Elle expose les bons endpoints (`/health`, `/stats`, `/query`) et vérifie la connectivité avec Qdrant et le LLM, mais elle n'interroge pas encore Qdrant et ne retourne pas de sources documentaires. Son seul rôle à ce stade est de valider que l'authentification, le routage et la connectivité fonctionnent. La RAG API complète avec indexation, recherche vectorielle et filtrage ACL fait l'objet de la Partie 2 de ce guide.
+> La RAG API est le composant central de la Partie 1. Elle reçoit les requêtes utilisateurs, interroge Qdrant, appelle le LLM et journalise chaque échange. Sans authentification LDAP ni filtrage fin par ACL (Partie 2), elle convient pour un corpus dont tous les utilisateurs peuvent légitimement consulter tous les documents.
+>
+> **Avertissement rappelé de §0 :** ne pas indexer un partage contenant des données à accès restreint avant d'avoir déployé la Partie 2.
 
 ---
 
 ## §3.1 Structure des répertoires
 
 ```bash
-mkdir -p ~/rag-stack/{qdrant_data,n8n_data,api}
+mkdir -p ~/rag-stack/{qdrant_data,n8n_data,openwebui_data,api}
+mkdir -p /var/log/rag
+chmod 750 /var/log/rag
 cd ~/rag-stack
 ```
+
+`/var/log/rag` accueille le journal nLPD et les rapports de synchronisation. Ce répertoire doit exister avant le premier lancement, sinon le montage Docker échoue silencieusement.
 
 ---
 
 ## §3.2 Fichier .env
 
-Toutes les variables sensibles sont centralisées dans un fichier `.env` à la racine du projet. Ne jamais committer ce fichier dans Git.
+Toutes les variables sensibles sont centralisées dans `.env`. Ne jamais committer ce fichier dans Git : il contient les mots de passe du compte de service et le secret API.
+
+Le fichier complet est fourni en téléchargement dans ce dépôt sous le nom `env.example`. Voici les variables clés à adapter à votre environnement :
 
 ```bash
-cat > ~/rag-stack/.env << 'EOF'
-# Endpoint d'inférence
-# Mode validation VM-RAG-LAB (vLLM local) :
-LLM_BASE_URL=http://172.17.0.1:8000
-LLM_MODEL=Qwen/Qwen3-1.7B
+# Génération LLM : Ollama sur LABO-G9 (hôte Windows, port 11434)
+LLM_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+LLM_MODEL=qwen2.5:14b
+JUDGE_MODEL=qwen3:4b
 
-# Mode production DGX Spark (changer uniquement le modèle) :
-# LLM_MODEL=Qwen/Qwen3-30B-A3B
-# LLM_BASE_URL reste sur 172.17.0.1:8000 si vLLM tourne sur la VM
-# ou sur l'IP réseau du DGX Spark si vLLM tourne sur une machine séparée
+# Embeddings : identique au service qui a servi à indexer
+# En cas de changement de modèle, réindexer avec indexer.py --reset
+EMBED_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+EMBED_MODEL=nomic-embed-text
 
+# Qdrant
 QDRANT_HOST=http://qdrant:6333
+QDRANT_COLLECTION=documents
+
+# Identité affichée dans le prompt système
+ORG_NAME=Axonix SA
+
+# Authentification API (générer avec openssl rand -hex 32)
+API_TOKEN=changeme-api-token
+ADMIN_TOKEN=changeme-admin-token
+
+# Journalisation et rapports de synchronisation
+LOG_FILE=/var/log/rag/rag-queries.jsonl
+REPORT_DIR=/var/log/rag
+
+# Annuaire AD (authentification LDAP par les scripts de synchronisation)
+LDAP_HOST=DC01.votre-domaine.ch
+LDAP_PORT=636
+LDAP_USE_TLS=true
+LDAP_BASE_DN=DC=votre-domaine,DC=ch
+LDAP_BIND_DN=CN=svc-rag,OU=Services,DC=votre-domaine,DC=ch
+LDAP_BIND_PWD=REMPLACER
+LDAP_DOMAIN=VOTREDOMAINE
+LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
+
+# Synchronisation corpus (§7)
+SYNC_SCRIPTS_DIR=/rag-pipeline
+SMB_SHARE=//SERVEUR/PartageDocuments
+SMB_MOUNT=/mnt/corpus-root
+SMB_USER=svc-rag
+SMB_PASSWORD=REMPLACER
+SMB_DOMAIN=VOTREDOMAINE
+
+# n8n
 N8N_BASIC_AUTH_USER=admin
 N8N_BASIC_AUTH_PASSWORD=changeme
 
-
-API_TOKEN=changeme-api-token
-EOF
+# Open WebUI
+WEBUI_SECRET_KEY=changeme-openwebui-secret
 ```
 
-> **Point critique :** `LLM_BASE_URL` doit utiliser l'IP de la passerelle Docker (`172.17.0.1`) et non `localhost`. Depuis l'intérieur d'un conteneur Docker, `localhost` pointe sur le conteneur lui-même, pas sur la VM hôte. vLLM tournant directement sur la VM (hors Docker), `localhost:8000` est inaccessible depuis les conteneurs. L'IP `172.17.0.1` est l'adresse de la passerelle Docker, toujours accessible depuis tous les conteneurs.
-
-Pour vérifier l'IP de la passerelle Docker sur votre système :
-
-```bash
-ip addr show docker0 | grep "inet "
-```
+> **Point critique :** `LLM_BASE_URL` et `EMBED_BASE_URL` doivent utiliser l'IP réseau de l'hôte Windows ou la passerelle Docker (`172.17.0.1`), jamais `localhost`. Depuis l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même. Pour vérifier l'IP de la passerelle Docker : `ip addr show docker0 | grep "inet "`.
+>
+> **Docker et variables vides :** avec `- VAR=${VAR}`, si `VAR` est absente du `.env`, Compose transmet une chaîne vide. Le code Python ne voit pas la valeur par défaut définie dans le script. Toute variable listée dans le bloc `environment` du Compose doit donc être définie dans `.env`.
 
 ---
 
-## §3.3 FastAPI RAG API
+## §3.3 RAG API FastAPI
 
-La RAG API est construite localement via Docker. Créer les trois fichiers suivants :
+La RAG API est construite localement via Docker. Les trois fichiers suivants forment l'image `rag-api`.
 
 **api/requirements.txt**
 
@@ -85,85 +120,45 @@ uvicorn[standard]
 qdrant-client
 httpx
 python-dotenv
+ldap3
+python-docx
 ```
+
+`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx` est requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync`.
 
 **api/Dockerfile**
 
 ```dockerfile
 FROM python:3.11-slim
 
+# smbclient fournit le binaire smbcacls, appelé par acl_resolver.py
+# pour lire les ACL NTFS du partage. Sans ce paquet, la synchronisation
+# échoue avec FileNotFoundError: smbcacls.
+# ca-certificates est requis pour la validation TLS du certificat LDAP.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        smbclient \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Locale UTF-8 : les noms de fichiers du corpus contiennent des accents.
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8
+
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY main.py auth.py .
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-**api/main.py**
+> **Pourquoi `smbclient` dans l'image RAG API ?** `acl_resolver.py` utilise le binaire `smbcacls` pour lire les ACL NTFS du partage. Ce script tourne dans le conteneur `rag-api` via l'endpoint `/admin/sync` (§7). Sans `smbclient` installé, chaque synchronisation échoue sur `FileNotFoundError: smbcacls`, après avoir correctement traité les embeddings. Le code de retour non nul remonte en fausse alerte dans n8n.
 
-> **Ce fichier est un squelette de validation.** Il expose les bons endpoints et vérifie la connectivité, mais l'endpoint `/query` appelle le LLM directement sans interroger Qdrant et retourne `"sources": []` en dur. Ce n'est pas encore une RAG API : c'est un proxy LLM avec authentification. La version complète avec indexation, recherche vectorielle et filtrage ACL est développée en Partie 2.
-
-```python
-from fastapi import FastAPI, HTTPException, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
-import httpx
-import os
-
-# SQUELETTE DE VALIDATION - voir Partie 2 pour la version complète avec RAG
-app = FastAPI(title="RAG API - squelette de validation")
-security = HTTPBearer()
-
-API_TOKEN = os.getenv("API_TOKEN", "changeme-api-token")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://172.17.0.1:8000")
-LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen3-1.7B")
-QDRANT_HOST = os.getenv("QDRANT_HOST", "http://qdrant:6333")
-
-class QueryRequest(BaseModel):
-    query: str
-    user_id: str = "anonymous"
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-@app.get("/stats")
-async def stats():
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{QDRANT_HOST}/collections")
-    return {"qdrant": r.json(), "llm": LLM_BASE_URL, "model": LLM_MODEL}
-
-@app.post("/query")
-async def query(
-    request: QueryRequest,
-    credentials: HTTPAuthorizationCredentials = Security(security)
-):
-    if credentials.credentials != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Token invalide")
-
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            f"{LLM_BASE_URL}/v1/chat/completions",
-            json={
-                "model": LLM_MODEL,
-                "messages": [
-                    {"role": "system", "content": "Tu es un assistant documentaire."},
-                    {"role": "user", "content": f"/no_think {request.query}"}
-                ],
-                "max_tokens": 500,
-                "chat_template_kwargs": {"enable_thinking": False}
-            }
-        )
-    result = response.json()
-    return {
-        "answer": result["choices"][0]["message"]["content"],
-        "user_id": request.user_id,
-        "sources": []
-    }
-```
+`main.py` et `auth.py` sont fournis en téléchargement dans ce dépôt. Ne pas copier les scripts `indexer.py` et `acl_resolver.py` dans l'image : ils sont montés depuis l'hôte en lecture seule, ce qui permet de les modifier sans reconstruire l'image.
 
 ---
 
@@ -191,7 +186,8 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - N8N_HOST=0.0.0.0
-      - WEBHOOK_URL=http://10.100.1.15:5678
+      - WEBHOOK_URL=http://<IP-VM>:5678
+      - N8N_SECURE_COOKIE=false
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -203,23 +199,104 @@ services:
       - "8080:8080"
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION}
+      # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000 sur DGX Spark)
+      # EMBED_BASE_URL : embeddings. Doit correspondre au service qui a servi
+      # à indexer. Si les deux services diffèrent, définir EMBED_BASE_URL
+      # explicitement dans .env, sinon les vecteurs de requête sont incohérents.
       - LLM_BASE_URL=${LLM_BASE_URL}
+      - EMBED_BASE_URL=${EMBED_BASE_URL}
+      - EMBED_MODEL=${EMBED_MODEL}
       - LLM_MODEL=${LLM_MODEL}
+      - JUDGE_MODEL=${JUDGE_MODEL}
+      - ORG_NAME=${ORG_NAME}
       - API_TOKEN=${API_TOKEN}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - LOG_FILE=${LOG_FILE}
+      - REPORT_DIR=${REPORT_DIR}
+      - TOP_K=${TOP_K}
+      - CONTEXT_THRESHOLD=${CONTEXT_THRESHOLD}
+      - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
+      - CHUNK_SIZE=${CHUNK_SIZE}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP}
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_PORT=${LDAP_PORT}
+      - LDAP_USE_TLS=${LDAP_USE_TLS}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_BIND_DN=${LDAP_BIND_DN}
+      - LDAP_BIND_PWD=${LDAP_BIND_PWD}
+      - LDAP_DOMAIN=${LDAP_DOMAIN}
+      - LDAP_CA_CERT=${LDAP_CA_CERT}
+      - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
+      - SMB_SHARE=${SMB_SHARE}
+      - SMB_MOUNT=${SMB_MOUNT}
+      - SMB_USER=${SMB_USER}
+      - SMB_PASSWORD=${SMB_PASSWORD}
+      - SMB_DOMAIN=${SMB_DOMAIN}
+    volumes:
+      # Scripts indexeur et résolveur ACL, montés en LECTURE SEULE.
+      # Le conteneur les exécute via /admin/sync mais ne peut pas les modifier.
+      # Les rapports JSON sont écrits dans /var/log/rag (monté en écriture).
+      - /root/rag-pipeline:/rag-pipeline:ro
+      # Partage SMB monté sur l'hôte (accès aux fichiers pour l'indexeur)
+      - /mnt/corpus-root:/mnt/corpus-root:ro
+      # Certificat CA du contrôleur de domaine pour la validation TLS LDAP
+      - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+      # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
+      - /var/log/rag:/var/log/rag
     depends_on:
       - qdrant
     restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    depends_on:
+      - rag-api
+    ports:
+      - "3001:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - ENABLE_FORWARD_USER_INFO_HEADERS=true
+    volumes:
+      - ./openwebui_data:/app/backend/data
+      - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+    restart: unless-stopped
 ```
+
+> **Montage en lecture seule pour `/rag-pipeline` :** le conteneur exécute `indexer.py` et `acl_resolver.py` mais ne doit pas pouvoir les modifier. Si un lecteur suit ce guide avec un dépôt Git, ce montage protège les scripts d'une altération accidentelle depuis le conteneur.
+>
+> **Montage du certificat AD :** `/etc/ssl/certs/ad-chain.pem` doit exister sur l'hôte avant le lancement. En son absence, le montage échoue et le conteneur ne démarre pas. Voir §9.3 pour l'export et l'installation du certificat.
 
 ---
 
 ## §3.5 Lancement de la stack
 
 ```bash
+# Créer le répertoire de logs s'il n'existe pas encore
+sudo mkdir -p /var/log/rag
+sudo chmod 750 /var/log/rag
+
+# Certificat CA du DC : le fichier doit exister avant docker compose up,
+# même vide, sinon le montage Docker bloque le démarrage de rag-api et open-webui.
+# auth.py détecte un fichier vide et retombe sur CERT_NONE avec un avertissement.
+# Une fois le vrai certificat exporté depuis le DC (§9.3), redémarrer les conteneurs :
+#   docker compose restart rag-api open-webui
+[ -f /etc/ssl/certs/ad-chain.pem ] || sudo touch /etc/ssl/certs/ad-chain.pem
+
 # Corriger les permissions n8n avant le premier lancement
 sudo chown -R 1000:1000 ~/rag-stack/n8n_data
 
 cd ~/rag-stack
+
+# L'image rag-api est construite localement depuis api/Dockerfile.
+# --no-cache est obligatoire si Dockerfile ou requirements.txt ont changé :
+# sans lui, Docker réutilise les couches en cache et n'installe pas
+# les nouveaux paquets (smbclient, ldap3, python-docx).
+# Au premier lancement, --no-cache n'est pas indispensable mais reste
+# une bonne habitude pour partir d'une image propre.
+docker compose build --no-cache rag-api
 docker compose up -d
 
 # Vérification
@@ -232,11 +309,21 @@ docker compose logs -f
 docker compose down
 ```
 
-> **Point critique :** sans `chown -R 1000:1000` sur le répertoire `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne avec l'utilisateur `node` (uid 1000) mais le répertoire est créé par root lors du `mkdir`.
+> **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`.
+>
+> **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.3) avant toute connexion LDAP.
+
+```bash
+# Certificat temporaire pour débloquer le démarrage (à remplacer par le vrai)
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /tmp/ad-chain.key \
+  -out /etc/ssl/certs/ad-chain.pem \
+  -subj "/CN=placeholder"
+```
 
 ---
 
-## §3.6 Validation
+## §3.6 Validation de la stack
 
 ```bash
 # Qdrant opérationnel
@@ -261,11 +348,55 @@ curl -X POST http://localhost:8080/query \
 curl -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d '{"query": "test", "user_id": "test"}'
+
+# Test endpoint OpenAI-Compatible (pour Open WebUI)
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer changeme-api-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "rag",
+    "messages": [{"role": "user", "content": "Test"}]
+  }'
+
+# Vérifier la création du log nLPD
+ls -la /var/log/rag/
+```
+
+> **Collection Qdrant vide à ce stade :** `/query` renvoie une réponse du LLM sans sources tant qu'aucun document n'a été indexé. C'est le comportement attendu. L'indexation se fait via `indexer.py` (§5) ou via le pipeline n8n (§7).
+
+---
+
+## §3.7 Structure de répertoires finale
+
+```
+~/rag-stack/
+├── .env                    ← variables sensibles, ne pas committer
+├── docker-compose.yml
+├── qdrant_data/            ← données Qdrant (persist)
+├── n8n_data/               ← workflows n8n (persist)
+├── openwebui_data/         ← données Open WebUI (persist)
+└── api/
+    ├── Dockerfile
+    ├── requirements.txt
+    ├── main.py             ← RAG API complète
+    └── auth.py             ← résolution LDAP
+
+/root/rag-pipeline/         ← scripts d'indexation (montés en lecture seule)
+├── indexer.py
+├── acl_resolver.py
+└── .venv/                  ← environnement Python pour lancement hôte
+
+/var/log/rag/               ← logs nLPD et rapports de synchro
+├── rag-queries.jsonl
+├── rapport_indexer.json
+└── rapport_acl.json
+
+/mnt/corpus-root/           ← partage SMB monté sur l'hôte (lecture seule)
 ```
 
 ---
 
-[Suite : §4 Configuration Onyx](section-04-onyx.md)
+[Suite : §4 Interfaces utilisateur](section-04-onyx.md)
 
 ---
 

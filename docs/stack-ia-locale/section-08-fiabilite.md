@@ -21,7 +21,7 @@ description: "Détecter et prévenir les hallucinations dans un pipeline RAG : c
 
 ---
 
-> **Ce que cette section documente :** un pipeline RAG peut produire des réponses incorrectes qui ressemblent à des réponses correctes. Cette section décrit comment les détecter, comment les prévenir côté utilisateur, et comment les intercepter côté technique. Les exemples sont issus de sessions de validation réelles sur le corpus Axonix SA, un corpus de documents fictifs créés pour le lab (voir §4.7). Les noms de clients, montants et références de fichiers qui apparaissent dans cette section sont inventés.
+> **Ce que cette section documente :** un pipeline RAG peut produire des réponses incorrectes qui ressemblent à des réponses correctes. Cette section décrit comment les détecter, comment les prévenir côté utilisateur, et comment les intercepter côté technique. Les exemples sont issus de sessions de validation réelles sur le corpus Axonix SA, un corpus de documents fictifs créés pour le lab (voir §4, corpus de validation Axonix SA). Les noms de clients, montants et références de fichiers qui apparaissent dans cette section sont inventés.
 
 ---
 
@@ -55,7 +55,7 @@ Toutes les données sont exactes et vérifiables dans le document source.
 ### Cas 2 : hallucination par analogie ("fais pareil")
 
 **Question posée immédiatement après :**
-> Fais pareil pour l'ClientB
+> Fais pareil pour l'étude Rochat
 
 **Comportement observé :** le document `03_Contrat_Maintenance_Etude_Rochat.docx` existe dans le corpus. Onyx ne l'a pas trouvé lors de la recherche. Le modèle a produit une réponse en reprenant la structure du Cas 1 et en inventant les données.
 
@@ -77,13 +77,13 @@ La réponse était bien formatée, complète, et indiscernable d'une réponse co
 
 **Signal 1 : format des citations.** Une réponse ancrée produit des objets de citation structurés avec le nom du fichier. Une réponse hallucinée produit des URLs en texte brut répétées à chaque affirmation, signe que le modèle reproduit le format sans avoir de chunks à citer.
 
-**Signal 2 : identifiant de document inventé.** Dans ce cas Onyx/SharePoint, l'URL hallucinée contenait le GUID `56601275-318D-47CD-960B-D94C762ED9C0`, absent de tout document SharePoint du tenant. C'est le signal le plus net d'hallucination : le modèle a inventé un identifiant structurellement plausible mais inexistant. Dans un pipeline file server SMB (Partie 2), l'équivalent est un nom de fichier cité entre crochets mais absent des chunks récupérés par Qdrant : c'est ce que détecte le contrôle 3 de la RAG API.
+**Signal 2 : identifiant de document inventé.** Dans ce cas Onyx/SharePoint, l'URL hallucinée contenait le GUID `56601275-318D-47CD-960B-D94C762ED9C0`, absent de tout document SharePoint du tenant. C'est le signal le plus net d'hallucination : le modèle a inventé un identifiant structurellement plausible mais inexistant. Dans un pipeline file server SMB (§5), l'équivalent est un nom de fichier cité entre crochets mais absent des chunks récupérés par Qdrant : c'est ce que détecte le contrôle 3 de la RAG API.
 
 ---
 
 ## §8.3 Architecture de contrôle : RAG API et Open WebUI
 
-La réponse architecturale au problème ci-dessus est de ne pas laisser Onyx gérer seul la génération. La RAG API (Partie 2) implémente quatre couches de contrôle entre la récupération et l'affichage.
+La réponse architecturale est de ne pas laisser Onyx gérer seul la génération. La RAG API déployée en §3 implémente quatre couches de contrôle entre la récupération et l'affichage.
 
 ```
 Utilisateur (Open WebUI, port 3001)
@@ -228,7 +228,7 @@ La formation est la première ligne de défense, gratuite et sans développement
 
 | Formulation dangereuse | Formulation correcte |
 |---|---|
-| "Fais pareil pour l'ClientB" | "Quelles sont les conditions du contrat de maintenance avec l'ClientB ?" |
+| "Fais pareil pour l'étude Rochat" | "Quelles sont les conditions du contrat de maintenance avec l'étude Rochat ?" |
 | "Même chose pour Sarrasin" | "Quel est le chiffrage de la migration Azure pour Sarrasin Fiduciaire ?" |
 | "Compare les deux contrats" | "Quelles sont les différences de SLA entre le contrat Baumont et le contrat Rochat ?" |
 
@@ -245,7 +245,7 @@ La règle générale : toujours poser une question directe sur un sujet précis.
 | 3. Contrôles déterministes | Citations inventées, réponse sans source | Nul | RAG API uniquement |
 | 4. Groundedness check | Juge qwen3:4b, affirmation par affirmation | ~2 à 8 s CPU | RAG API uniquement |
 
-Les couches 1 et 2 s'appliquent à Onyx CE sans développement. Les couches 3 et 4 nécessitent la RAG API (Partie 2).
+Les couches 1 et 2 s'appliquent à Onyx CE sans développement. Les couches 3 et 4 nécessitent la RAG API déployée en §3.
 
 ---
 

@@ -15,13 +15,13 @@ description: "Configuration de Cline dans VS Code pour connecter un agent de cod
 
 # §6 Cline : agent de codage
 
-[Retour au sommaire](index.md) | [Section précédente : §4 Onyx](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §5 Connecteurs SMB](section-05-connecteurs.md)
 
 **Statut :** validé sur WIN11-AD-TESTS avec VS Code et Ollama sur LABO-G9, septembre 2026.
 
 ---
 
-> **Cette section est indépendante de §5.** Elle ne nécessite qu'Ollama configuré sur LABO-G9 (§4) et VS Code installé sur le poste développeur. Elle peut être lue et appliquée avant que §5 soit publié.
+> **Cette section est indépendante de §5.** Elle ne nécessite qu'Ollama configuré sur LABO-G9 (§4) et VS Code installé sur le poste développeur. Elle peut être lue dans n'importe quel ordre par rapport aux autres sections.
 
 > **Note sur Continue.dev :** le guide prévoyait initialement Continue.dev comme copilote développeur. Continue.dev a été acquis par Cursor en juin 2026 et le produit est arrêté (dernière version : v2.0.0-vscode, dépôt en lecture seule, plus de mises à jour). L'outil retenu est **Cline**, le remplaçant direct le plus proche, open source, activement maintenu.
 

@@ -70,7 +70,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 |---|---|---|
 | [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker | Publié |
 | [§2 vLLM, validation CPU](section-02-vllm.md) | vLLM-cpu pour validation, configuration production DGX Spark | Publié |
-| [§3 Infrastructure : Qdrant, n8n, squelette RAG API](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API squelette | Publié |
+| [§3 Infrastructure : Qdrant, n8n, RAG API, Open WebUI](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API complète, Open WebUI | Publié |
 | [§4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | Validation backend avec Onyx CE, déploiement Open WebUI, LDAP AD, cloisonnement | Publié |
 | [§5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | Montage SMB, ACL NTFS, résolution LDAP, filtrage Qdrant par identité | Publié |
 | [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié |

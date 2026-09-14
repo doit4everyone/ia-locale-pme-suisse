@@ -140,7 +140,7 @@ Dans **Settings → Admin → Authentication → LDAP** :
 | Hôte | `<NOM-DC>.domaine.ch` | Nom DNS, pas l'IP |
 | Port | `636` | LDAPS obligatoire |
 | TLS | Activé | |
-| Validate Certificate | Désactivé | Certificat auto-signé DC |
+| Validate Certificate | Désactivé | **Lab uniquement.** En production, activer avec le vrai certificat CA du DC (§9.3) |
 | DN de l'application | `CN=svc-rag,...` | |
 | Mot de passe DN | mot de passe svc-rag | |
 | Attribut email | `userPrincipalName` | `mail` souvent non renseigné dans l'AD |
