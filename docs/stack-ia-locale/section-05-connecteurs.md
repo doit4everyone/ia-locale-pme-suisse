@@ -217,9 +217,9 @@ sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/fileservice-root \
 # Vérifier
 ls /mnt/fileservice-root/
 # doit afficher : CLIENTS  COMPTABILITE  DIRECTION  RH  SERVICE INFO  ...
-# Le répertoire DfsrPrivate est un répertoire système de réplication DFS.
-# indexer.py l'exclut automatiquement : ses fichiers tombent en quarantaine
-# (contenu trop court ou non structuré) et ne sont pas indexés.
+# Le répertoire DfsrPrivate est un répertoire système de réplication DFS,
+# ainsi que System Volume Information et $RECYCLE.BIN.
+# Ces répertoires sont dans EXCLUDE_PATTERNS d'indexer.py et ne sont pas indexés.
 ```
 
 Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab` :
