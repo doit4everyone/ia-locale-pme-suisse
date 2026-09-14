@@ -17,7 +17,7 @@ description: "UFW, certificat TLS LDAP, journalisation nLPD, rotation des compte
 
 [Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité](section-08-fiabilite.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.8 (JIT AD PAM, documentaire) et de la validation du certificat LDAP dans Open WebUI (§9.3.3).
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5.
 
 ---
 
@@ -290,19 +290,61 @@ sudo chmod 755 /var/log/rag
 
 ### §9.4.3 Consultation pour audit
 
+Les commandes ci-dessous couvrent les cas d'audit nLPD courants : accès par utilisateur, accès à un document spécifique, réponses non ancrées, et résumé d'activité.
+
 ```bash
-# Toutes les requêtes d'un utilisateur
+# Tout ce qu'un utilisateur a consulté (format lisible)
+grep "utilisateur@domaine.ch" /var/log/rag/rag-queries.jsonl | while read line; do
+    echo "$line" | python3 -m json.tool
+    echo "---"
+done
+
+# Tout ce qu'un utilisateur a consulté (format condensé pour rapport)
 grep "utilisateur@domaine.ch" /var/log/rag/rag-queries.jsonl | \
     python3 -c "
 import sys, json
 for line in sys.stdin:
     r = json.loads(line.strip())
-    print(f\"{r['timestamp']} | {r['user_id']} | {r['question_hash']} | {', '.join(r['sources_accessed'])}\")
+    docs = ', '.join(set(r['sources_accessed']))
+    print(f\"{r['timestamp']} | {r['question_hash']} | {docs}\")
 "
 
-# Requêtes sur un document spécifique
+# Tous les accès à un document spécifique (qui l'a consulté et quand)
+grep "nom_document.docx" /var/log/rag/rag-queries.jsonl | \
+    python3 -c "
+import sys, json
+for line in sys.stdin:
+    r = json.loads(line.strip())
+    print(f\"{r['timestamp']} | {r['user_id']} | {r['question_hash']}\")
+"
+
+# Nombre d'accès à un document
 grep "nom_document.docx" /var/log/rag/rag-queries.jsonl | wc -l
+
+# Réponses non ancrées (potentielles hallucinations, à investiguer)
+grep '"ancree": false' /var/log/rag/rag-queries.jsonl | \
+    python3 -c "
+import sys, json
+for line in sys.stdin:
+    r = json.loads(line.strip())
+    print(f\"{r['timestamp']} | {r['user_id']} | {r['question_hash']}\")
+"
+
+# Activité par utilisateur sur une journée (résumé pour audit)
+grep "2026-09-14" /var/log/rag/rag-queries.jsonl | \
+    python3 -c "
+import sys, json
+from collections import Counter
+users = Counter()
+for line in sys.stdin:
+    r = json.loads(line.strip())
+    users[r['user_id']] += 1
+for user, count in users.most_common():
+    print(f'{count:4d} requêtes  {user}')
+"
 ```
+
+> **Question hashée, pas stockée en clair.** Le champ `question_hash` permet de démontrer qu'une question a été posée, sans exposer son contenu. La réponse générée par le modèle n'est pas stockée : arbitrage assumé entre traçabilité et confidentialité. Un auditeur nLPD peut vérifier qui a accédé à quels documents, pas ce qui lui a été répondu.
 
 ### §9.4.4 Rotation et rétention
 
@@ -333,6 +375,53 @@ Tester sans appliquer :
 ```bash
 sudo logrotate --debug /etc/logrotate.d/rag-nlpd
 ```
+
+
+## §9.4.5 Validation du cloisonnement documentaire
+
+Les tests suivants ont été réalisés en lab avec la stack en production (VM-RAG-LAB, septembre 2026) et documentin le comportement réel du pipeline.
+
+### Test DENY nominatif
+
+**Contexte :** `test-deny-explicite.docx` (corpus CLIENTS) contient un forfait fictif de CHF 9 999 HT, valeur absente de tout autre document. `test-client` est membre de `GRP-Clients` (dans `autorises[]`) mais visé par un ACE de refus nominatif (dans `interdits[]`).
+
+**Résultat avec `test-client` :**
+
+```
+Quel contrat mentionne un forfait mensuel de CHF 9 999 ?
+→ Cette information ne figure pas dans les documents disponibles.
+```
+
+**Résultat avec `blaise@bsculier.ch` (Admins du domaine, dans `autorises[]`, sans DENY) :**
+
+```
+Quel contrat mentionne un forfait mensuel de CHF 9 999 ?
+→ Le contrat mentionnant un forfait mensuel de CHF 9 999 est trouvé dans le
+  document [CLIENTS/test-deny-explicite.docx].
+```
+
+**Conclusion :** le DENY nominatif l'emporte sur l'autorisation par groupe, y compris sur le chemin d'extension de contexte (`scroll`). `test-deny-explicite.docx` n'apparaît pas dans les logs de `test-client`, ce qui confirme que le filtrage intervient avant le `scroll`, pas après.
+
+```bash
+# Vérifier dans les logs après un test DENY
+docker logs rag-api 2>&1 | grep -E "Contexte étendu|interdit|filtré" | tail -10
+```
+
+### Test groupes imbriqués
+
+**Protocole :** création d'un groupe `GRP-Clients-Niveau2` dans l'AD, imbriqué dans `GRP-Clients`. `test-client` est retiré de `GRP-Clients` et placé dans `GRP-Clients-Niveau2` uniquement. Une requête est posée depuis Open WebUI sur un document CLIENTS.
+
+**Résultat avant modification AD :** `auth.py` résolvait 2 groupes pour `test-client` : `BSCULIER\GRP-Clients` et `BSCULIER\test-client`.
+
+**Résultat après modification AD :** `auth.py` résout 3 groupes : `BSCULIER\GRP-Clients-Niveau2` (membre direct), `BSCULIER\GRP-Clients` (remonté par récursion `memberOf`) et `BSCULIER\test-client`.
+
+```bash
+# Vérifier la résolution des groupes dans les logs
+docker logs rag-api 2>&1 | grep "groupes AD" | tail -5
+# Attendu : [AUTH] /v1 user 'test-client@bsculier.ch' : 3 groupes AD
+```
+
+**Conclusion :** le cloisonnement est resté opérationnel après la modification de l'imbrication. `test-client` a obtenu une réponse correcte avec citation de `21_Contrat_Maintenance_Baumont_Industries.docx`, et `test-deny-explicite.docx` est resté bloqué malgré `GRP-Clients` dans `autorises[]`.
 
 ---
 
@@ -488,6 +577,8 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 | ADMIN_TOKEN fort | `grep ADMIN_TOKEN /root/rag-stack/.env` | Token de 32+ caractères |
 | Port 8080 non exposé | `sudo ufw status \| grep 8080` | Subnet interne uniquement |
 | SSH restreint (prod) | `sudo ufw status \| grep 22` | Subnet interne uniquement |
+| DENY validé | Voir §9.4.5 | Test positif + test négatif effectués |
+| Groupes imbriqués | Voir §9.4.5 | Résolution récursive validée |
 
 ---
 
@@ -495,4 +586,4 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026. §9.5.2 Option A (JIT AD PAM) est documentaire, non validé sur matériel.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026. §9.5.2 Option A (JIT AD PAM) est documentaire, non validé sur matériel. Tests DENY et groupes imbriqués validés en session, résultats en §9.4.5.*
