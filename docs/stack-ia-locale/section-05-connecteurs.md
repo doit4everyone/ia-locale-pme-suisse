@@ -217,13 +217,32 @@ sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/fileservice-root \
 # Vérifier
 ls /mnt/fileservice-root/
 # doit afficher : CLIENTS  COMPTABILITE  DIRECTION  RH  SERVICE INFO  ...
+# Le répertoire DfsrPrivate est un répertoire système de réplication DFS.
+# indexer.py l'exclut automatiquement : ses fichiers tombent en quarantaine
+# (contenu trop court ou non structuré) et ne sont pas indexés.
 ```
 
 Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab` :
 
+```bash
+sudo tee -a /etc/fstab << 'FSTAB'
+
+# Partage SMB FileService (corpus RAG, monté par svc-rag)
+//<NOM-FILESERVER>/FileService /mnt/fileservice-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
+FSTAB
 ```
-//<NOM-FILESERVER>/FileService /mnt/fileservice-root cifs credentials=/etc/smbcredentials/svc-rag,uid=1000,gid=1000,_netdev 0 0
+
+`soft` : si le serveur est inaccessible, les opérations I/O retournent une erreur au lieu de bloquer indéfiniment. `nofail` : si le partage est inaccessible au démarrage, la VM démarre quand même au lieu de rester bloquée en attente.
+
+Tester sans rebooter :
+
+```bash
+sudo mount -a
+mount | grep fileservice
+ls /mnt/fileservice-root | head -5
 ```
+
+> **Rotation du mot de passe :** le fichier `/etc/smbcredentials/svc-rag` doit être mis à jour en même temps que `.env` lors de la rotation (§9.5.1). Si le fichier contient l'ancien mot de passe, le montage tombe au prochain reboot sans message d'erreur explicite.
 
 > **Pourquoi le partage racine ?** L'indexeur et le résolveur d'ACL doivent partager la même racine pour que les chemins relatifs soient identiques dans Qdrant. Si l'indexeur tourne depuis `/mnt/fileservice-root` et stocke `CLIENTS/ClientA/contrat.docx`, le résolveur doit calculer ce chemin depuis la même racine.
 

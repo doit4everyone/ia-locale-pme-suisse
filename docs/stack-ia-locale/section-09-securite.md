@@ -451,6 +451,8 @@ sudo nano /etc/smbcredentials/svc-rag
 # Modifier la ligne : password=<nouveau-mdp>
 ```
 
+Ce fichier est utilisé par deux mécanismes distincts : le montage automatique au démarrage via `/etc/fstab`, et les outils `smbcacls` et `smbclient` appelés par `acl_resolver.py`. Les deux utilisent ce même fichier. Si la mise à jour est oubliée, le montage fonctionnera avec la session actuelle (déjà établie) mais tombera au prochain reboot ou au prochain remontage.
+
 **Étape 4 :** mettre à jour le fichier `.env` :
 
 ```bash
