@@ -125,18 +125,30 @@ La RAG API est construite localement via Docker. Les trois fichiers suivants for
 **api/requirements.txt**
 
 ```
+# API
 fastapi
 uvicorn[standard]
-qdrant-client
-httpx
 python-dotenv
+httpx
+
+# Vector store
+qdrant-client
+
+# Retrieval hybride BM25 (main.py)
+# Index en mémoire : ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
+# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (voir §10).
+rank-bm25
+
+# Résolution LDAP des groupes AD (auth.py)
 ldap3
+
+# Extraction de texte des documents (indexer.py)
 python-docx
 pdfplumber
 python-pptx
 ```
 
-`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`.
+`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. `rank-bm25` est requis par `main.py` pour le retrieval hybride BM25 : au démarrage du conteneur, un index BM25 est construit en mémoire depuis les chunks Qdrant et fusionné avec la recherche vectorielle par Reciprocal Rank Fusion.
 
 **api/Dockerfile**
 
