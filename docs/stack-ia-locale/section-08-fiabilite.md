@@ -194,11 +194,15 @@ Réponse à vérifier :
 Instructions :
 - Une affirmation est sourcée si elle est directement tirée des sources ou en est une reformulation fidèle.
 - Une affirmation est NON sourcée si elle contient un chiffre, une date, un nom ou un fait précis absent des sources.
-- Ne valide pas une affirmation si tu ne la trouves pas dans les sources.
+- Une affirmation est NON sourcée si elle attribue une fonctionnalité ou une action au mauvais sujet : si la source dit que A fait X, la réponse ne peut pas dire que B fait X.
+- Si la source documente un outil construit autour d'un produit, la réponse ne peut pas présenter cet outil comme une fonctionnalité native du produit.
+- Ne valide pas une affirmation si tu ne la trouves pas dans les sources ou si l'attribution est incorrecte.
 
 Réponds uniquement en JSON :
 {"ancree": true ou false, "affirmations_non_sourcees": ["liste des affirmations avec des faits précis absents des sources"]}"""
 ```
+
+> **Limite du juge sur CPU :** `qwen3:4b` détecte les hallucinations grossières (chiffres, dates, noms inventés) mais rate les mauvaises attributions subtiles : si une source documente un outil construit *autour* d'un produit, le juge peut valider une réponse qui présente cet outil comme une fonctionnalité native du produit. Les deux règles d'attribution ajoutées ci-dessus réduisent ce risque, mais ne l'éliminent pas. Une validation fiable des attributions nécessite un modèle juge plus grand (`qwen2.5:14b` sur GPU, en réutilisant le modèle principal déjà chargé en VRAM).
 
 **En cas d'échec du juge**, la réponse est laissée passer pour ne pas bloquer le service. L'échec est journalisé avec le champ `verification: non_effectuee` pour l'audit nLPD. Un juge qui tombe pendant une semaine devient visible dans les logs, pas silencieux.
 
@@ -244,7 +248,7 @@ La règle générale : toujours poser une question directe sur un sujet précis.
 
 | Couche | Mécanisme | Coût | Interface |
 |---|---|---|---|
-| 1. Prompt strict | "Réponds uniquement à partir des documents" | Nul | Onyx CE et RAG API |
+| 1. Prompt strict | "Réponds uniquement à partir des documents, ignore les chunks hors sujet" | Nul | Onyx CE et RAG API |
 | 2. Formation utilisateurs | Proscrire "fais pareil", questions directes | Nul | Toutes interfaces |
 | 3. Contrôles déterministes | Citations inventées, réponse sans source | Nul | RAG API uniquement |
 | 4. Groundedness check | Juge qwen3:4b, affirmation par affirmation | ~2 à 8 s CPU | RAG API uniquement |
@@ -257,4 +261,4 @@ Les couches 1 et 2 s'appliquent à Onyx CE sans développement. Les couches 3 et
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, corpus Axonix SA (12 documents, 68 chunks), RAG API avec qwen2.5:14b et qwen3:4b, Open WebUI, septembre 2026.*
+*Validé en lab sur VM-RAG-LAB, corpus Axonix SA + DOIT4EVERYONE (45 fichiers, 970 chunks), RAG API avec qwen2.5:14b et qwen3:4b, Open WebUI, septembre 2026.*
