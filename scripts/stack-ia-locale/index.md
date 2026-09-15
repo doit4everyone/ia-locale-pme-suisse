@@ -48,7 +48,7 @@ Les scripts `indexer.py` et `acl_resolver.py` tournent hors conteneur, sur l'hô
 
 | Script | Rôle | Exécution |
 |---|---|---|
-| `main.py` | RAG API FastAPI : retrieval, génération, journalisation nLPD, endpoint `/admin/sync` | Dans le conteneur `rag-api` |
+| `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel, génération, journalisation nLPD, endpoint `/admin/sync` | Dans le conteneur `rag-api` |
 | `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage des chunks par ACL | Dans le conteneur `rag-api` |
 | `indexer.py` | Parcours SMB, extraction de texte, embedding, écriture Qdrant avec payload ACL | Sur l'hôte, via `/admin/sync` ou manuel |
 | `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant | Sur l'hôte, via `/admin/sync` ou manuel |
@@ -68,6 +68,10 @@ Fonctionnalités :
 
 - Retrieval Qdrant avec filtre ACL (`autorises[]` et `interdits[]`)
 - Extension de contexte par `scroll` sur le document le mieux classé, avec contrôle ACL appliqué après le scroll
+- Retrieval hybride BM25 + vectoriel fusionné par Reciprocal Rank Fusion (RRF) :
+  l'index BM25 est construit en mémoire au démarrage depuis Qdrant et reconstruit
+  après chaque synchronisation réussie. BM25 capture les termes exacts (noms de fichiers,
+  acronymes, commandes) là où la recherche vectorielle seule échoue sur les reformulations.
 - `TOP_K` configurable (défaut 12), augmenté pour les questions multi-sources
 - `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
@@ -213,13 +217,27 @@ SMB_DOMAIN=DOMAINE
 **Dans le conteneur `rag-api` (`api/requirements.txt`) :**
 
 ```
+# API
 fastapi
 uvicorn[standard]
-qdrant-client
-httpx
 python-dotenv
+httpx
+
+# Vector store
+qdrant-client
+
+# Retrieval hybride BM25
+# Index en mémoire : ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
+# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (voir §10).
+rank-bm25
+
+# Résolution LDAP
 ldap3
+
+# Extraction de texte
 python-docx
+pdfplumber
+python-pptx
 ```
 
 **Sur l'hôte (`/root/rag-pipeline/.venv`) :**
