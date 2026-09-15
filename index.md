@@ -44,25 +44,62 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 
 ## Procédures opérationnelles
 
-Procédures pas à pas dérivées du plan d'apprentissage RAG local. Ce plan est un premier jet non encore validé en pratique. Les procédures seront publiées au fur et à mesure de leur validation terrain.
-
 ### Guide de déploiement stack IA locale
 
-Déploiement complet d'un pipeline RAG local nLPD-compliant sur VM Ubuntu Server 24.04 : indexation SMB, cloisonnement documentaire par ACL NTFS, authentification LDAP Active Directory, automatisation n8n et journalisation nLPD.
+Ce guide documente le déploiement complet d'un pipeline RAG local fonctionnel, validé en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c'est une stack opérationnelle, avec cloisonnement documentaire réel, authentification Active Directory, journalisation nLPD et contrôle d'ancrage des réponses.
 
-→ [Guide de déploiement stack IA locale](docs/stack-ia-locale/)
+**Ce que la stack fait concrètement :**
 
-### Toutes les procédures
+- Les utilisateurs s'authentifient via leur compte Active Directory dans Open WebUI.
+- Chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
+- Les réponses du LLM sont vérifiées par un juge LLM secondaire avant d'être affichées.
+- Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
+- La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-→ [Voir toutes les procédures](docs/)
+**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, sur VM Ubuntu Server 26.04, Docker Compose. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+
+→ [Guide de déploiement stack IA locale](docs/stack-ia-locale/index.md)
 
 ---
 
 ## Scripts
 
-Scripts Python du pipeline RAG local (VM-RAG-LAB, Ubuntu Server 24.04, Docker Compose).
+Scripts Python du pipeline RAG local, publiés avec les valeurs sensibles remplacées par des placeholders. Validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026.
 
-→ [Voir les scripts](scripts/)
+**Hôte Ubuntu (hors conteneur) :**
+
+| Script | Rôle |
+|---|---|
+| `indexer.py` | Parcours SMB, extraction de texte, embedding, écriture Qdrant |
+| `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant |
+
+**Image Docker `rag-api` (sous-dossier `api/`) :**
+
+| Fichier | Rôle |
+|---|---|
+| `main.py` | RAG API FastAPI : retrieval, génération, journalisation nLPD, endpoint `/admin/sync` |
+| `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage ACL |
+| `Dockerfile` | Image basée sur Python 3.11-slim avec `smbclient`, `ldap3`, `python-docx` |
+| `requirements.txt` | Dépendances Python de l'image |
+
+**Configuration :**
+
+| Fichier | Rôle |
+|---|---|
+| `docker-compose.yml` | Stack complète : Qdrant, n8n, RAG API, Open WebUI |
+| `.env.example` | Template de configuration à copier en `.env` et adapter |
+
+→ [Documentation et téléchargement des scripts](scripts/stack-ia-locale/index.md)
+
+---
+
+## Ce qui vient ensuite
+
+La stack actuelle couvre le cas d'usage file server Windows avec ACL NTFS. Deux extensions sont en préparation, après validation en lab avec un tenant Microsoft 365 actif et l'installation du GPU RTX 5060 Ti :
+
+**Connecteurs Microsoft 365 :** connecteur SharePoint Online avec propagation des permissions Entra ID vers Qdrant, pipeline de résumé de réunions Teams, et RAG visuel avec ColVec pour les documents PDF complexes.
+
+**Fichiers chiffrés Purview :** indexation des documents protégés par des labels de sensibilité Microsoft Information Protection, avec déchiffrement à la volée via clé RMS consultée depuis Azure Key Vault.
 
 ---
 
