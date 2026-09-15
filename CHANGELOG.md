@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.1.0] — Septembre 2026
+
+### Ajouté
+
+**Retrieval hybride BM25 + vectoriel :**
+- `main.py` : index BM25 construit en mémoire au démarrage depuis Qdrant, fusionné avec la recherche vectorielle par Reciprocal Rank Fusion (RRF). Améliore le retrieval sur les termes exacts (noms de fichiers, acronymes, commandes, termes techniques) là où la recherche vectorielle seule échoue sur les reformulations.
+- `main.py` : reconstruction automatique de l'index BM25 après chaque synchronisation réussie via `/admin/sync`.
+- `requirements.txt` : ajout de `rank-bm25`.
+
+**Plan d'apprentissage RAG local refondu (`guides/plan-apprentissage-rag-2026.docx`) :**
+- Document entièrement réécrit pour refléter la stack validée en lab (septembre 2026).
+- 14 phases : 12 validées sur CPU, 2 optionnelles nécessitant un tenant MS 365.
+- Choix techniques réels documentés : pipeline Python custom, chunking par blocs de paragraphes, `MIN_CHUNK_WORDS=8`, `JUDGE_KEEP_ALIVE`, `warmup_judge()`, Open WebUI comme interface finale.
+- Note sur la migration BM42 (Qdrant sparse vectors) au-delà de 200 000 chunks.
+
+### Modifié
+- `main.py` : prompt système corrigé (suppression de la règle contradictoire "cite le document même hors sujet"), prompt juge enrichi avec deux règles d'attribution pour détecter les hallucinations par mauvaise attribution de contexte.
+- `section-03-docker-compose.md` : `requirements.txt` documenté aligné sur la version réelle (`rank-bm25`, `pdfplumber`, `python-pptx`).
+- `section-08-fiabilite.md` : nouvelles règles du prompt juge documentées, note sur les limites du juge `qwen3:4b` sur CPU et stratégie GPU (`JUDGE_MODEL=qwen2.5:14b`), footer mis à jour (970 chunks).
+- `index.md` (racine du repo) : stack technique mise à jour avec "retrieval hybride BM25+vectoriel (RRF)".
+- `scripts/stack-ia-locale/index.md` : fonctionnalités BM25 documentées, dépendances alignées.
+- `docs/stack-ia-locale/index.md` : section Scripts ajoutée avec tableau des fichiers et lien vers `scripts/stack-ia-locale/`.
+
+---
+
 ## [2.0.0] — Septembre 2026
 
 ### Ajouté
