@@ -100,6 +100,16 @@ N8N_BASIC_AUTH_PASSWORD=changeme
 
 # Open WebUI
 WEBUI_SECRET_KEY=changeme-openwebui-secret
+JWT_EXPIRES_IN=4h
+
+# Paramètres avancés du pipeline (défauts suffisants pour un démarrage)
+# TOP_K=12                  → nombre de chunks récupérés par requête
+# CHUNK_SIZE=150            → taille cible d'un chunk en mots
+# CHUNK_OVERLAP=20          → recouvrement entre chunks en mots
+# MIN_CHUNK_WORDS=8         → taille minimale d'un chunk (8 préserve les .md courts)
+# JUDGE_KEEP_ALIVE=2h       → rétention du juge en mémoire Ollama après chaque appel
+#                             Format Ollama : "5m", "2h", "-1" (indéfiniment)
+#                             Passer à -1 une fois le GPU installé
 ```
 
 > **Point critique :** `LLM_BASE_URL` et `EMBED_BASE_URL` doivent utiliser l'IP réseau de l'hôte Windows ou la passerelle Docker (`172.17.0.1`), jamais `localhost`. Depuis l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même. Pour vérifier l'IP de la passerelle Docker : `ip addr show docker0 | grep "inet "`.
@@ -221,6 +231,10 @@ services:
       - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
       - CHUNK_SIZE=${CHUNK_SIZE}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP}
+      - MIN_CHUNK_WORDS=${MIN_CHUNK_WORDS}
+      # JUDGE_KEEP_ALIVE : rétention du juge en mémoire Ollama après chaque appel.
+      # Format : "5m", "2h", "-1" (indéfiniment). Défaut : 2h.
+      - JUDGE_KEEP_ALIVE=${JUDGE_KEEP_ALIVE}
       - LDAP_HOST=${LDAP_HOST}
       - LDAP_PORT=${LDAP_PORT}
       - LDAP_USE_TLS=${LDAP_USE_TLS}
@@ -261,6 +275,7 @@ services:
       - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
     volumes:
       - ./openwebui_data:/app/backend/data
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro

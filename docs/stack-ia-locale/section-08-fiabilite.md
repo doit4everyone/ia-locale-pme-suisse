@@ -122,7 +122,9 @@ def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
     citees = set(re.findall(r'\[([^\]]{5,100})\]', answer))
     inventees = []
     for citee in citees:
-        # Nettoyer le préfixe "Document N :" produit par build_context()
+        # Nettoyer le préfixe "Document N :" résiduel (format obsolète)
+        # Le format actuel de build_context() est "→ filename" mais la regex
+        # est conservée pour rétrocompatibilité avec d'anciens chunks indexés.
         citee_clean = re.sub(r'^Document\s+\d+\s*:\s*', '', citee).strip()
         citee_sans_ext = os.path.splitext(citee_clean)[0]
         if citee_clean in sources_reelles:
@@ -175,6 +177,8 @@ curl http://<IP-HOTE-OLLAMA>:11434/api/chat \
 ```
 
 > **Paramètres critiques :** `"think": false` est requis pour Qwen3. Sans ce paramètre, la réponse JSON arrive dans le champ `thinking` au lieu de `message.content` et ne peut pas être parsée. L'endpoint `/api/chat` est requis : `/api/generate` ne supporte pas ce paramètre correctement avec Qwen3.
+
+> **`keep_alive` et déchargement du juge :** Ollama décharge un modèle de la mémoire après 5 minutes d'inactivité par défaut. Pour `qwen3:4b`, ce déchargement ajoute 30 à 90 secondes au premier groundedness check suivant une période d'inactivité. La variable `JUDGE_KEEP_ALIVE` (défaut `2h` dans `main.py`, transmise par le Compose) contrôle cette durée. `qwen3:4b` occupe environ 2,5 Go en Q4 : le cumul avec `qwen2.5:14b` (~9 Go) tient en RAM système sur LABO-G9. Passer à `-1` une fois le GPU installé pour maintenir les deux modèles en VRAM indéfiniment.
 
 **Prompt du juge :**
 
