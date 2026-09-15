@@ -18,6 +18,7 @@ import subprocess
 import asyncio
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access
+from rank_bm25 import BM25Okapi
 
 # ─────────────────────────────────────────
 # Configuration
@@ -68,6 +69,53 @@ qdrant = QdrantClient(url=QDRANT_HOST)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────
+# Index BM25 : chargé au démarrage depuis Qdrant
+# ─────────────────────────────────────────
+# L'index BM25 tient en RAM : ~1 Mo pour 1 000 chunks,
+# ~200 Mo pour 50 000 chunks. Au-delà de 200 000 chunks,
+# préférer Qdrant BM42 (sparse vectors, index sur disque).
+_bm25_index: BM25Okapi | None = None
+_bm25_chunks: list[dict] = []
+
+
+def build_bm25_index() -> None:
+    """Charge tous les chunks depuis Qdrant et construit l'index BM25.
+    Appelé au démarrage et après chaque synchronisation réussie.
+    Si Qdrant n'est pas disponible, l'index reste None et le retrieval
+    retombe sur la recherche vectorielle seule sans erreur.
+    """
+    global _bm25_index, _bm25_chunks
+    try:
+        points, _ = qdrant.scroll(
+            collection_name=COLLECTION,
+            limit=100_000,
+            with_payload=True,
+        )
+        _bm25_chunks = [
+            {
+                "text":      p.payload.get("text", ""),
+                "source":    p.payload.get("source", "inconnu"),
+                "source_id": p.payload.get("source_id", ""),
+                "autorises": p.payload.get("autorises", []),
+                "interdits": p.payload.get("interdits", []),
+            }
+            for p in points
+        ]
+        tokenized = [c["text"].lower().split() for c in _bm25_chunks]
+        _bm25_index = BM25Okapi(tokenized)
+        logger.info(f"[BM25] Index construit : {len(_bm25_chunks)} chunks")
+    except Exception as e:
+        logger.warning(f"[BM25] Impossible de construire l'index : {e}")
+        _bm25_index = None
+        _bm25_chunks = []
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Construit l'index BM25 au démarrage du conteneur."""
+    build_bm25_index()
 
 # ─────────────────────────────────────────
 # Modèles de données
@@ -121,17 +169,17 @@ async def get_embedding(text: str) -> list[float]:
 
 async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] = None) -> list[dict]:
     """
-    Recherche les chunks les plus proches dans Qdrant.
+    Recherche hybride : vectorielle (Qdrant) + mots-clés (BM25),
+    fusionnée par Reciprocal Rank Fusion (RRF, k=60).
 
-    Si user_groups est fourni, filtre sur le champ autorisés[] :
-    seuls les chunks accessibles à l'utilisateur sont retournés.
-    C'est le cloisonnement réel basé sur les ACL NTFS.
+    La recherche vectorielle capture la similarité sémantique.
+    BM25 capture les termes exacts : noms de fichiers, acronymes,
+    termes techniques, commandes. RRF combine les deux classements
+    sans nécessiter de normalisation des scores.
 
-    Si user_groups est None ou vide, aucun filtre d'accès n'est appliqué
-    (mode dégradé, à éviter en production).
-
-    Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère tous les chunks
-    du même document pour garantir un contexte complet.
+    Le filtre ACL NTFS s'applique sur les deux branches.
+    Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère
+    tous les chunks du même document (contexte complet).
     """
     try:
         embedding = await get_embedding(query)
@@ -154,19 +202,66 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             with_payload=True
         ).points
 
-        chunks = []
+        # Résultats vectoriels
+        vec_results = []
         for r in results:
-            # Vérifier les interdits (DENY NTFS prioritaires sur ALLOW)
             interdits = r.payload.get("interdits", [])
             if interdits and user_groups:
                 if not check_access(user_groups, r.payload.get("autorises", []), interdits):
                     continue
-            chunks.append({
-                "score": r.score,
-                "text": r.payload.get("text", ""),
-                "source": r.payload.get("source", "inconnu"),
+            vec_results.append({
+                "score":     r.score,
+                "text":      r.payload.get("text", ""),
+                "source":    r.payload.get("source", "inconnu"),
                 "source_id": r.payload.get("source_id", ""),
+                "autorises": r.payload.get("autorises", []),
+                "interdits": r.payload.get("interdits", []),
             })
+
+        # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
+        bm25_results = []
+        if _bm25_index is not None and _bm25_chunks:
+            tokens = query.lower().split()
+            scores = _bm25_index.get_scores(tokens)
+            ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+            for idx, score in ranked[:top_k * 2]:
+                if score < 0.01:
+                    break
+                c = _bm25_chunks[idx]
+                if user_groups:
+                    if not any(g in c["autorises"] for g in user_groups):
+                        continue
+                    if not check_access(user_groups, c["autorises"], c["interdits"]):
+                        continue
+                bm25_results.append({"score": score, **c})
+                if len(bm25_results) >= top_k:
+                    break
+
+        # Fusion par Reciprocal Rank Fusion (RRF, k=60)
+        # RRF(d) = Σ 1 / (k + rank(d))
+        # Un chunk bien classé dans les deux listes obtient un score élevé.
+        K = 60
+        rrf_scores: dict[str, float] = {}
+        rrf_data:   dict[str, dict]  = {}
+        for rank, c in enumerate(vec_results):
+            key = c["source_id"] or c["source"]
+            rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
+            rrf_data[key] = c
+        for rank, c in enumerate(bm25_results):
+            key = c["source_id"] or c["source"]
+            rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
+            rrf_data[key] = c
+
+        chunks = [
+            {**rrf_data[key], "score": score}
+            for key, score in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        ][:top_k]
+
+        if bm25_results:
+            logger.info(
+                f"[BM25] {len(bm25_results)} BM25 + {len(vec_results)} vectoriels"
+                f" → {len(chunks)} chunks après RRF"
+            )
 
         # Si le meilleur chunk dépasse le seuil, récupérer TOUS les chunks
         # du même document via scroll (avec le même filtre d'accès)
@@ -792,5 +887,11 @@ async def admin_sync(
             f"quarantine={rapport['quarantine_count']}, "
             f"errors={len(rapport['errors'])}"
         )
+
+        # Reconstruire l'index BM25 après une synchronisation réussie :
+        # les nouveaux chunks doivent être disponibles immédiatement
+        # pour la recherche hybride, sans redémarrer le conteneur.
+        if rapport["success"]:
+            build_bm25_index()
 
         return rapport

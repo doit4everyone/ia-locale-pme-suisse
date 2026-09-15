@@ -7,6 +7,11 @@ httpx
 # Vector store (main.py, indexer.py, acl_resolver.py)
 qdrant-client
 
+# Retrieval hybride BM25 (main.py)
+# Index en mémoire, ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
+# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors).
+rank-bm25
+
 # Résolution LDAP des groupes AD (auth.py)
 ldap3
 
