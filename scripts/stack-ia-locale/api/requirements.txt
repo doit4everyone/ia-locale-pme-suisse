@@ -1,0 +1,20 @@
+# API
+fastapi
+uvicorn[standard]
+python-dotenv
+httpx
+
+# Vector store (main.py, indexer.py, acl_resolver.py)
+qdrant-client
+
+# Résolution LDAP des groupes AD (auth.py)
+ldap3
+
+# Extraction de texte des documents (indexer.py)
+python-docx
+
+# Extraction PDF (indexer.py)
+pdfplumber
+
+# Extraction PowerPoint (indexer.py)
+python-pptx
