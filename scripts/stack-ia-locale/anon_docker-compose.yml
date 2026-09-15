@@ -1,0 +1,104 @@
+services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=0.0.0.0
+      - WEBHOOK_URL=http://<IP-VM>:5678
+      - N8N_SECURE_COOKIE=false
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+  rag-api:
+    build: ./api
+    container_name: rag-api
+    ports:
+      - "8080:8080"
+    environment:
+      - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION}
+      # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000)
+      # EMBED_BASE_URL : embeddings, toujours le service qui a servi à indexer.
+      # Si les deux diffèrent, EMBED_BASE_URL doit être renseigné explicitement.
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - EMBED_BASE_URL=${EMBED_BASE_URL}
+      - EMBED_MODEL=${EMBED_MODEL}
+      - ORG_NAME=${ORG_NAME}
+      - REPORT_DIR=${REPORT_DIR}
+      - LLM_MODEL=${LLM_MODEL}
+      - API_TOKEN=${API_TOKEN}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - LDAP_HOST=${LDAP_HOST}
+      - LDAP_PORT=${LDAP_PORT}
+      - LDAP_USE_TLS=${LDAP_USE_TLS}
+      - LDAP_BASE_DN=${LDAP_BASE_DN}
+      - LDAP_BIND_DN=${LDAP_BIND_DN}
+      - LDAP_BIND_PWD=${LDAP_BIND_PWD}
+      - LDAP_DOMAIN=${LDAP_DOMAIN}
+      - LDAP_CA_CERT=${LDAP_CA_CERT}
+      - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
+      - SMB_SHARE=${SMB_SHARE}
+      - SMB_MOUNT=${SMB_MOUNT}
+      - SMB_USER=${SMB_USER}
+      - SMB_PASSWORD=${SMB_PASSWORD}
+      - SMB_DOMAIN=${SMB_DOMAIN}
+    volumes:
+      # Scripts indexeur et résolveur ACL, montés en LECTURE SEULE : le conteneur
+      # les exécute via /admin/sync mais ne doit pas pouvoir les modifier.
+      # Leurs rapports JSON sont donc écrits dans /var/log/rag, via l'option
+      # --rapport que admin_sync passe explicitement aux deux scripts.
+      # Lancement manuel depuis la VM (hors conteneur) : le rapport est écrit
+      # à côté du script, sauf si --rapport est fourni.
+      - /root/rag-pipeline:/rag-pipeline:ro
+      # Partage SMB monté sur l'hôte (accès aux fichiers pour l'indexeur)
+      - /mnt/corpus-root:/mnt/corpus-root:ro
+      # Certificat CA du contrôleur de domaine pour la validation TLS LDAP.
+      # Ce fichier DOIT exister sur l'hôte (même vide) avant le lancement,
+      # sinon Docker refuse de démarrer rag-api et open-webui.
+      # Créer un fichier vide si le certificat n'est pas encore exporté :
+      #   sudo touch /etc/ssl/certs/ad-chain.pem
+      # auth.py détecte un fichier vide et retombe sur CERT_NONE avec avertissement.
+      # Une fois le vrai certificat installé : docker compose restart rag-api open-webui
+      - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+      # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
+      - /var/log/rag:/var/log/rag
+    depends_on:
+      - qdrant
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    depends_on:
+      - rag-api
+    ports:
+      - "3001:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+      - WEBUI_SECRET_KEY=changeme-openwebui-secret
+      - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      # Expiration de session : 4h = durée d'une demi-journée de travail.
+      # L'utilisateur est redirigé vers la page de connexion après cette durée.
+      # Valeurs possibles : 1h, 4h, 8h, 24h, 7d.
+      - JWT_EXPIRES_IN=4h
+    volumes:
+      - ./openwebui_data:/app/backend/data
+      # Même prérequis : sudo touch /etc/ssl/certs/ad-chain.pem si absent.
+      - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+    restart: unless-stopped
