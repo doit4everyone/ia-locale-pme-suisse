@@ -56,7 +56,7 @@ Ce guide documente le déploiement complet d'un pipeline RAG local fonctionnel, 
 - Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, sur VM Ubuntu Server 26.04, Docker Compose. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF). Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 → [Guide de déploiement stack IA locale](docs/stack-ia-locale/index.md)
 
@@ -77,9 +77,9 @@ Scripts Python du pipeline RAG local, publiés avec les valeurs sensibles rempla
 
 | Fichier | Rôle |
 |---|---|
-| `main.py` | RAG API FastAPI : retrieval, génération, journalisation nLPD, endpoint `/admin/sync` |
+| `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel (RRF), génération, journalisation nLPD, endpoint `/admin/sync` |
 | `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage ACL |
-| `Dockerfile` | Image basée sur Python 3.11-slim avec `smbclient`, `ldap3`, `python-docx` |
+| `Dockerfile` | Image basée sur Python 3.11-slim avec `smbclient`, `ldap3`, `python-docx`, `rank-bm25` |
 | `requirements.txt` | Dépendances Python de l'image |
 
 **Configuration :**
