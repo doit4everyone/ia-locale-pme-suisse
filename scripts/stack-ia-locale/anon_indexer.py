@@ -78,13 +78,15 @@ OLLAMA_URL    = os.getenv("OLLAMA_URL",        "http://<IP-HOTE-OLLAMA>:11434")
 EMBED_MODEL   = os.getenv("EMBED_MODEL",       "nomic-embed-text")
 QDRANT_URL    = os.getenv("QDRANT_URL",        "http://localhost:6333")
 COLLECTION    = os.getenv("QDRANT_COLLECTION", "documents")
+DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
+DOCUMENTATION_PATHS = [
+    p.strip() for p in
+    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    if p.strip()
+]
 ORG_OWNER     = os.getenv("ORG_OWNER",         "Organisation interne")
 CHUNK_SIZE    = int(os.getenv("CHUNK_SIZE",    "150"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "20"))
-# Nombre minimal de mots pour qu'un chunk soit conservé.
-# 15 convient aux .docx structurés ; 8 est nécessaire pour les .md
-# et les fichiers .txt à sections courtes.
-MIN_CHUNK_WORDS = int(os.getenv("MIN_CHUNK_WORDS", "8"))
 
 # Dimensions par modèle d'embedding
 # Si le modèle n'est pas dans ce dictionnaire, l'indexeur s'arrête
@@ -289,7 +291,7 @@ def chunk_blocks(blocks: list[str], chunk_size: int = CHUNK_SIZE, overlap: int =
 
     for block in blocks:
         if block.startswith("## "):
-            if current_words and len(current_words) >= MIN_CHUNK_WORDS:
+            if current_words and len(current_words) >= 15:
                 chunks.append(' '.join(current_words))
             current_section = block
             current_words = [block]
@@ -297,15 +299,15 @@ def chunk_blocks(blocks: list[str], chunk_size: int = CHUNK_SIZE, overlap: int =
             words = block.split()
             # Si le bloc seul dépasse chunk_size, le découper
             if len(words) > chunk_size:
-                if current_words and len(current_words) >= MIN_CHUNK_WORDS:
+                if current_words and len(current_words) >= 15:
                     chunks.append(' '.join(current_words))
                     current_words = [current_section] if current_section else []
                 for j in range(0, len(words), chunk_size - overlap):
                     sub = words[j:j + chunk_size]
-                    if len(sub) >= MIN_CHUNK_WORDS:
+                    if len(sub) >= 15:
                         chunks.append(' '.join(([current_section] if current_section else []) + sub))
             elif current_words and len(current_words) + len(words) > chunk_size:
-                if len(current_words) >= MIN_CHUNK_WORDS:
+                if len(current_words) >= 15:
                     chunks.append(' '.join(current_words))
                 overlap_start = [current_section] if current_section else []
                 overlap_words = current_words[-overlap:] if len(current_words) > overlap else current_words
@@ -313,7 +315,7 @@ def chunk_blocks(blocks: list[str], chunk_size: int = CHUNK_SIZE, overlap: int =
             else:
                 current_words.extend(words)
 
-    if current_words and len(current_words) >= MIN_CHUNK_WORDS:
+    if current_words and len(current_words) >= 15:
         chunks.append(' '.join(current_words))
 
     return chunks
@@ -495,6 +497,17 @@ def get_embed_dim() -> int:
     return dim
 
 
+def get_collection_for_path(source_name: str) -> str:
+    """Retourne la collection Qdrant pour ce fichier.
+    Prefixes dans DOCUMENTATION_PATHS (racine du partage) -> DOCUMENTATION_COLLECTION.
+    Tout le reste -> COLLECTION (corpus entreprise).
+    """
+    for prefix in DOCUMENTATION_PATHS:
+        if source_name.startswith(prefix + "/") or source_name.startswith(prefix + "\\"):
+            return DOCUMENTATION_COLLECTION
+    return COLLECTION
+
+
 def init_collection(qdrant: QdrantClient, reset: bool = False) -> int:
     """
     Crée ou vérifie la collection Qdrant.
@@ -504,27 +517,27 @@ def init_collection(qdrant: QdrantClient, reset: bool = False) -> int:
     embed_dim = get_embed_dim()
     existing = [c.name for c in qdrant.get_collections().collections]
 
-    if reset and COLLECTION in existing:
-        qdrant.delete_collection(COLLECTION)
-        print(f"Collection '{COLLECTION}' supprimée.")
-        existing = []
+    for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
+        if reset and col in existing:
+            qdrant.delete_collection(col)
+            print(f"Collection '{col}' supprimée.")
+            existing = [c.name for c in qdrant.get_collections().collections]
 
-    if COLLECTION not in existing:
-        qdrant.create_collection(
-            collection_name=COLLECTION,
-            vectors_config=VectorParams(size=embed_dim, distance=Distance.COSINE)
-        )
-        print(f"Collection '{COLLECTION}' créée (dim={embed_dim}, cosine, modèle={EMBED_MODEL}).")
-    else:
-        # Vérifier la compatibilité des dimensions
-        info = qdrant.get_collection(COLLECTION)
-        existing_dim = info.config.params.vectors.size
-        if existing_dim != embed_dim:
-            print(f"ERREUR : collection '{COLLECTION}' existante en {existing_dim} dimensions,")
-            print(f"mais '{EMBED_MODEL}' produit {embed_dim} dimensions.")
-            print(f"Utilisez --reset pour recréer la collection, ou changez EMBED_MODEL.")
-            sys.exit(1)
-        print(f"Collection '{COLLECTION}' existante conservée (dim={existing_dim}).")
+        if col not in existing:
+            qdrant.create_collection(
+                collection_name=col,
+                vectors_config=VectorParams(size=embed_dim, distance=Distance.COSINE)
+            )
+            print(f"Collection '{col}' créée (dim={embed_dim}, cosine, modèle={EMBED_MODEL}).")
+        else:
+            info = qdrant.get_collection(col)
+            existing_dim = info.config.params.vectors.size
+            if existing_dim != embed_dim:
+                print(f"ERREUR : collection '{col}' existante en {existing_dim} dimensions,")
+                print(f"mais '{EMBED_MODEL}' produit {embed_dim} dimensions.")
+                print(f"Utilisez --reset pour recréer la collection, ou changez EMBED_MODEL.")
+                sys.exit(1)
+            print(f"Collection '{col}' existante conservée (dim={existing_dim}).")
 
     return embed_dim
 
@@ -532,16 +545,16 @@ def init_collection(qdrant: QdrantClient, reset: bool = False) -> int:
 # Pipeline principal
 # ─────────────────────────────────────────
 
-def delete_existing_chunks(qdrant: QdrantClient, source_name: str, content_hash: str = ""):
+def delete_existing_chunks(qdrant: QdrantClient, source_name: str, content_hash: str = "", collection_name: str = ""):
     """
-    Supprime les chunks existants d'un document avant réindexation.
-    Supprime par source_name (chemin relatif) ET par content_hash (contenu).
-    Le hash permet de nettoyer les chunks d'un fichier renommé ou déplacé
-    dont le contenu est identique.
+    Supprime les chunks existants d'un document avant reindexation.
+    Si collection_name est vide, utilise get_collection_for_path(source_name).
     """
+    if not collection_name:
+        collection_name = get_collection_for_path(source_name)
     try:
         qdrant.delete(
-            collection_name=COLLECTION,
+            collection_name=collection_name,
             points_selector=Filter(must=[
                 FieldCondition(key="source", match=MatchValue(value=source_name))
             ])
@@ -642,8 +655,9 @@ def index_file(
             "niveau": None,
             "methode": None
         }
-    delete_existing_chunks(qdrant, source_name, content_hash)
-    qdrant.upsert(collection_name=COLLECTION, points=points)
+    target_collection = get_collection_for_path(source_name)
+    delete_existing_chunks(qdrant, source_name, content_hash, target_collection)
+    qdrant.upsert(collection_name=target_collection, points=points)
     print(f"  → {len(points)} chunks indexés (org: {org_name})          ")
 
     return len(points), {
@@ -682,6 +696,9 @@ def index_corpus(corpus_dir: str, reset: bool = False, org_arg: str = "", rappor
         print(f"Organisation forcée (niveau 1) : '{org_arg}'")
     print(f"Organisation interne par défaut (niveau 4) : '{ORG_OWNER}'")
     print(f"\nNote : org_name est indexé mais pas encore filtré (attend auth.py)")
+    print(f"Collection documents      : '{COLLECTION}'")
+    print(f"Collection documentation  : '{DOCUMENTATION_COLLECTION}'")
+    print(f"Prefixes documentation    : {DOCUMENTATION_PATHS}")
 
     # Découverte récursive des fichiers avec filtrage du bruit
     supported = ('.docx', '.pdf', '.pptx', '.txt', '.md')
@@ -790,7 +807,7 @@ if __name__ == "__main__":
         epilog="""
 Exemples :
   # Corpus plat, détection automatique
-  ORG_OWNER="Axonix SA" python indexer.py --corpus /serveur/documents
+  ORG_OWNER="<Nom organisation>" python indexer.py --corpus /serveur/documents
 
   # Dossier d'un client spécifique
   python indexer.py --corpus /serveur/Baumont_Industries --org "Baumont Industries SA"

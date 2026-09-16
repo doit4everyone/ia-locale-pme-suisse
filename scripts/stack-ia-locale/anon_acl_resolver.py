@@ -46,6 +46,12 @@ SMB_PASSWORD = os.getenv("SMB_PASSWORD", "")
 SMB_DOMAIN   = os.getenv("SMB_DOMAIN",   "VOTRE-DOMAINE")
 QDRANT_URL   = os.getenv("QDRANT_URL",   "http://localhost:6333")
 COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
+DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
+DOCUMENTATION_PATHS = [
+    p.strip() for p in
+    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    if p.strip()
+]
 
 # Groupes à exclure des autorisés[] : comptes système, pas des utilisateurs métier
 GROUPES_EXCLUS = {
@@ -147,9 +153,18 @@ def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
 # Mise à jour Qdrant
 # ─────────────────────────────────────────
 
+def get_collection_for_path(source_name: str) -> str:
+    """Retourne la collection Qdrant pour ce fichier."""
+    for prefix in DOCUMENTATION_PATHS:
+        if source_name.startswith(prefix + "/") or source_name.startswith(prefix + "\\"):
+            return DOCUMENTATION_COLLECTION
+    return COLLECTION
+
+
 def mettre_a_jour_qdrant(
     qdrant: QdrantClient,
     source_name: str,
+    collection_name: str,
     autorisés: list[str],
     interdits: list[str],
     dry_run: bool = False
@@ -166,7 +181,7 @@ def mettre_a_jour_qdrant(
         next_offset = None
         while True:
             batch, next_offset = qdrant.scroll(
-                collection_name=COLLECTION,
+                collection_name=collection_name,
                 scroll_filter=Filter(must=[
                     FieldCondition(key="source", match=MatchValue(value=source_name))
                 ]),
@@ -198,7 +213,7 @@ def mettre_a_jour_qdrant(
         if interdits:
             payload["interdits"] = interdits
         qdrant.set_payload(
-            collection_name=COLLECTION,
+            collection_name=collection_name,
             payload=payload,
             points=ids
         )
@@ -238,10 +253,9 @@ def resoudre_acl(
     qdrant = QdrantClient(url=QDRANT_URL)
     try:
         collections = [c.name for c in qdrant.get_collections().collections]
-        if COLLECTION not in collections:
-            print(f"Erreur : collection '{COLLECTION}' introuvable dans Qdrant.")
-            print(f"Collections disponibles : {collections}")
-            sys.exit(1)
+        for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
+            if col not in collections:
+                print(f"Avertissement : collection '{col}' absente (sera ignorée).")
     except Exception as e:
         print(f"Erreur connexion Qdrant : {e}")
         sys.exit(1)
@@ -284,7 +298,8 @@ def resoudre_acl(
             print(f"  Interdits ({len(interdits)}) : {', '.join(interdits)}")
 
         # Mettre à jour Qdrant
-        nb = mettre_a_jour_qdrant(qdrant, source_name, autorisés, interdits, dry_run)
+        col = get_collection_for_path(source_name)
+        nb = mettre_a_jour_qdrant(qdrant, source_name, col, autorisés, interdits, dry_run)
         if nb == 0:
             print(f"  → Aucun chunk trouvé dans Qdrant pour '{source_name}'")
             fichiers_sans_chunks.append(source_name)
@@ -338,22 +353,26 @@ def resoudre_acl(
         source_name = os.path.relpath(chemin_local, mount_point).replace('\\', '/')
         sources_partage.add(source_name)
 
-    # Récupérer tous les source_names présents dans Qdrant par pagination
+    # Récupérer tous les source_names présents dans les deux collections
     sources_qdrant = set()
-    next_offset = None
-    while True:
-        batch, next_offset = qdrant.scroll(
-            collection_name=COLLECTION,
-            limit=100,
-            offset=next_offset,
-            with_payload=["source"]
-        )
-        for point in batch:
-            src = point.payload.get("source", "")
-            if src:
-                sources_qdrant.add(src)
-        if next_offset is None:
-            break
+    for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
+        next_offset = None
+        while True:
+            try:
+                batch, next_offset = qdrant.scroll(
+                    collection_name=col,
+                    limit=100,
+                    offset=next_offset,
+                    with_payload=["source"]
+                )
+                for point in batch:
+                    src = point.payload.get("source", "")
+                    if src:
+                        sources_qdrant.add(src)
+                if next_offset is None:
+                    break
+            except Exception:
+                break
 
     # Orphelins : dans Qdrant mais absents du partage
     orphelins = sources_qdrant - sources_partage
@@ -370,8 +389,9 @@ def resoudre_acl(
             for src in orphelins:
                 try:
                     # Compter les chunks avant suppression
+                    col_src = get_collection_for_path(src)
                     points_orphelins, _ = qdrant.scroll(
-                        collection_name=COLLECTION,
+                        collection_name=col_src,
                         scroll_filter=Filter(must=[
                             FieldCondition(key="source", match=MatchValue(value=src))
                         ]),
@@ -381,7 +401,7 @@ def resoudre_acl(
                     ids_a_supprimer = [p.id for p in points_orphelins]
                     if ids_a_supprimer:
                         qdrant.delete(
-                            collection_name=COLLECTION,
+                            collection_name=col_src,
                             points_selector=ids_a_supprimer
                         )
                         nb_supprimes += len(ids_a_supprimer)
@@ -406,7 +426,7 @@ def resoudre_acl(
         json.dump({
             "date": datetime.now(timezone.utc).isoformat(),
             "share": share,
-            "collection": COLLECTION,
+            "collections": [COLLECTION, DOCUMENTATION_COLLECTION],
             "dry_run": dry_run,
             "statistiques": {
                 "fichiers_traités": len(fichiers),
