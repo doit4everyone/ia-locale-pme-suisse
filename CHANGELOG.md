@@ -4,6 +4,32 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.2.0] — Septembre 2026
+
+### Ajouté
+
+**Deux collections Qdrant (documents + documentation) :**
+- `indexer.py` : `get_collection_for_path()` route les fichiers vers la collection correcte selon le préfixe de chemin.
+- `acl_resolver.py` : même logique, scan des orphelins sur les deux collections.
+- `main.py` : recherche vectorielle sur les deux collections, fusion avant RRF, scroll d'extension de contexte dans la bonne collection.
+- `section-05-connecteurs.md` : §5.8 ajouté, règles de gouvernance des collections.
+
+**Correctifs retrieval (bugs identifiés en session) :**
+- Clé RRF unique par chunk (`chunk_key = md5(text)`) au lieu du `source_id` (hash du fichier). Permet à plusieurs chunks du même fichier d'entrer dans le classement indépendamment.
+- Scroll d'extension de contexte dans la bonne collection (`best_collection` déduit du chunk, non hardcodé à `documents`).
+- `DOCUMENTATION_COLLECTION` et `DOCUMENTATION_PATHS` transmis aux sous-processus `indexer.py` et `acl_resolver.py` via `/admin/sync`.
+
+**Paramètres ajustés (validés en lab) :**
+- `TOP_K=20` : améliore le recall sur les gros fichiers .md.
+- `CONTEXT_THRESHOLD=0.01` : adapté à l'échelle des scores RRF ([0, 0.016] avec k=60).
+- `MAX_CONTEXT_CHUNKS=6` : évite les timeouts sur CPU.
+
+### Modifié
+- `section-03-docker-compose.md` : nouvelles variables `.env` documentées, `requirements.txt` mis à jour avec `rank-bm25`.
+- `section-08-fiabilite.md` : §8.5 ajouté (retrieval hybride BM25, paramètres validés, limite sur les gros fichiers).
+
+---
+
 ## [2.1.0] — Septembre 2026
 
 ### Ajouté
