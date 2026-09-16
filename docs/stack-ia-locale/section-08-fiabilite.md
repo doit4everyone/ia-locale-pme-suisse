@@ -219,6 +219,33 @@ Les valeurs CPU sont mesurées. Les valeurs GPU sont des estimations à mesurer 
 
 ---
 
+## §8.5 Retrieval hybride BM25 et paramètres clés
+
+Le retrieval combine deux approches fusionnées par Reciprocal Rank Fusion (RRF) :
+
+| Approche | Avantage | Limite |
+|---|---|---|
+| Vectorielle (Qdrant) | Similarité sémantique, reformulations | Moins efficace sur les termes exacts |
+| BM25 (mots-clés) | Termes exacts : noms de fichiers, acronymes, commandes | Ne comprend pas le sens |
+
+L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit après chaque synchronisation. Il couvre les deux collections (`documents` et `documentation`).
+
+### Paramètres validés en lab
+
+| Paramètre | Valeur | Justification |
+|---|---|---|
+| `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
+| `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
+| `MAX_CONTEXT_CHUNKS` | 6 | Évite les timeouts sur CPU pour les gros documents. Augmenter à 10-15 après GPU. |
+
+### Limite sur les très gros fichiers
+
+Un fichier de 100+ chunks (ex. `11-correlations-yaml.md` à 189 chunks, `09-pipeline-llm.md` à 117 chunks) est trop dilué pour que ses chunks pertinents remontent systématiquement dans le top 20. Les questions génériques sur ces fichiers peuvent échouer. Les questions précises avec les bons termes techniques réussissent.
+
+**Correctif documentaire recommandé :** découper les très gros fichiers en sections thématiques séparées. `11-correlations-yaml.md` gagnerait à être découpé en 6 fichiers par série de règles (W, WD, S, L, M, A). C'est un travail sur le file server, pas dans le code.
+
+---
+
 ## §8.6 Règles de formation utilisateurs
 
 La formation est la première ligne de défense, gratuite et sans développement.

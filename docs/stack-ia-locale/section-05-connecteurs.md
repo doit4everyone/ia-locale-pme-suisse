@@ -583,4 +583,44 @@ Ce cas confirme que le filtre ne renvoie pas systématiquement zéro chunk : il 
 
 ---
 
+## §5.8 Deux collections Qdrant : règles de gouvernance
+
+La stack utilise deux collections Qdrant distinctes pour séparer le corpus d'entreprise de la documentation technique :
+
+| Collection | Contenu | Cloisonnement ACL |
+|---|---|---|
+| `documents` | Corpus entreprise (CLIENTS, RH, DIRECTION, etc.) | Oui, par groupes AD |
+| `documentation` | Documentation technique (DOIT4EVERYONE/) | Oui, accessible à tous les utilisateurs authentifiés |
+
+Le routage se fait automatiquement à l'indexation selon le chemin relatif du fichier. Les dossiers dont le chemin commence par un préfixe de `DOCUMENTATION_PATHS` vont dans `documentation`. Tout le reste va dans `documents`.
+
+> **Ces règles sont structurelles.** Leur non-respect produit un routage silencieusement incorrect sans message d'erreur : des documents confidentiels peuvent se retrouver dans `documentation` sans cloisonnement ACL effectif.
+
+**Règle 1 : dossiers de documentation uniquement à la racine du partage.**
+Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\PartageDocuments`. Jamais dans un sous-dossier. Si `CLIENTS\DOIT4EVERYONE\` existe, ses fichiers partent en `documentation` sans cloisonnement ACL.
+
+**Règle 2 : droits AD sur les dossiers racine.**
+Seul un administrateur peut créer des dossiers à la racine du partage.
+
+**Règle 3 : modifier `DOCUMENTATION_PATHS` exige une réindexation complète.**
+
+```bash
+# Modifier .env, puis :
+docker compose build --no-cache rag-api && docker compose up -d rag-api
+cd /root/rag-pipeline && source .venv/bin/activate
+set -a && source /root/rag-stack/.env && set +a
+python indexer.py --corpus /mnt/fileservice-root --reset
+curl -X POST http://localhost:8080/admin/sync -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+**Règle 4 : vérifier les deux compteurs après chaque réindexation.**
+
+```bash
+curl -s http://localhost:6333/collections/documents | python3 -m json.tool | grep points_count
+curl -s http://localhost:6333/collections/documentation | python3 -m json.tool | grep points_count
+# Les deux compteurs additionnés doivent correspondre au total des chunks indexés.
+```
+
+---
+
 *Validé en lab sur VM-RAG-LAB, septembre 2026. Les commandes et résultats présentés sont issus de sessions de test réelles.*

@@ -64,6 +64,12 @@ EMBED_MODEL=nomic-embed-text
 # Qdrant
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
+# Deux collections Qdrant : corpus entreprise (documents) et documentation technique (documentation).
+# Les dossiers racine listés dans DOCUMENTATION_PATHS vont dans DOCUMENTATION_COLLECTION.
+# Ces dossiers doivent être à la racine du partage SMB uniquement.
+# Modifier DOCUMENTATION_PATHS exige --reset + resync ACL (voir §5).
+DOCUMENTATION_COLLECTION=documentation
+DOCUMENTATION_PATHS=DOIT4EVERYONE
 
 # Identité affichée dans le prompt système
 ORG_NAME=Axonix SA
@@ -102,11 +108,19 @@ N8N_BASIC_AUTH_PASSWORD=changeme
 WEBUI_SECRET_KEY=changeme-openwebui-secret
 JWT_EXPIRES_IN=4h
 
-# Paramètres avancés du pipeline (défauts suffisants pour un démarrage)
-# TOP_K=12                  → nombre de chunks récupérés par requête
-# CHUNK_SIZE=150            → taille cible d'un chunk en mots
-# CHUNK_OVERLAP=20          → recouvrement entre chunks en mots
-# MIN_CHUNK_WORDS=8         → taille minimale d'un chunk (8 préserve les .md courts)
+# Paramètres avancés du pipeline
+TOP_K=20
+# 20 améliore le recall sur les gros fichiers .md (100+ chunks). Valeur validée en lab.
+CONTEXT_THRESHOLD=0.01
+# Score RRF minimum pour déclencher l'extension de contexte.
+# Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche
+# l'extension sur presque toutes les questions. Ne pas dépasser 0.05.
+MAX_CONTEXT_CHUNKS=6
+# Nombre maximum de chunks par extension de contexte.
+# 6 évite les timeouts sur CPU. Augmenter à 10-15 une fois le GPU installé.
+CHUNK_SIZE=150
+CHUNK_OVERLAP=20
+MIN_CHUNK_WORDS=8
 # JUDGE_KEEP_ALIVE=2h       → rétention du juge en mémoire Ollama après chaque appel
 #                             Format Ollama : "5m", "2h", "-1" (indéfiniment)
 #                             Passer à -1 une fois le GPU installé
@@ -134,21 +148,21 @@ httpx
 # Vector store
 qdrant-client
 
-# Retrieval hybride BM25 (main.py)
+# Retrieval hybride BM25
 # Index en mémoire : ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
-# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (voir §10).
+# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors, voir §10).
 rank-bm25
 
-# Résolution LDAP des groupes AD (auth.py)
+# Résolution LDAP
 ldap3
 
-# Extraction de texte des documents (indexer.py)
+# Extraction de texte
 python-docx
 pdfplumber
 python-pptx
 ```
 
-`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. `rank-bm25` est requis par `main.py` pour le retrieval hybride BM25 : au démarrage du conteneur, un index BM25 est construit en mémoire depuis les chunks Qdrant et fusionné avec la recherche vectorielle par Reciprocal Rank Fusion.
+`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. `rank-bm25` est requis par `main.py` pour le retrieval hybride BM25 : un index de recherche par mots-clés est construit en mémoire au démarrage du conteneur et fusionné avec la recherche vectorielle par Reciprocal Rank Fusion (RRF).
 
 **api/Dockerfile**
 
@@ -244,6 +258,8 @@ services:
       - CHUNK_SIZE=${CHUNK_SIZE}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP}
       - MIN_CHUNK_WORDS=${MIN_CHUNK_WORDS}
+      - DOCUMENTATION_COLLECTION=${DOCUMENTATION_COLLECTION}
+      - DOCUMENTATION_PATHS=${DOCUMENTATION_PATHS}
       # JUDGE_KEEP_ALIVE : rétention du juge en mémoire Ollama après chaque appel.
       # Format : "5m", "2h", "-1" (indéfiniment). Défaut : 2h.
       - JUDGE_KEEP_ALIVE=${JUDGE_KEEP_ALIVE}
