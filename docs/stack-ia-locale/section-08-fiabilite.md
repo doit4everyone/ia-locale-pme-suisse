@@ -228,7 +228,11 @@ Le retrieval combine deux approches fusionnées par Reciprocal Rank Fusion (RRF)
 | Vectorielle (Qdrant) | Similarité sémantique, reformulations | Moins efficace sur les termes exacts |
 | BM25 (mots-clés) | Termes exacts : noms de fichiers, acronymes, commandes | Ne comprend pas le sens |
 
-L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit après chaque synchronisation. Il couvre les deux collections (`documents` et `documentation`).
+L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit après chaque synchronisation. Il couvre les deux collections (`documents` et `documentation`). Chaque chunk BM25 inclut son `chunk_index` : si un chunk BM25 gagne le RRF, l'extension de contexte peut récupérer ses voisins par `chunk_index ± radius` au lieu de faire un scroll aléatoire.
+
+### Note sur les PDF avec tables des matières
+
+`indexer.py` nettoie les suites de points répétitifs (`......`) avant l'appel à Ollama. Ces patterns, fréquents dans les tables des matières PDF, provoquent une erreur 500 sur `nomic-embed-text`. Le nettoyage est appliqué dans `get_embedding()` et n'affecte pas la qualité des embeddings.
 
 ### Paramètres validés en lab
 
