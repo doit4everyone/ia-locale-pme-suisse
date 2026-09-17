@@ -100,13 +100,14 @@ def _load_collection_chunks(collection_name: str) -> list[dict]:
             {
                 # Clé unique par chunk : hash du texte. Distinct du source_id
                 # qui est le hash du fichier (même pour tous les chunks d'un fichier).
-                "chunk_key":  hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
-                "text":       p.payload.get("text", ""),
-                "source":     p.payload.get("source", "inconnu"),
-                "source_id":  p.payload.get("source_id", ""),
-                "collection": collection_name,
-                "autorises":  p.payload.get("autorises", []),
-                "interdits":  p.payload.get("interdits", []),
+                "chunk_key":   hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
+                "text":        p.payload.get("text", ""),
+                "source":      p.payload.get("source", "inconnu"),
+                "source_id":   p.payload.get("source_id", ""),
+                "collection":  collection_name,
+                "chunk_index": p.payload.get("chunk_index", None),
+                "autorises":   p.payload.get("autorises", []),
+                "interdits":   p.payload.get("interdits", []),
             }
             for p in points
         ]
@@ -405,7 +406,7 @@ Question : {query}"""
                 "model": LLM_MODEL,
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.1},
+                "options": {"temperature": 0.2},
                 "messages": [
                     {"role": "system", "content": get_system_prompt()},
                     {"role": "user", "content": prompt_user}
