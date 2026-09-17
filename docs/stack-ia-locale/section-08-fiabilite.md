@@ -236,7 +236,7 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 |---|---|---|
 | `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
 | `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
-| `MAX_CONTEXT_CHUNKS` | 10 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 12-15 après GPU. |
+| `MAX_CONTEXT_CHUNKS` | 12 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 15-20 après GPU. |
 
 ### Limite sur les très gros fichiers
 
