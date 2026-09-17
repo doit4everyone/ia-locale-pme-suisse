@@ -24,7 +24,7 @@ Procédures pas à pas pour déployer un pipeline RAG local opérationnel sur VM
 - Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-Stack : Open WebUI + RAG API FastAPI + Qdrant + Ollama + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF). Validé en lab sur matériel CPU sans GPU (i7-14700, 64 Go DDR5).
+Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + Ollama + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Validé en lab sur matériel CPU sans GPU (i7-14700, 64 Go DDR5).
 
 ### Scripts Python
 
@@ -32,7 +32,7 @@ Scripts du pipeline RAG local, publiés avec les valeurs sensibles remplacées p
 
 | Script | Rôle |
 |---|---|
-| `indexer.py` | Indexation SMB, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant |
+| `indexer.py` | Indexation SMB incrémentale, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant, deux collections |
 | `acl_resolver.py` | Lecture ACL NTFS, résolution LDAP récursive, propagation vers Qdrant |
 | `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel (RRF), génération, groundedness check, journalisation nLPD |
 | `auth.py` | Résolution groupes AD via LDAP, filtrage ACL |

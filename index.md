@@ -56,7 +56,7 @@ Ce guide documente le déploiement complet d'un pipeline RAG local fonctionnel, 
 - Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF). Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation technique) + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 → [Guide de déploiement stack IA locale](docs/stack-ia-locale/index.md)
 
@@ -70,7 +70,7 @@ Scripts Python du pipeline RAG local, publiés avec les valeurs sensibles rempla
 
 | Script | Rôle |
 |---|---|
-| `indexer.py` | Parcours SMB, extraction de texte, embedding, écriture Qdrant |
+| `indexer.py` | Parcours SMB, indexation incrémentale, extraction de texte, embedding, écriture Qdrant (deux collections) |
 | `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant |
 
 **Image Docker `rag-api` (sous-dossier `api/`) :**
