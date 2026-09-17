@@ -46,7 +46,7 @@ QDRANT_COLLECTION=documents
 # ---------------------------------------------------------
 TOP_K=20
 CONTEXT_THRESHOLD=0.01
-MAX_CONTEXT_CHUNKS=10
+MAX_CONTEXT_CHUNKS=12
 
 # ---------------------------------------------------------
 # Identité affichée dans le prompt système
