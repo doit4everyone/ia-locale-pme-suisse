@@ -34,26 +34,26 @@ SMB_PASSWORD = os.getenv("SMB_PASSWORD", "")
 SMB_DOMAIN   = os.getenv("SMB_DOMAIN", "DOMAINE")
 
 # Verrou global : une seule synchronisation à la fois
-# Si une passe est déjà en cours, la requête suivante retourne 409
 _sync_lock = asyncio.Lock()
+
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
 LLM_MODEL    = os.getenv("LLM_MODEL", "qwen2.5:14b")
 JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b")
-# Durée de rétention du juge en mémoire Ollama après chaque appel.
-# Format Ollama : "5m", "10m", "1h", "-1" (indéfiniment).
-# -1 exige assez de RAM/VRAM pour deux modèles simultanés.
-# 2h couvre une session de travail typique sans rechargement entre
-# deux questions espacées. qwen3:4b pèse ~2,5 Go, le cumul avec
-# qwen2.5:14b (~9 Go) tient en RAM système sur LABO-G9.
 JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
 QDRANT_HOST  = os.getenv("QDRANT_HOST", "http://qdrant:6333")
 COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
+# Collection dediee a la documentation technique (guides, procedures).
+# Les dossiers racine listes dans DOCUMENTATION_PATHS sont indexes ici.
+# Ces dossiers doivent etre a la racine du partage SMB uniquement.
+DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
+DOCUMENTATION_PATHS = [
+    p.strip() for p in
+    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    if p.strip()
+]
 LOG_FILE     = os.getenv("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
 TOP_K              = int(os.getenv("TOP_K", "12"))
 EMBED_MODEL        = os.getenv("EMBED_MODEL", "nomic-embed-text")
-# URL du service d'embedding. Distincte de LLM_BASE_URL car la génération peut
-# être servie par vLLM (port 8000) alors que les embeddings restent sur Ollama
-# (port 11434). Si EMBED_BASE_URL n'est pas défini, on retombe sur LLM_BASE_URL.
 EMBED_BASE_URL     = os.getenv("EMBED_BASE_URL", "") or os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
 CONTEXT_THRESHOLD  = float(os.getenv("CONTEXT_THRESHOLD", "0.75"))
 MAX_CONTEXT_CHUNKS = int(os.getenv("MAX_CONTEXT_CHUNKS", "15"))
@@ -80,32 +80,58 @@ _bm25_index: BM25Okapi | None = None
 _bm25_chunks: list[dict] = []
 
 
+def get_collection_for_source(source_name: str) -> str:
+    """Retourne la collection Qdrant pour ce chemin de source."""
+    for prefix in DOCUMENTATION_PATHS:
+        if source_name.startswith(prefix + "/") or source_name.startswith(prefix + "\\"):
+            return DOCUMENTATION_COLLECTION
+    return COLLECTION
+
+
+def _load_collection_chunks(collection_name: str) -> list[dict]:
+    """Charge les chunks d'une collection Qdrant pour l'index BM25."""
+    try:
+        points, _ = qdrant.scroll(
+            collection_name=collection_name,
+            limit=100_000,
+            with_payload=True,
+        )
+        return [
+            {
+                # Clé unique par chunk : hash du texte. Distinct du source_id
+                # qui est le hash du fichier (même pour tous les chunks d'un fichier).
+                "chunk_key":  hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
+                "text":       p.payload.get("text", ""),
+                "source":     p.payload.get("source", "inconnu"),
+                "source_id":  p.payload.get("source_id", ""),
+                "collection": collection_name,
+                "autorises":  p.payload.get("autorises", []),
+                "interdits":  p.payload.get("interdits", []),
+            }
+            for p in points
+        ]
+    except Exception as e:
+        logger.warning(f"[BM25] Impossible de charger {collection_name} : {e}")
+        return []
+
+
 def build_bm25_index() -> None:
-    """Charge tous les chunks depuis Qdrant et construit l'index BM25.
+    """Charge les chunks des deux collections et construit l'index BM25.
     Appelé au démarrage et après chaque synchronisation réussie.
     Si Qdrant n'est pas disponible, l'index reste None et le retrieval
     retombe sur la recherche vectorielle seule sans erreur.
     """
     global _bm25_index, _bm25_chunks
     try:
-        points, _ = qdrant.scroll(
-            collection_name=COLLECTION,
-            limit=100_000,
-            with_payload=True,
-        )
-        _bm25_chunks = [
-            {
-                "text":      p.payload.get("text", ""),
-                "source":    p.payload.get("source", "inconnu"),
-                "source_id": p.payload.get("source_id", ""),
-                "autorises": p.payload.get("autorises", []),
-                "interdits": p.payload.get("interdits", []),
-            }
-            for p in points
-        ]
+        docs     = _load_collection_chunks(COLLECTION)
+        docutech = _load_collection_chunks(DOCUMENTATION_COLLECTION)
+        _bm25_chunks = docs + docutech
         tokenized = [c["text"].lower().split() for c in _bm25_chunks]
         _bm25_index = BM25Okapi(tokenized)
-        logger.info(f"[BM25] Index construit : {len(_bm25_chunks)} chunks")
+        logger.info(
+            "[BM25] Index construit : %d chunks '%s' + %d chunks '%s'",
+            len(docs), COLLECTION, len(docutech), DOCUMENTATION_COLLECTION
+        )
     except Exception as e:
         logger.warning(f"[BM25] Impossible de construire l'index : {e}")
         _bm25_index = None
@@ -124,7 +150,7 @@ async def startup_event():
 class QueryRequest(BaseModel):
     query: str
     user_id: str = "anonymous"
-    skip_groundedness: bool = False  # Désactiver le check sur CPU si trop lent
+    skip_groundedness: bool = False
 
 class QueryResponse(BaseModel):
     answer: str
@@ -157,7 +183,7 @@ RÈGLES ABSOLUES :
 # ─────────────────────────────────────────
 
 async def get_embedding(text: str) -> list[float]:
-    """Génère un embedding via le service d'embedding (EMBED_BASE_URL, modèle EMBED_MODEL)."""
+    """Génère un embedding via le service d'embedding."""
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             f"{EMBED_BASE_URL}/api/embeddings",
@@ -169,22 +195,22 @@ async def get_embedding(text: str) -> list[float]:
 
 async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] = None) -> list[dict]:
     """
-    Recherche hybride : vectorielle (Qdrant) + mots-clés (BM25),
+    Recherche hybride : vectorielle (Qdrant, deux collections) + mots-clés (BM25),
     fusionnée par Reciprocal Rank Fusion (RRF, k=60).
 
-    La recherche vectorielle capture la similarité sémantique.
-    BM25 capture les termes exacts : noms de fichiers, acronymes,
-    termes techniques, commandes. RRF combine les deux classements
-    sans nécessiter de normalisation des scores.
+    Clé RRF : hash du texte du chunk (chunk_key), unique par chunk.
+    Contrairement au source_id (hash du fichier, identique pour tous les chunks
+    d'un même fichier), le chunk_key permet à plusieurs chunks du même fichier
+    d'entrer dans le classement RRF indépendamment.
 
     Le filtre ACL NTFS s'applique sur les deux branches.
-    Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère
-    tous les chunks du même document (contexte complet).
+    Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère tous les chunks
+    du même document via scroll (dans la bonne collection).
     """
     try:
         embedding = await get_embedding(query)
 
-        # Construire le filtre d'accès si des groupes sont fournis
+        # Filtre d'accès Qdrant (ALLOW)
         query_filter = None
         if user_groups:
             query_filter = Filter(must=[
@@ -194,6 +220,8 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                 )
             ])
 
+        # Recherche vectorielle : top_k par collection
+        # Chaque collection retourne top_k candidats : total 2*top_k avant RRF.
         results = qdrant.query_points(
             collection_name=COLLECTION,
             query=embedding,
@@ -202,20 +230,35 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             with_payload=True
         ).points
 
-        # Résultats vectoriels
+        try:
+            results_doc = qdrant.query_points(
+                collection_name=DOCUMENTATION_COLLECTION,
+                query=embedding,
+                query_filter=query_filter,
+                limit=top_k,
+                with_payload=True
+            ).points
+        except Exception:
+            results_doc = []  # collection absente au premier démarrage
+
+        # Résultats vectoriels : filtrage DENY + construction dict
         vec_results = []
-        for r in results:
+        for r in list(results) + list(results_doc):
             interdits = r.payload.get("interdits", [])
             if interdits and user_groups:
                 if not check_access(user_groups, r.payload.get("autorises", []), interdits):
                     continue
+            text = r.payload.get("text", "")
             vec_results.append({
-                "score":     r.score,
-                "text":      r.payload.get("text", ""),
-                "source":    r.payload.get("source", "inconnu"),
-                "source_id": r.payload.get("source_id", ""),
-                "autorises": r.payload.get("autorises", []),
-                "interdits": r.payload.get("interdits", []),
+                "chunk_key":   hashlib.md5(text.encode()).hexdigest(),
+                "score":       r.score,
+                "text":        text,
+                "source":      r.payload.get("source", "inconnu"),
+                "source_id":   r.payload.get("source_id", ""),
+                "collection":  get_collection_for_source(r.payload.get("source", "")),
+                "chunk_index": r.payload.get("chunk_index", None),
+                "autorises":   r.payload.get("autorises", []),
+                "interdits":   r.payload.get("interdits", []),
             })
 
         # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
@@ -238,17 +281,20 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                     break
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
-        # RRF(d) = Σ 1 / (k + rank(d))
-        # Un chunk bien classé dans les deux listes obtient un score élevé.
+        # Clé = chunk_key (hash du texte), unique par chunk.
+        # vec_results est triée par score cosinus décroissant avant l'énumération
+        # pour éviter que la collection documentation soit pénalisée par un biais
+        # de rang : sans tri, les rangs de documentation commencent à top_k.
+        vec_results.sort(key=lambda x: x["score"], reverse=True)
         K = 60
         rrf_scores: dict[str, float] = {}
         rrf_data:   dict[str, dict]  = {}
         for rank, c in enumerate(vec_results):
-            key = c["source_id"] or c["source"]
+            key = c["chunk_key"]
             rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
             rrf_data[key] = c
         for rank, c in enumerate(bm25_results):
-            key = c["source_id"] or c["source"]
+            key = c["chunk_key"]
             rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
             rrf_data[key] = c
 
@@ -263,37 +309,57 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                 f" → {len(chunks)} chunks après RRF"
             )
 
-        # Si le meilleur chunk dépasse le seuil, récupérer TOUS les chunks
-        # du même document via scroll (avec le même filtre d'accès)
+        # Extension de contexte : si le meilleur chunk dépasse CONTEXT_THRESHOLD,
+        # récupérer les chunks voisins du même document (par chunk_index).
+        # IMPORTANT : scroll dans la bonne collection (documents ou documentation).
         if chunks and chunks[0]["score"] >= CONTEXT_THRESHOLD:
             best_source = chunks[0]["source"]
+            best_collection = chunks[0].get("collection", get_collection_for_source(best_source))
+            best_chunk_index = chunks[0].get("chunk_index", None)
 
-            scroll_filter_conditions = [
-                FieldCondition(key="source", match=MatchValue(value=best_source))
-            ]
+            # Extension par chunk_index : récupérer les voisins du chunk gagnant
+            # plutôt qu'un scroll aléatoire. Garantit que le chunk pertinent
+            # reste dans le contexte et que les chunks sont dans l'ordre du document.
+            if best_chunk_index is not None:
+                radius = MAX_CONTEXT_CHUNKS // 2
+                idx_min = max(0, best_chunk_index - radius)
+                idx_max = best_chunk_index + radius
+                scroll_filter_conditions = [
+                    FieldCondition(key="source", match=MatchValue(value=best_source)),
+                    FieldCondition(key="chunk_index", range={"gte": idx_min, "lte": idx_max}),
+                ]
+            else:
+                # Fallback : scroll sans chunk_index (anciens chunks sans ce champ)
+                scroll_filter_conditions = [
+                    FieldCondition(key="source", match=MatchValue(value=best_source))
+                ]
             if user_groups:
                 scroll_filter_conditions.append(
                     FieldCondition(key="autorises", match=MatchAny(any=user_groups))
                 )
 
             source_points = qdrant.scroll(
-                collection_name=COLLECTION,
+                collection_name=best_collection,
                 scroll_filter=Filter(must=scroll_filter_conditions),
                 limit=MAX_CONTEXT_CHUNKS,
                 with_payload=True
             )[0]
+            # Trier par chunk_index pour respecter l'ordre du document
+            source_points_sorted = sorted(
+                source_points,
+                key=lambda r: r.payload.get("chunk_index", 0)
+            )
             source_chunks = [
                 {
-                    "score": 1.0,
-                    "text": r.payload.get("text", ""),
-                    "source": r.payload.get("source", "inconnu"),
-                    "source_id": r.payload.get("source_id", ""),
+                    "chunk_key":   hashlib.md5(r.payload.get("text", "").encode()).hexdigest(),
+                    "score":       1.0,
+                    "text":        r.payload.get("text", ""),
+                    "source":      r.payload.get("source", "inconnu"),
+                    "source_id":   r.payload.get("source_id", ""),
+                    "collection":  best_collection,
+                    "chunk_index": r.payload.get("chunk_index", 0),
                 }
-                for r in source_points
-                # Appliquer check_access sur chaque chunk du scroll :
-                # le filtre Qdrant couvre les ALLOW mais pas les DENY explicites.
-                # Sans ce contrôle, un utilisateur visé par un DENY verrait
-                # le document dès que son score dépasse CONTEXT_THRESHOLD.
+                for r in source_points_sorted
                 if not user_groups or check_access(
                     user_groups,
                     r.payload.get("autorises", []),
@@ -302,7 +368,11 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             ]
             other_chunks = [c for c in chunks if c["source"] != best_source]
             chunks = source_chunks + other_chunks[:3]
-            logger.info(f"Contexte étendu : {len(source_chunks)} chunks de '{best_source}' (scroll)")
+            idx_str = f"{idx_min}-{idx_max}" if best_chunk_index is not None else "?"
+            logger.info(
+                f"Contexte étendu : {len(source_chunks)} chunks de '{best_source}'"
+                f" (idx {idx_str}) dans '{best_collection}'"
+            )
 
         return chunks
     except Exception as e:
@@ -316,7 +386,6 @@ def build_context(chunks: list[dict]) -> str:
         return "Aucun document disponible."
     parts = []
     for i, chunk in enumerate(chunks, 1):
-        # Le symbole → introduit le nom du fichier à citer entre crochets
         filename = chunk['source'].split('/')[-1]
         parts.append(f"→ {filename}\n{chunk['text']}")
     return "\n\n".join(parts)
@@ -350,41 +419,22 @@ Question : {query}"""
 def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
     """
     Contrôle déterministe : vérifie que les sources citées existent dans les chunks.
-
-    Le modèle peut citer de deux façons :
-    - Avec extension complète : [21_Contrat_Maintenance_Baumont_Industries.docx]
-    - Sans extension (troncature) : [21_Contrat_Maintenance_Baumont_Industries]
-
-    Pour chaque citation détectée, on vérifie qu'elle correspond à au moins
-    une source réelle (par correspondance exacte ou par préfixe sans extension).
-    Seules les citations qui ne correspondent à aucune source réelle sont retournées.
     """
     import re
     sources_reelles = {c["source"] for c in chunks}
-    # Préfixes sans extension pour la correspondance souple
     prefixes_reels = {os.path.splitext(s)[0] for s in sources_reelles}
-
-    # Capturer tout ce qui est entre crochets (format large)
     citees = set(re.findall(r'\[([^\]]{5,100})\]', answer))
 
     inventees = []
     for citee in citees:
-        # Nettoyer les préfixes "Document N :" résiduels (format obsolète).
-        # Le format actuel de build_context() est "→ filename" ; la regex
-        # est conservée pour rétrocompatibilité avec d'anciens chunks indexés.
         citee_clean = re.sub(r'^Document\s+\d+\s*:\s*', '', citee).strip()
-        # Correspondance exacte
         if citee_clean in sources_reelles:
             continue
-        # Correspondance sans extension
         citee_sans_ext = os.path.splitext(citee_clean)[0]
         if citee_sans_ext in prefixes_reels:
             continue
-        # Correspondance partielle : la citation est un sous-ensemble d'une source réelle
         if any(citee_clean in s or s in citee_clean for s in sources_reelles):
             continue
-        # Vérifier que ça ressemble à un nom de fichier (contient un point ou underscore)
-        # pour éviter de signaler des crochets de mise en forme normaux
         if '.' not in citee_clean and '_' not in citee_clean:
             continue
         inventees.append(citee_clean)
@@ -392,13 +442,8 @@ def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
     return sorted(inventees)
 
 
-
 async def warmup_judge() -> None:
-    """Ping du juge Ollama avec 0 token pour le maintenir chargé en mémoire.
-    Appelé au début de chaque requête RAG, avant la génération, pour que le
-    rechargement éventuel se fasse en parallèle plutôt qu'à la fin.
-    L'échec est ignoré silencieusement : si le ping échoue, le vrai appel
-    du juge tentera quand même de charger le modèle."""
+    """Ping du juge Ollama pour le maintenir chargé en mémoire."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(
@@ -410,26 +455,20 @@ async def warmup_judge() -> None:
                 },
             )
     except Exception:
-        pass  # ignoré : le vrai appel du juge gère ses propres erreurs
+        pass
 
 
 async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
-    """
-    Vérifie que chaque affirmation de la réponse est ancrée dans les chunks.
-    Retourne {"ancree": bool, "affirmations_non_sourcees": list}
-    """
-    # Contrôle déterministe 1 : aucun chunk récupéré
+    """Vérifie que chaque affirmation de la réponse est ancrée dans les chunks."""
+    # Contrôle 1 : aucun chunk
     if not chunks:
         return {"ancree": False, "affirmations_non_sourcees": ["Aucun document source récupéré"]}
 
-    # Contrôle déterministe 2 : réponse de refus standard (courte, < 200 caractères)
-    # Un refus réel est une réponse courte. Une réponse longue qui contient
-    # cette phrase quelque part n'est pas un refus : on continue les contrôles.
+    # Contrôle 2 : réponse de refus standard
     if len(answer) < 200 and "ne figure pas dans les documents" in answer:
         return {"ancree": True, "affirmations_non_sourcees": []}
 
-    # Contrôle déterministe 3 : sources citées inexistantes (cas Baumont)
-    import re
+    # Contrôle 3 : sources citées inexistantes
     inventees = verifier_citations(answer, chunks)
     if inventees:
         return {
@@ -437,7 +476,8 @@ async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
             "affirmations_non_sourcees": [f"Source inexistante citée : {s}" for s in inventees]
         }
 
-    # Contrôle déterministe 4 : réponse longue sans aucune citation
+    # Contrôle 4 : réponse longue sans citation
+    import re
     if len(answer) > 200 and not re.search(r'\[[^\]]+\]', answer):
         return {
             "ancree": False,
@@ -485,8 +525,6 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
             return result
     except Exception as e:
         logger.warning(f"Groundedness check échoué : {e}")
-        # En cas d'échec du juge, on laisse passer pour ne pas bloquer le service.
-        # L'échec est journalisé dans log_query via juge_error pour audit ultérieur.
         return {"ancree": True, "affirmations_non_sourcees": [], "juge_error": str(e)}
 
 
@@ -496,7 +534,7 @@ def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_e
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
         "question_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
-        "sources_accessed": [c["source"] for c in chunks],
+        "sources_accessed": list(dict.fromkeys(c["source"] for c in chunks)),
         "ancree": ancree,
     }
     if juge_error:
@@ -527,12 +565,17 @@ async def stats():
         count = 0
         if COLLECTION in col_names:
             count = qdrant.count(COLLECTION).count
+        count_doc = 0
+        if DOCUMENTATION_COLLECTION in col_names:
+            count_doc = qdrant.count(DOCUMENTATION_COLLECTION).count
     except Exception as e:
         col_names = []
         count = 0
+        count_doc = 0
     return {
         "qdrant_collections": col_names,
-        "chunks_indexed": count,
+        "chunks_documents": count,
+        "chunks_documentation": count_doc,
         "llm": LLM_BASE_URL,
         "model": LLM_MODEL,
         "judge_model": JUDGE_MODEL
@@ -547,35 +590,24 @@ async def query(
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
-    # 1. Résoudre les groupes AD de l'utilisateur (cloisonnement ACL)
-    # Pour /query, l'identité vient du champ user_id de la requête
     user_groups = get_user_groups(request.user_id) if "@" in request.user_id else []
     if user_groups:
         logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupes AD")
     else:
         logger.warning(f"[AUTH] /query user '{request.user_id}' : aucun groupe AD, accès non filtré")
 
-    # 2. Recherche documentaire avec filtre d'accès
-    # Ping du juge en amont pour qu'il soit chargé quand on en a besoin
     await warmup_judge()
     chunks = await search_qdrant(request.query, user_groups=user_groups)
-
-    # 2. Construction du contexte
     context = build_context(chunks)
-
-    # 3. Génération de la réponse
     answer = await generate_answer(request.query, context)
 
-    # 4. Groundedness check
     if request.skip_groundedness:
         gc_result = {"ancree": True, "affirmations_non_sourcees": []}
     else:
         gc_result = await groundedness_check(answer, chunks)
 
-    # 5. Journalisation nLPD
     log_query(request.user_id, request.query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
 
-    # 6. Si hallucination détectée : bloquer la réponse
     if not gc_result.get("ancree", True):
         raise HTTPException(
             status_code=422,
@@ -597,7 +629,6 @@ async def query(
 
 # ─────────────────────────────────────────
 # Endpoint compatible OpenAI /v1/chat/completions
-# Permet à Open WebUI et tout client OpenAI de consommer la RAG API
 # ─────────────────────────────────────────
 
 class OpenAIMessage(BaseModel):
@@ -632,7 +663,6 @@ class OpenAIChatResponse(BaseModel):
 async def list_models(
     credentials: HTTPAuthorizationCredentials = Security(security)
 ):
-    """Endpoint compatible OpenAI : liste des modèles disponibles."""
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
     return {
@@ -654,23 +684,19 @@ async def openai_chat_completions(
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
-    # Log des headers pour identifier l'utilisateur Open WebUI
-    # Temporaire : permet de comprendre ce qu'Open WebUI transmet
-    owui_user = raw_request.headers.get("X-Forwarded-User", "")
+    owui_user  = raw_request.headers.get("X-Forwarded-User", "")
     owui_email = raw_request.headers.get("X-Forwarded-Email", "")
     owui_token = raw_request.headers.get("Authorization", "")
-    owui_user2 = raw_request.headers.get("X-OpenWebUI-User-Name", "")
+    owui_user2  = raw_request.headers.get("X-OpenWebUI-User-Name", "")
     owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
-    owui_id = raw_request.headers.get("X-OpenWebUI-User-Id", "")
+    owui_id     = raw_request.headers.get("X-OpenWebUI-User-Id", "")
     logger.info(f"[AUTH] X-Forwarded-User: '{owui_user}' | X-Forwarded-Email: '{owui_email}'")
     logger.info(f"[AUTH] X-OpenWebUI-User-Name: '{owui_user2}' | X-OpenWebUI-User-Email: '{owui_email2}' | Id: '{owui_id}'")
     logger.info(f"[AUTH] Authorization: '{owui_token[:80]}...' " if len(owui_token) > 80 else f"[AUTH] Authorization: '{owui_token}'")
     logger.info(f"[AUTH] request.user: '{request.user}'")
-    # Log de tous les headers pour analyse complète
     all_headers = dict(raw_request.headers)
     logger.info(f"[HEADERS] {json.dumps({k: v for k, v in all_headers.items() if k.lower() != 'authorization'})}")
 
-    # Extraire la dernière question utilisateur
     user_query = ""
     for msg in reversed(request.messages):
         if msg.role == "user":
@@ -680,7 +706,6 @@ async def openai_chat_completions(
     if not user_query:
         raise HTTPException(status_code=400, detail="Aucun message utilisateur trouvé")
 
-    # Résoudre les groupes AD depuis l'email Open WebUI (cloisonnement ACL)
     owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
     if not owui_email2:
         logger.warning("[AUTH] /v1 : aucun email utilisateur, accès refusé")
@@ -692,8 +717,6 @@ async def openai_chat_completions(
         logger.error(f"[AUTH] /v1 user '{owui_email2}' : résolution LDAP échouée ou aucun groupe, accès refusé")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
 
-    # Passer par le pipeline RAG complet avec filtre d'accès
-    # Ping du juge en amont pour qu'il soit chargé quand on en a besoin
     await warmup_judge()
     chunks = await search_qdrant(user_query, user_groups=user_groups)
     context = build_context(chunks)
@@ -701,11 +724,6 @@ async def openai_chat_completions(
     gc_result = await groundedness_check(answer, chunks)
     log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
 
-    # Le résultat ancree: false est journalisé pour audit nLPD.
-    # On n'injecte pas d'avertissement dans le texte : Open WebUI duplique
-    # le contenu si on modifie la réponse après génération.
-    # Le groundedness check dans /query bloque la réponse (HTTP 422).
-    # Ici on laisse passer proprement pour l'interface utilisateur.
     return OpenAIChatResponse(
         choices=[OpenAIChoice(
             message=OpenAIMessage(role="assistant", content=answer)
@@ -725,22 +743,10 @@ async def admin_sync(
     Déclenche la synchronisation complète du corpus :
       1. indexer.py : indexe les fichiers nouveaux ou modifiés
       2. acl_resolver.py : met à jour les autorises[] dans Qdrant
-
-    Sécurité :
-      - Authentifié par ADMIN_TOKEN (distinct de API_TOKEN)
-      - Tous les paramètres (chemins, partage, credentials) viennent
-        du fichier .env, jamais du corps de la requête : pas d'injection
-        de commande possible via l'appelant
-      - Un verrou global empêche deux synchronisations simultanées :
-        si une passe est déjà en cours, retourne HTTP 409
-
-    Retourne un rapport JSON exploitable par n8n pour décider
-    si une notification doit être envoyée.
     """
     if credentials.credentials != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Token admin invalide")
 
-    # Refuser si une synchronisation est déjà en cours
     if _sync_lock.locked():
         raise HTTPException(
             status_code=409,
@@ -757,9 +763,6 @@ async def admin_sync(
             "errors": []
         }
 
-        # Utiliser python3 du conteneur : les dépendances sont dans l'image rag-api.
-        # Le venv de l'hôte n'est pas utilisable depuis le conteneur
-        # (symlinks cassés vers /usr/bin/python3 absent de l'image slim).
         venv_python = os.getenv("SYNC_PYTHON", "python3")
 
         # ── Étape 1 : indexer.py ─────────────────────────────────────────
@@ -773,11 +776,8 @@ async def admin_sync(
                  "--rapport", "/var/log/rag/rapport_indexer.json"],
                 capture_output=True,
                 text=True,
-                timeout=int(os.getenv("SYNC_TIMEOUT_INDEXER", "600")),  # configurable via SYNC_TIMEOUT_INDEXER
+                timeout=int(os.getenv("SYNC_TIMEOUT_INDEXER", "600")),
                 env={
-                    # Environnement restreint : seules les variables nécessaires
-                    # à indexer.py sont transmises. Les secrets LDAP, ADMIN_TOKEN
-                    # et API_TOKEN ne sont pas propagés aux sous-processus.
                     "PATH": os.environ.get("PATH", ""),
                     "HOME": os.environ.get("HOME", ""),
                     "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -789,20 +789,18 @@ async def admin_sync(
                     "ORG_OWNER": ORG_NAME,
                     "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
                     "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
+                    # Variables de routage des collections
+                    "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
+                    "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
+                    "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
                 }
             )
             rapport["indexer"]["returncode"] = result.returncode
-            # stdout/stderr non retournés dans la réponse HTTP : une trace d'exception
-            # peut contenir des chemins ou des URLs de connexion. La quarantaine est lue
-            # depuis le rapport JSON produit par indexer.py dans /var/log/rag/.
-            # Ce parsing sur chaîne fixe est robuste : toute modification cosmétique
-            # dans indexer.py ne casse pas la détection.
             if result.returncode != 0:
                 rapport["errors"].append(f"indexer.py a retourné code {result.returncode}")
                 logger.error(f"[SYNC] indexer.py erreur : {result.stderr[-200:]}")
             else:
                 logger.info("[SYNC] indexer.py terminé avec succès")
-                # Lire la quarantaine depuis le rapport JSON produit par indexer.py
                 try:
                     with open("/var/log/rag/rapport_indexer.json", "r") as rf:
                         r_data = json.load(rf)
@@ -833,10 +831,8 @@ async def admin_sync(
                  "--rapport", "/var/log/rag/rapport_acl.json"],
                 capture_output=True,
                 text=True,
-                timeout=int(os.getenv("SYNC_TIMEOUT_ACL", "300")),  # configurable via SYNC_TIMEOUT_ACL
+                timeout=int(os.getenv("SYNC_TIMEOUT_ACL", "300")),
                 env={
-                    # Environnement restreint : seules les variables nécessaires
-                    # à acl_resolver.py sont transmises.
                     "PATH": os.environ.get("PATH", ""),
                     "HOME": os.environ.get("HOME", ""),
                     "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -846,24 +842,21 @@ async def admin_sync(
                     "SMB_DOMAIN": SMB_DOMAIN,
                     "QDRANT_URL": QDRANT_HOST,
                     "QDRANT_COLLECTION": COLLECTION,
+                    # Variables de routage des collections
+                    "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
+                    "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
                 }
             )
             rapport["acl_resolver"]["returncode"] = result.returncode
-            # stdout/stderr non retournés (même principe que pour indexer.py).
             if result.returncode != 0:
                 rapport["errors"].append(f"acl_resolver.py a retourné code {result.returncode}")
                 logger.error(f"[SYNC] acl_resolver.py erreur : {result.stderr[-200:]}")
             else:
                 logger.info("[SYNC] acl_resolver.py terminé avec succès")
-                # Lire les fichiers non indexés depuis le rapport JSON d'acl_resolver.py
-                # (fichiers présents sur le partage mais absents de Qdrant)
                 try:
                     with open("/var/log/rag/rapport_acl.json", "r") as rf:
                         r_data = json.load(rf)
                     for doc in r_data.get("documents", []):
-                        # non_indexé : ACL lue mais aucun chunk dans Qdrant
-                        # acl_illisible : smbcacls a échoué, le chunk garde ses
-                        #   anciens autorisés[] et peut donc rester visible à tort
                         if doc.get("statut") in ("non_indexé", "acl_illisible"):
                             rapport["quarantine"].append(doc.get("fichier", doc.get("source_name", "")))
                 except Exception as e:
@@ -888,9 +881,6 @@ async def admin_sync(
             f"errors={len(rapport['errors'])}"
         )
 
-        # Reconstruire l'index BM25 après une synchronisation réussie :
-        # les nouveaux chunks doivent être disponibles immédiatement
-        # pour la recherche hybride, sans redémarrer le conteneur.
         if rapport["success"]:
             build_bm25_index()
 
