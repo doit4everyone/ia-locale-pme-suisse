@@ -67,12 +67,12 @@ RAG API FastAPI. Expose quatre endpoints :
 Fonctionnalités :
 
 - Retrieval Qdrant avec filtre ACL (`autorises[]` et `interdits[]`)
-- Extension de contexte par `scroll` sur le document le mieux classé, avec contrôle ACL appliqué après le scroll
+- Extension de contexte par `chunk_index ± radius` sur le document le mieux classé : les chunks voisins sont récupérés dans l'ordre du document, le chunk pertinent reste dans le contexte. Contrôle ACL appliqué après le scroll
 - Retrieval hybride BM25 + vectoriel fusionné par Reciprocal Rank Fusion (RRF) :
   l'index BM25 est construit en mémoire au démarrage depuis Qdrant et reconstruit
-  après chaque synchronisation réussie. BM25 capture les termes exacts (noms de fichiers,
+  après chaque synchronisation réussie. Chaque chunk BM25 inclut son `chunk_index` pour que l'extension de contexte fonctionne même quand BM25 gagne le RRF. BM25 capture les termes exacts (noms de fichiers,
   acronymes, commandes) là où la recherche vectorielle seule échoue sur les reformulations.
-- `TOP_K` configurable (défaut 12), augmenté pour les questions multi-sources
+- `TOP_K` configurable (défaut 20), validé en lab pour améliorer le recall sur les gros fichiers .md
 - `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
 - Prompt système : citation du nom exact du fichier entre crochets, jamais `[Document X]`
@@ -95,6 +95,8 @@ EMBED_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
 EMBED_MODEL=nomic-embed-text
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
+DOCUMENTATION_COLLECTION=documentation  # Collection pour la documentation technique
+DOCUMENTATION_PATHS=DOIT4EVERYONE       # Dossiers racine routés vers DOCUMENTATION_COLLECTION
 ORG_NAME=<Nom de l'organisation>
 API_TOKEN=<token fort>
 ADMIN_TOKEN=<token fort distinct>
@@ -141,7 +143,10 @@ Fonctionnalités :
 - Chunking par blocs de mots avec recouvrement configurable
 - Embedding via Ollama (`nomic-embed-text` par défaut, configurable)
 - Vérification de la dimension du modèle contre la collection existante au démarrage
-- Suppression des chunks avant réindexation (évite les chunks orphelins sur document raccourci)
+- Indexation incrémentale : comparaison `content_hash` + paramètres d'indexation + `chunker_version`. Les fichiers non modifiés sont ignorés sans appel Ollama. ACL reportées sur les fichiers modifiés.
+- IDs de chunks déterministes + upsert : plus de fenêtre d'indisponibilité lors d'une réindexation
+- Suppression des chunks excédentaires après réindexation (document raccourci)
+- Index de payload Qdrant créés automatiquement : `source` (keyword) + `chunk_index` (integer)
 - Détection de l'organisation propriétaire en cinq niveaux : chemin explicite, nom de client dans l'arborescence, pattern « Client : » dans le contenu, mots-clés internes, fallback sur `ORG_OWNER`
 
 > **Sur la détection d'organisation :** `org_name` est une donnée déduite, utile pour la navigation et les facettes de recherche. Elle ne doit pas servir de critère d'accès. Le cloisonnement repose sur `autorises[]`, lu depuis les ACL par `acl_resolver.py`.
@@ -158,7 +163,9 @@ source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 # Indexer
 python indexer.py --corpus /mnt/fileservice-root
-# Réindexer depuis zéro
+# Réindexer tous les fichiers en conservant les ACL
+python indexer.py --corpus /mnt/fileservice-root --force
+# Réindexer depuis zéro (ACL perdues, relancer acl_resolver.py)
 python indexer.py --corpus /mnt/fileservice-root --reset
 ```
 
@@ -172,6 +179,8 @@ EMBED_MODEL=nomic-embed-text
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8         # Seuil minimal en mots pour conserver un chunk (8 préserve les sections courtes des .md)
+DOCUMENTATION_COLLECTION=documentation
+DOCUMENTATION_PATHS=DOIT4EVERYONE
 ```
 
 ---
@@ -266,6 +275,10 @@ Structure du payload stocké pour chaque chunk :
   "org_name": "ClientA",
   "detection_niveau": 2,
   "embed_model": "nomic-embed-text",
+  "chunk_index": 0,
+  "chunk_size": 150,
+  "chunker_version": 2,
+  "content_hash": "3c7db804...",
   "autorises": ["DOMAINE\\GRP-Clients", "DOMAINE\\Admins du domaine"],
   "interdits": [],
   "acl_updated_at": "2026-09-14T10:06:02Z"
