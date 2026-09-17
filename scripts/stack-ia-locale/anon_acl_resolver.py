@@ -95,7 +95,7 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
         )
         if result.returncode != 0:
             print(f"  Erreur smbcacls sur '{chemin_relatif}' : {result.stderr.strip()}")
-            return []
+            return [], []
 
         autorisés = []
         interdits = []
@@ -131,7 +131,7 @@ def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
 
     Le chemin relatif SMB utilise des backslashes (format Windows).
     """
-    supported = ('.docx', '.txt', '.md', '.pdf', '.xlsx')
+    supported = ('.docx', '.pdf', '.pptx', '.txt', '.md')
     fichiers = []
 
     for root, dirs, files in os.walk(mount_point):
