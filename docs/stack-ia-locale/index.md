@@ -87,12 +87,14 @@ Les scripts du pipeline sont publiés séparément, avec les valeurs sensibles r
 
 | Script | Rôle |
 |---|---|
-| `indexer.py` | Parcours SMB, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant |
+| `indexer.py` | Parcours SMB, indexation incrémentale, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant (deux collections) |
 | `acl_resolver.py` | Lecture ACL NTFS via `smbcacls`, résolution LDAP récursive, mise à jour `autorises[]` |
 | `main.py` | RAG API FastAPI : retrieval, génération, groundedness check, journalisation nLPD |
 | `auth.py` | Résolution groupes AD via LDAP, filtrage ACL, cache TTL |
 | `docker-compose.yml` | Stack complète : Qdrant, n8n, RAG API, Open WebUI |
 | `.env.example` | Template de configuration commenté, à copier en `.env` et adapter |
+
+| `suivi-corrections.md` | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
 
 → [Scripts : documentation et téléchargement](../../scripts/stack-ia-locale/index.md)
 
