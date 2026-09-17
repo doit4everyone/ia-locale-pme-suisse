@@ -115,9 +115,9 @@ CONTEXT_THRESHOLD=0.01
 # Score RRF minimum pour déclencher l'extension de contexte.
 # Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche
 # l'extension sur presque toutes les questions. Ne pas dépasser 0.05.
-MAX_CONTEXT_CHUNKS=6
+MAX_CONTEXT_CHUNKS=10
 # Nombre maximum de chunks par extension de contexte.
-# 6 évite les timeouts sur CPU. Augmenter à 10-15 une fois le GPU installé.
+# 10 validé en lab sur CPU. Augmenter à 12-15 une fois le GPU installé.
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8

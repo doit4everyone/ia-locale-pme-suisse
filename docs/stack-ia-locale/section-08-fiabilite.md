@@ -236,11 +236,15 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 |---|---|---|
 | `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
 | `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
-| `MAX_CONTEXT_CHUNKS` | 6 | Évite les timeouts sur CPU pour les gros documents. Augmenter à 10-15 après GPU. |
+| `MAX_CONTEXT_CHUNKS` | 10 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 12-15 après GPU. |
 
 ### Limite sur les très gros fichiers
 
 Un fichier de 100+ chunks (ex. `11-correlations-yaml.md` à 189 chunks, `09-pipeline-llm.md` à 117 chunks) est trop dilué pour que ses chunks pertinents remontent systématiquement dans le top 20. Les questions génériques sur ces fichiers peuvent échouer. Les questions précises avec les bons termes techniques réussissent.
+
+### Note sur la température de génération
+
+La température est fixée à 0.2 (validé en lab). En dessous de 0.1, les réponses sont courtes et répétitives. Au-dessus de 0.3, le taux de hallucination augmente sur les données factuelles. 0.2 est le bon compromis entre fidélité aux sources et fluidité pour un RAG nLPD-compliant. Ne pas dépasser 0.3 sur ce type de corpus.
 
 **Correctif documentaire recommandé :** découper les très gros fichiers en sections thématiques séparées. `11-correlations-yaml.md` gagnerait à être découpé en 6 fichiers par série de règles (W, WD, S, L, M, A). C'est un travail sur le file server, pas dans le code.
 
