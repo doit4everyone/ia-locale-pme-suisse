@@ -4,6 +4,32 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.3.0] — Septembre 2026
+
+### Ajouté
+
+**Indexation incrémentale (`indexer.py`) :**
+- Comparaison `content_hash` + `embed_model` + `chunk_size` + `chunk_overlap` + `min_chunk_words` + `chunker_version` : les fichiers non modifiés sont ignorés sans appel Ollama.
+- Report des ACL (`autorises`, `interdits`, `acl_updated_at`) sur les fichiers modifiés : plus de fenêtre sans ACL entre indexeur et résolveur.
+- IDs de chunks déterministes + upsert : plus de fenêtre d'indisponibilité.
+- `supprimer_chunks_excedentaires` via `Range(gte=nb_chunks)` sur `chunk_index` : les chunks de l'ancienne version qui n'existent plus sont supprimés proprement.
+- Index de payload Qdrant créés dans `init_collection` : `source` (keyword) + `chunk_index` (integer). Idempotent, créé une seule fois par collection.
+- `CHUNKER_VERSION=2` : réindexation automatique si `chunk_blocks()` est modifié.
+- `MIN_CHUNK_WORDS` lu depuis l'environnement (défaut 8, corrigé de 15).
+- `SUPPORTED_EXTENSIONS` partagée entre `indexer.py` et `acl_resolver.py`.
+- Gestion erreurs par fichier : code de sortie 2 si erreur, pas plantage global.
+- Répertoires exclus réellement élagués via `dirs[:]=` dans `os.walk` (DfsrPrivate, etc.).
+
+**Correctifs `main.py` :**
+- `chunk_index` ajouté dans `_load_collection_chunks` : l'extension de contexte fonctionne désormais quand un chunk BM25 gagne le RRF.
+- Nettoyage des suites de points répétitifs dans `get_embedding()` : corrige l'erreur 500 Ollama sur les PDF avec tables des matières.
+
+### Modifié
+- `section-03-docker-compose.md` : note sur `chunk_index` dans l'index BM25.
+- `section-08-fiabilite.md` : note sur `chunk_index` BM25 et nettoyage PDF.
+
+---
+
 ## [2.2.0] — Septembre 2026
 
 ### Ajouté
