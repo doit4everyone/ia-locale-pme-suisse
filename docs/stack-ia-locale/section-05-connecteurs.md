@@ -583,7 +583,7 @@ Ce cas confirme que le filtre ne renvoie pas systématiquement zéro chunk : il 
 
 ---
 
-## §5.8 Deux collections Qdrant : règles de gouvernance
+## §5.9 Deux collections Qdrant : règles de gouvernance
 
 La stack utilise deux collections Qdrant distinctes pour séparer le corpus d'entreprise de la documentation technique :
 

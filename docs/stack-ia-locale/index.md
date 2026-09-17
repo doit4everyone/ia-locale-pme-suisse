@@ -66,8 +66,6 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 ## Sommaire
 
-### Procédures
-
 | Section | Contenu | Statut |
 |---|---|---|
 | [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker | Publié |
@@ -79,24 +77,13 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, Teams et OCR (documentaire) | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
-| §10 Validation et benchmarks | Checklist complète, mesure du débit, benchmarks GPU | À venir après installation GPU |
+| §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
 
-### Scripts Python
+### Référence
 
-Les scripts du pipeline sont publiés séparément, avec les valeurs sensibles remplacées par des placeholders. Ils accompagnent ce guide et sont prêts à adapter à votre environnement.
-
-| Script | Rôle |
+| Document | Contenu |
 |---|---|
-| `indexer.py` | Parcours SMB, indexation incrémentale, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant (deux collections) |
-| `acl_resolver.py` | Lecture ACL NTFS via `smbcacls`, résolution LDAP récursive, mise à jour `autorises[]` |
-| `main.py` | RAG API FastAPI : retrieval, génération, groundedness check, journalisation nLPD |
-| `auth.py` | Résolution groupes AD via LDAP, filtrage ACL, cache TTL |
-| `docker-compose.yml` | Stack complète : Qdrant, n8n, RAG API, Open WebUI |
-| `.env.example` | Template de configuration commenté, à copier en `.env` et adapter |
-
-| `suivi-corrections.md` | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
-
-→ [Scripts : documentation et téléchargement](../../scripts/stack-ia-locale/index.md)
+| [suivi-corrections.md](suivi-corrections.md) | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
 
 ---
 

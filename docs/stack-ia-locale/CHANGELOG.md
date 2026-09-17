@@ -1,0 +1,131 @@
+# Changelog
+
+Toutes les modifications notables de ce repo sont documentées ici.
+
+---
+
+## [2.3.0] — Septembre 2026
+
+### Ajouté
+
+**Indexation incrémentale (`indexer.py`) :**
+- Comparaison `content_hash` + `embed_model` + `chunk_size` + `chunk_overlap` + `min_chunk_words` + `chunker_version` : les fichiers non modifiés sont ignorés sans appel Ollama.
+- Report des ACL (`autorises`, `interdits`, `acl_updated_at`) sur les fichiers modifiés : plus de fenêtre sans ACL entre indexeur et résolveur.
+- IDs de chunks déterministes + upsert : plus de fenêtre d'indisponibilité.
+- `supprimer_chunks_excedentaires` via `Range(gte=nb_chunks)` sur `chunk_index` : les chunks de l'ancienne version qui n'existent plus sont supprimés proprement.
+- Index de payload Qdrant créés dans `init_collection` : `source` (keyword) + `chunk_index` (integer). Idempotent, créé une seule fois par collection.
+- `CHUNKER_VERSION=2` : réindexation automatique si `chunk_blocks()` est modifié.
+- `MIN_CHUNK_WORDS` lu depuis l'environnement (défaut 8, corrigé de 15).
+- `SUPPORTED_EXTENSIONS` partagée entre `indexer.py` et `acl_resolver.py`.
+- Gestion erreurs par fichier : code de sortie 2 si erreur, pas plantage global.
+- Répertoires exclus réellement élagués via `dirs[:]=` dans `os.walk` (DfsrPrivate, etc.).
+
+**Correctifs `main.py` :**
+- `chunk_index` ajouté dans `_load_collection_chunks` : l'extension de contexte fonctionne désormais quand un chunk BM25 gagne le RRF.
+- Nettoyage des suites de points répétitifs dans `get_embedding()` : corrige l'erreur 500 Ollama sur les PDF avec tables des matières.
+
+### Modifié
+- `section-03-docker-compose.md` : note sur `chunk_index` dans l'index BM25.
+- `section-08-fiabilite.md` : note sur `chunk_index` BM25 et nettoyage PDF.
+
+---
+
+## [2.2.0] — Septembre 2026
+
+### Ajouté
+
+**Deux collections Qdrant (documents + documentation) :**
+- `indexer.py` : `get_collection_for_path()` route les fichiers vers la collection correcte selon le préfixe de chemin.
+- `acl_resolver.py` : même logique, scan des orphelins sur les deux collections.
+- `main.py` : recherche vectorielle sur les deux collections, fusion avant RRF, scroll d'extension de contexte dans la bonne collection.
+- `section-05-connecteurs.md` : §5.8 ajouté, règles de gouvernance des collections.
+
+**Correctifs retrieval (bugs identifiés en session) :**
+- Clé RRF unique par chunk (`chunk_key = md5(text)`) au lieu du `source_id` (hash du fichier). Permet à plusieurs chunks du même fichier d'entrer dans le classement indépendamment.
+- Scroll d'extension de contexte dans la bonne collection (`best_collection` déduit du chunk, non hardcodé à `documents`).
+- `DOCUMENTATION_COLLECTION` et `DOCUMENTATION_PATHS` transmis aux sous-processus `indexer.py` et `acl_resolver.py` via `/admin/sync`.
+
+**Paramètres ajustés (validés en lab) :**
+- `TOP_K=20` : améliore le recall sur les gros fichiers .md.
+- `CONTEXT_THRESHOLD=0.01` : adapté à l'échelle des scores RRF ([0, 0.016] avec k=60).
+- `MAX_CONTEXT_CHUNKS=12` : validé en lab sur CPU (6 était insuffisant pour les documents denses).
+
+### Modifié
+- `section-03-docker-compose.md` : nouvelles variables `.env` documentées, `requirements.txt` mis à jour avec `rank-bm25`.
+- `section-08-fiabilite.md` : §8.5 ajouté (retrieval hybride BM25, paramètres validés, limite sur les gros fichiers).
+
+---
+
+## [2.1.0] — Septembre 2026
+
+### Ajouté
+
+**Retrieval hybride BM25 + vectoriel :**
+- `main.py` : index BM25 construit en mémoire au démarrage depuis Qdrant, fusionné avec la recherche vectorielle par Reciprocal Rank Fusion (RRF). Améliore le retrieval sur les termes exacts (noms de fichiers, acronymes, commandes, termes techniques) là où la recherche vectorielle seule échoue sur les reformulations.
+- `main.py` : reconstruction automatique de l'index BM25 après chaque synchronisation réussie via `/admin/sync`.
+- `requirements.txt` : ajout de `rank-bm25`.
+
+**Plan d'apprentissage RAG local refondu (`guides/plan-apprentissage-rag-2026.docx`) :**
+- Document entièrement réécrit pour refléter la stack validée en lab (septembre 2026).
+- 14 phases : 12 validées sur CPU, 2 optionnelles nécessitant un tenant MS 365.
+- Choix techniques réels documentés : pipeline Python custom, chunking par blocs de paragraphes, `MIN_CHUNK_WORDS=8`, `JUDGE_KEEP_ALIVE`, `warmup_judge()`, Open WebUI comme interface finale.
+- Note sur la migration BM42 (Qdrant sparse vectors) au-delà de 200 000 chunks.
+
+### Modifié
+- `main.py` : prompt système corrigé (suppression de la règle contradictoire "cite le document même hors sujet"), prompt juge enrichi avec deux règles d'attribution pour détecter les hallucinations par mauvaise attribution de contexte.
+- `section-03-docker-compose.md` : `requirements.txt` documenté aligné sur la version réelle (`rank-bm25`, `pdfplumber`, `python-pptx`).
+- `section-08-fiabilite.md` : nouvelles règles du prompt juge documentées, note sur les limites du juge `qwen3:4b` sur CPU et stratégie GPU (`JUDGE_MODEL=qwen2.5:14b`), footer mis à jour (970 chunks).
+- `index.md` (racine du repo) : stack technique mise à jour avec "retrieval hybride BM25+vectoriel (RRF)".
+- `scripts/stack-ia-locale/index.md` : fonctionnalités BM25 documentées, dépendances alignées.
+- `docs/stack-ia-locale/index.md` : section Scripts ajoutée avec tableau des fichiers et lien vers `scripts/stack-ia-locale/`.
+
+---
+
+## [2.0.0] — Septembre 2026
+
+### Ajouté
+
+**Guide de déploiement stack IA locale (§1 à §9) :**
+- §1 Prérequis et création de la VM Ubuntu Server 26.04
+- §2 Installation et configuration de vLLM (mode CPU et référence DGX Spark)
+- §3 Infrastructure Docker Compose : Qdrant, n8n, RAG API FastAPI, Open WebUI
+- §4 Interfaces utilisateur : Onyx CE (validation) et Open WebUI (stack finale)
+- §5 Connecteurs SMB et cloisonnement documentaire par ACL NTFS
+- §6 Cline : agent de codage IA connecté à Ollama
+- §7 Pipelines n8n : synchronisation corpus, rappel rotation svc-rag
+- §8 Fiabilité : contrôles déterministes, groundedness check, formation utilisateurs
+- §9 Sécurité et durcissement : UFW, TLS LDAP, journalisation nLPD, rotation svc-rag
+
+**Scripts Python du pipeline RAG local (répertoire `scripts/stack-ia-locale/`) :**
+- `indexer.py` : indexeur v5, cascade de détection org à 5 niveaux, support `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`, exclusion `DfsrPrivate`, seuil minimal chunk configurable (`MIN_CHUNK_WORDS`)
+- `acl_resolver.py` : v3 avec détection des chunks orphelins, résolution LDAP récursive (`memberOf`), DENY explicites
+- `main.py` : RAG API FastAPI complète, filtrage Qdrant par ACL NTFS, groundedness check (`qwen3:4b`), `warmup_judge()`, journalisation nLPD, endpoint `/admin/sync`
+- `auth.py` : résolution LDAP email → groupes AD, récursion `memberOf`, `CERT_REQUIRED`, cache TTL
+- `docker-compose.yml` : stack complète Qdrant + n8n + RAG API + Open WebUI
+- `.env.example` : template de configuration commenté
+- `Dockerfile` et `requirements.txt` : image `rag-api` basée sur Python 3.11-slim
+
+**Stack validée en lab :**
+- Authentification LDAP Active Directory sur port 636 (LDAPS)
+- Cloisonnement documentaire par ACL NTFS : propagation des SIDs jusqu'aux chunks Qdrant, filtrage à la requête par groupes AD de l'utilisateur
+- DENY explicites NTFS prioritaires sur les ALLOW (cas validé en lab)
+- Groupes imbriqués AD résolus par récursion `memberOf` (3 niveaux validés)
+- Journalisation nLPD : hash de la question, identité utilisateur, sources consultées
+- Groundedness check : juge `qwen3:4b` avec règles d'attribution pour détecter les hallucinations par mauvaise attribution de contexte
+
+### Modifié
+- `index.md` (racine) : description de la stack opérationnelle, liens corrigés vers les index de docs et scripts, section "Ce qui vient ensuite" (MS 365, Purview)
+
+---
+
+## [1.0.0] — Août 2026
+
+### Ajouté
+- Guide décisionnel « IA locale pour PME suisse » v1.0 (août 2026) — 25 pages, sources vérifiées
+- Plan d'apprentissage RAG local — 12 phases, architecture LABO-G9 + VM-RAG-LAB
+- Structure initiale du repo : `docs/`, `guides/`, `scripts/`
+- Index des procédures opérationnelles à venir
+
+---
+
+*Les prochaines entrées seront ajoutées au fur et à mesure des publications.*
