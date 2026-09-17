@@ -411,7 +411,69 @@ ls -la /var/log/rag/
 
 ---
 
-## §3.7 Structure de répertoires finale
+## §3.7 Sauvegarde et restauration Qdrant
+
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026.
+
+Qdrant stocke les vecteurs et les métadonnées (ACL, hashes, org_name) dans `./qdrant_data/`. Une perte de ce répertoire sans snapshot oblige à relancer une réindexation complète et un resync ACL. Prendre un snapshot avant toute opération risquée (mise à jour, modification du corpus, changement de modèle d'embedding).
+
+### Créer un snapshot
+
+```bash
+# Snapshot de la collection documents
+curl -X POST http://localhost:6333/collections/documents/snapshots
+
+# Snapshot de la collection documentation
+curl -X POST http://localhost:6333/collections/documentation/snapshots
+
+# Lister les snapshots disponibles
+curl http://localhost:6333/collections/documents/snapshots
+curl http://localhost:6333/collections/documentation/snapshots
+```
+
+Les snapshots sont écrits dans `./qdrant_data/snapshots/`. Les copier hors du conteneur pour les conserver :
+
+```bash
+cp -r ~/rag-stack/qdrant_data/snapshots/ /backup/qdrant-snapshots-$(date +%Y%m%d)/
+```
+
+### Restaurer un snapshot
+
+```bash
+# Arrêter la stack
+cd ~/rag-stack && docker compose down
+
+# Supprimer les données existantes
+rm -rf ~/rag-stack/qdrant_data/
+
+# Redémarrer Qdrant seul
+docker compose up -d qdrant
+sleep 5
+
+# Restaurer la collection documents depuis le snapshot
+curl -X POST "http://localhost:6333/collections/documents/snapshots/recover" \
+  -H "Content-Type: application/json" \
+  -d '{"location": "file:///qdrant/storage/snapshots/documents/<nom-du-snapshot>.snapshot"}'
+
+# Restaurer la collection documentation
+curl -X POST "http://localhost:6333/collections/documentation/snapshots/recover" \
+  -H "Content-Type: application/json" \
+  -d '{"location": "file:///qdrant/storage/snapshots/documentation/<nom-du-snapshot>.snapshot"}'
+
+# Redémarrer la stack complète
+docker compose up -d
+```
+
+> **Après une restauration :** relancer impérativement `acl_resolver.py` pour vérifier que les ACL sont cohérentes avec les permissions actuelles du file server. Un snapshot peut dater de plusieurs heures : des permissions modifiées entre-temps ne seraient pas reflétées.
+
+```bash
+curl -X POST http://localhost:8080/admin/sync \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+---
+
+## §3.8 Structure de répertoires finale
 
 ```
 ~/rag-stack/
