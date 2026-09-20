@@ -68,6 +68,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 | Section | Contenu | Statut |
 |---|---|---|
+| [§0 Déploiement rapide](section-00-quickstart.md) | Procédure condensée pour redéployer la stack en 30 minutes | Publié |
 | [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker | Publié |
 | [§2 vLLM, validation CPU](section-02-vllm.md) | vLLM-cpu pour validation, configuration production DGX Spark | Publié |
 | [§3 Infrastructure : Qdrant, n8n, RAG API, Open WebUI](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API complète, Open WebUI | Publié |
