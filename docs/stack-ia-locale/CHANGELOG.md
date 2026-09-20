@@ -4,6 +4,40 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.8.0] — Septembre 2026
+
+### Nettoyage
+
+**`main.py` :**
+- Variables mortes supprimées : `owui_user`, `owui_email`, `owui_token`, `owui_user2`. `owui_id` conservé avec commentaire pour future corrélation dans le journal nLPD.
+- Lecture redondante de `owui_email2` supprimée (doublon ligne 749).
+- `except Exception as e` → `except Exception` dans `/stats` (`e` non utilisé).
+
+**`acl_resolver.py` :**
+- 5 f-strings sans variable converties en strings normales.
+- `if not dry_run` redondant en phase 2 supprimé : `mettre_a_jour_qdrant` gère déjà le cas.
+- Logs phase 2 enrichis avec `source_name` pour faciliter le diagnostic.
+
+---
+
+## [2.7.0] — Septembre 2026
+
+### Corrigé
+
+**`main.py` : 5 corrections suite au second audit**
+
+- Branche fallback `search_qdrant` : `idx_min = idx_max = None` initialisés explicitement pour éviter un `NameError` sur les chunks sans `chunk_index` (indexés avant v2.3.0). Le `limit` adapté : `(idx_max - idx_min + 1) if idx_min is not None else MAX_CONTEXT_CHUNKS`.
+- `enrichir_citations` déplacé après `groundedness_check` et `log_query` dans `/query` et `/v1`. Avant ce correctif, le juge et `verifier_citations` voyaient la citation enrichie `[nom.docx : \\\\serveur\\...]` au lieu de `[nom.docx]`, produisant des faux positifs `ancree: false` sur des réponses correctement sourcées.
+- Docstring `build_context` mise à jour : suppression de la référence au lien cliquable et au commentaire chemin UNC devenus obsolètes.
+
+**`acl_resolver.py` : réécriture en deux phases**
+
+- Phase 1 : lecture complète de toutes les ACL en mémoire, sans aucune écriture dans Qdrant.
+- Garde-fou 20% évalué AVANT toute écriture. Dans la version précédente, le garde-fou était placé après la boucle d'écriture : il se déclenchait après avoir déjà vidé les ACL de tout le corpus, rendant le message "abandon sans modification" faux.
+- Phase 2 : écriture dans Qdrant uniquement si le seuil 20% n'est pas atteint.
+
+---
+
 ## [2.6.0] — Septembre 2026
 
 ### Ajouté
