@@ -206,12 +206,14 @@ def mettre_a_jour_qdrant(
 
         # Mettre à jour le payload de chaque chunk
         ids = [p.id for p in points]
+        # interdits est toujours écrit, même vide.
+        # Si on ne l'écrit que quand non vide, un DENY retiré sur le file server
+        # reste actif indéfiniment dans Qdrant.
         payload = {
             "autorises": autorisés,
+            "interdits": interdits,
             "acl_updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if interdits:
-            payload["interdits"] = interdits
         qdrant.set_payload(
             collection_name=collection_name,
             payload=payload,
@@ -283,8 +285,15 @@ def resoudre_acl(
         # Lire les ACL
         autorisés, interdits = lire_acl_fichier(share, chemin_smb)
         if not autorisés and not interdits:
-            print(f"  → Aucune ACL lisible, fichier ignoré.")
+            # ACL illisible : deny by default.
+            # On vide autorises dans Qdrant pour bloquer l'accès
+            # jusqu'à ce que les ACL soient lisibles au prochain passage.
+            # Un DENY conservé par défaut est plus sûr qu'un accès ouvert.
+            print(f"  → ACL illisible : autorises vidé (deny by default).")
             fichiers_sans_acl.append(chemin_smb)
+            col = get_collection_for_path(source_name)
+            if not dry_run:
+                mettre_a_jour_qdrant(qdrant, source_name, col, [], [], dry_run)
             rapport.append({
                 "fichier": chemin_smb,
                 "statut": "acl_illisible",
