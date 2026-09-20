@@ -591,18 +591,27 @@ async def query(
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
-    user_groups = get_user_groups(request.user_id) if "@" in request.user_id else []
-    if user_groups:
-        logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupes AD")
-    else:
-        logger.warning(f"[AUTH] /query user '{request.user_id}' : aucun groupe AD, accès non filtré")
+    # Résolution des groupes AD depuis user_id fourni par le client.
+    # /query est un endpoint machine à machine (API_TOKEN). L'identité
+    # est déclarée par l'appelant : à n'utiliser que depuis des systèmes
+    # de confiance internes. Pour les utilisateurs finaux, utiliser /v1.
+    if "@" not in request.user_id:
+        logger.warning(f"[AUTH] /query user_id '{request.user_id}' invalide (pas d'@), accès refusé")
+        raise HTTPException(status_code=403, detail="user_id invalide : format email requis")
+    user_groups = get_user_groups(request.user_id)
+    if not user_groups:
+        logger.error(f"[AUTH] /query user '{request.user_id}' : résolution LDAP échouée, accès refusé")
+        raise HTTPException(status_code=403, detail="Résolution des droits impossible")
+    logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupes AD")
 
     await warmup_judge()
     chunks = await search_qdrant(request.query, user_groups=user_groups)
     context = build_context(chunks)
     answer = await generate_answer(request.query, context)
 
-    if request.skip_groundedness:
+    # skip_groundedness réservé à ADMIN_TOKEN uniquement.
+    skip = request.skip_groundedness and credentials.credentials == ADMIN_TOKEN
+    if skip:
         gc_result = {"ancree": True, "affirmations_non_sourcees": []}
     else:
         gc_result = await groundedness_check(answer, chunks)
@@ -691,12 +700,6 @@ async def openai_chat_completions(
     owui_user2  = raw_request.headers.get("X-OpenWebUI-User-Name", "")
     owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
     owui_id     = raw_request.headers.get("X-OpenWebUI-User-Id", "")
-    logger.info(f"[AUTH] X-Forwarded-User: '{owui_user}' | X-Forwarded-Email: '{owui_email}'")
-    logger.info(f"[AUTH] X-OpenWebUI-User-Name: '{owui_user2}' | X-OpenWebUI-User-Email: '{owui_email2}' | Id: '{owui_id}'")
-    logger.info(f"[AUTH] Authorization: '{owui_token[:80]}...' " if len(owui_token) > 80 else f"[AUTH] Authorization: '{owui_token}'")
-    logger.info(f"[AUTH] request.user: '{request.user}'")
-    all_headers = dict(raw_request.headers)
-    logger.info(f"[HEADERS] {json.dumps({k: v for k, v in all_headers.items() if k.lower() != 'authorization'})}")
 
     user_query = ""
     for msg in reversed(request.messages):
