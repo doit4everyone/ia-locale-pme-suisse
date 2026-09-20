@@ -275,25 +275,51 @@ def resoudre_acl(
     fichiers_sans_chunks = []
     fichiers_sans_acl = []
 
+    # Phase 1 : lecture seule de toutes les ACL, aucune ecriture dans Qdrant.
+    # Le garde-fou est evalue sur la totalite des lectures, avant toute modification.
+    lectures = []  # (chemin_smb, source_name, autorises, interdits, illisible)
+
     for i, (chemin_smb, chemin_local) in enumerate(fichiers, 1):
-        # source_name doit correspondre exactement au champ "source" dans Qdrant,
-        # qui est le chemin relatif depuis le corpus (= depuis le point de montage).
-        # os.path.basename() ne fonctionnerait que pour les fichiers à la racine.
         source_name = os.path.relpath(chemin_local, mount_point).replace('\\', '/')
         print(f"  [{i}/{len(fichiers)}] {chemin_smb}")
-
-        # Lire les ACL
-        autorisés, interdits = lire_acl_fichier(share, chemin_smb)
-        if not autorisés and not interdits:
-            # ACL illisible : deny by default.
-            # On vide autorises dans Qdrant pour bloquer l'accès
-            # jusqu'à ce que les ACL soient lisibles au prochain passage.
-            # Un DENY conservé par défaut est plus sûr qu'un accès ouvert.
-            print(f"  → ACL illisible : autorises vidé (deny by default).")
+        autorises_f, interdits_f = lire_acl_fichier(share, chemin_smb)
+        illisible = not autorises_f and not interdits_f
+        if illisible:
+            print("  Aucune ACL lisible.")
             fichiers_sans_acl.append(chemin_smb)
-            col = get_collection_for_path(source_name)
-            if not dry_run:
-                mettre_a_jour_qdrant(qdrant, source_name, col, [], [], dry_run)
+        else:
+            print(f"  Autorises ({len(autorises_f)}) : {', '.join(autorises_f)}")
+            if interdits_f:
+                print(f"  Interdits ({len(interdits_f)}) : {', '.join(interdits_f)}")
+        lectures.append((chemin_smb, source_name, autorises_f, interdits_f, illisible))
+
+    # Garde-fou : evalue AVANT toute ecriture dans Qdrant.
+    # Si plus de 20% des fichiers sont illisibles, c'est une panne globale
+    # (svc-rag expire, DC injoignable, montage SMB tombe). Abandon sans modification.
+    if fichiers and len(fichiers_sans_acl) / len(fichiers) > 0.20:
+        pct = 100 * len(fichiers_sans_acl) // len(fichiers)
+        print(f"\n[GARDE-FOU] {len(fichiers_sans_acl)}/{len(fichiers)} fichiers en ACL illisible ({pct}% > seuil 20%).")
+        print("[GARDE-FOU] Abandon sans modification de Qdrant.")
+        print("[GARDE-FOU] Verifier : svc-rag actif, DC joignable, montage SMB present.")
+        rapport_data = {
+            "statut": "abandon_garde_fou",
+            "fichiers_examines": len(fichiers),
+            "fichiers_sans_acl": len(fichiers_sans_acl),
+            "message": "Plus de 20% de fichiers en ACL illisible, abandon sans modification"
+        }
+        if rapport_path:
+            with open(rapport_path, "w") as rf:
+                json.dump(rapport_data, rf, ensure_ascii=False, indent=2)
+        sys.exit(1)
+
+    # Phase 2 : ecriture dans Qdrant.
+    for chemin_smb, source_name, autorises_f, interdits_f, illisible in lectures:
+        col = get_collection_for_path(source_name)
+        if illisible:
+            # ACL illisible : deny by default.
+            # On vide autorises dans Qdrant pour bloquer l'acces jusqu'au
+            # prochain passage ou les ACL redeviennent lisibles.
+            mettre_a_jour_qdrant(qdrant, source_name, col, [], [], dry_run)
             rapport.append({
                 "fichier": chemin_smb,
                 "statut": "acl_illisible",
@@ -302,48 +328,42 @@ def resoudre_acl(
             })
             continue
 
-        print(f"  Autorisés ({len(autorisés)}) : {', '.join(autorisés)}")
-        if interdits:
-            print(f"  Interdits ({len(interdits)}) : {', '.join(interdits)}")
-
-        # Mettre à jour Qdrant
-        col = get_collection_for_path(source_name)
-        nb = mettre_a_jour_qdrant(qdrant, source_name, col, autorisés, interdits, dry_run)
+        nb = mettre_a_jour_qdrant(qdrant, source_name, col, autorises_f, interdits_f, dry_run)
         if nb == 0:
-            print(f"  → Aucun chunk trouvé dans Qdrant pour '{source_name}'")
+            print(f"  [{source_name}] Aucun chunk trouve dans Qdrant")
             fichiers_sans_chunks.append(source_name)
-            statut = "non_indexé"
+            statut = "non_indexe"
         else:
-            print(f"  → {nb} chunks mis à jour")
+            print(f"  [{source_name}] {nb} chunks mis a jour")
             total_chunks_mis_a_jour += nb
-            statut = "mis_à_jour"
+            statut = "mis_a_jour"
 
         rapport.append({
             "fichier": chemin_smb,
             "source_name": source_name,
             "statut": statut,
-            "autorises": autorisés,
-            "interdits": interdits,
+            "autorises": autorises_f,
+            "interdits": interdits_f,
             "chunks_mis_a_jour": nb
         })
 
-    # Résumé
+    # Resume
     print(f"\n{'='*60}")
-    print(f"RAPPORT ACL RESOLVER")
+    print("RAPPORT ACL RESOLVER")
     print(f"{'='*60}")
-    print(f"Fichiers traités        : {len(fichiers)}")
-    print(f"Chunks mis à jour       : {total_chunks_mis_a_jour}")
+    print(f"Fichiers traites        : {len(fichiers)}")
+    print(f"Chunks mis a jour       : {total_chunks_mis_a_jour}")
     print(f"Fichiers sans ACL       : {len(fichiers_sans_acl)}")
-    print(f"Fichiers non indexés    : {len(fichiers_sans_chunks)}")
+    print(f"Fichiers non indexes    : {len(fichiers_sans_chunks)}")
 
     if fichiers_sans_chunks:
-        print(f"\nFichiers présents sur le partage mais absents de Qdrant :")
+        print("\nFichiers présents sur le partage mais absents de Qdrant :")
         print("  (à indexer avec indexer.py)")
         for f in fichiers_sans_chunks:
             print(f"  {f}")
 
     if fichiers_sans_acl:
-        print(f"\nFichiers sans ACL lisible :")
+        print("\nFichiers sans ACL lisible :")
         for f in fichiers_sans_acl:
             print(f"  {f}")
 
@@ -353,7 +373,7 @@ def resoudre_acl(
     # Sans cette étape, les chunks orphelins restent interrogeables indéfiniment.
 
     print(f"\n{'='*60}")
-    print(f"NETTOYAGE DES CHUNKS ORPHELINS")
+    print("NETTOYAGE DES CHUNKS ORPHELINS")
     print(f"{'='*60}")
 
     # Construire la liste des source_names présents sur le partage
