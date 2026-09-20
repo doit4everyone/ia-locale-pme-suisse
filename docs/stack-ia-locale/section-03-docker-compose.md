@@ -115,9 +115,9 @@ CONTEXT_THRESHOLD=0.01
 # Score RRF minimum pour déclencher l'extension de contexte.
 # Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche
 # l'extension sur presque toutes les questions. Ne pas dépasser 0.05.
-MAX_CONTEXT_CHUNKS=12
+MAX_CONTEXT_CHUNKS=14
 # Nombre maximum de chunks par extension de contexte.
-# 12 validé en lab sur CPU. Augmenter à 15-20 une fois le GPU installé.
+# 14 validé en lab sur CPU. Augmenter à 15-20 une fois le GPU installé.
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8
@@ -209,7 +209,10 @@ services:
     image: qdrant/qdrant:latest
     container_name: qdrant
     ports:
-      - "6333:6333"
+      # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
+      # le binding 127.0.0.1 est la seule protection fiable contre un accès LAN
+      # non authentifié au corpus Qdrant (voir §9.1).
+      - "127.0.0.1:6333:6333"
     volumes:
       - ./qdrant_data:/qdrant/storage
     restart: unless-stopped
@@ -233,8 +236,9 @@ services:
   rag-api:
     build: ./api
     container_name: rag-api
-    ports:
-      - "8080:8080"
+    # Port 8080 non publié sur le LAN : joignable uniquement depuis le réseau
+    # Compose interne (open-webui via http://rag-api:8080, n8n idem).
+    # Empêche la falsification de l'en-tête X-OpenWebUI-User-Email depuis le LAN.
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}

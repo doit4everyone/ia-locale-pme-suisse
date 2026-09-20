@@ -47,26 +47,31 @@ sudo ufw allow 22/tcp
 
 # Services RAG : depuis les subnets internes uniquement
 # Adapter aux subnets de l'organisation
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 8080   # RAG API
+# Ports publiés sur le LAN
+# 8080 (RAG API) et 6333 (Qdrant) ne sont PAS listés ici :
+# ces ports sont liés à 127.0.0.1 dans docker-compose.yml (voir §3.4).
+# UFW ne protège pas contre Docker qui écrit ses propres règles iptables.
 sudo ufw allow from <SUBNET-SITE-1>/24 to any port 3001   # Open WebUI
 sudo ufw allow from <SUBNET-SITE-1>/24 to any port 5678   # n8n
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 6333   # Qdrant
 
 # Second subnet si nécessaire
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 8080
 sudo ufw allow from <SUBNET-SITE-2>/24 to any port 3001
 sudo ufw allow from <SUBNET-SITE-2>/24 to any port 5678
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 6333
 ```
 
-### §9.1.3 Réseau Docker interne
+### §9.1.3 Réseau Docker interne et contournement UFW
 
-> **Piège critique :** les conteneurs Docker communiquent via un réseau bridge interne (`172.18.0.0/16`), pas via le subnet physique. Sans les règles ci-dessous, Open WebUI ne peut pas joindre la RAG API même s'ils sont sur la même VM. Le mode de défaillance est silencieux : Open WebUI affiche "OpenAI: Network Problem" sans autre indication.
+> **Piège critique :** Docker écrit ses propres règles `iptables` pour les ports publiés, ce qui **contourne UFW**. Une règle UFW `deny` sur le port 6333 n'empêche pas Docker d'exposer Qdrant sur le LAN. La seule protection fiable est le binding sur `127.0.0.1` dans `docker-compose.yml`, comme documenté en §3.4.
+
+> **Conséquence dans cette stack :** les ports 6333 (Qdrant) et 8080 (RAG API) ne sont pas publiés sur le LAN. Les règles UFW ci-dessous pour ces ports sont donc superflues et ne sont pas ajoutées. Seul le port 3001 (Open WebUI) reste publié sur le LAN, c'est l'accès utilisateur légitime.
 
 ```bash
-# Réseau bridge Docker : communication inter-conteneurs via l'hôte
-sudo ufw allow from 172.18.0.0/16 to any port 8080
-sudo ufw allow from 172.18.0.0/16 to any port 6333
+# Réseau bridge Docker : communication inter-conteneurs
+# Uniquement nécessaire si des conteneurs joignent des services via l'IP hôte.
+# Dans cette stack, open-webui et n8n joignent rag-api par le réseau Compose
+# (http://rag-api:8080), pas via l'IP hôte. Cette règle est conservée
+# pour les éventuelles extensions futures.
+sudo ufw allow from 172.18.0.0/16 to any port 3001
 ```
 
 ### §9.1.4 Activation et vérification
@@ -82,12 +87,9 @@ sudo ufw status verbose
 Status: active
 To                         Action      From
 22/tcp                     ALLOW IN    Anywhere
-8080                       ALLOW IN    <SUBNET-SITE-1>/24
 3001                       ALLOW IN    <SUBNET-SITE-1>/24
 5678                       ALLOW IN    <SUBNET-SITE-1>/24
-6333                       ALLOW IN    <SUBNET-SITE-1>/24
-8080                       ALLOW IN    172.18.0.0/16
-6333                       ALLOW IN    172.18.0.0/16
+# 8080 et 6333 absents : liés à 127.0.0.1 dans docker-compose.yml
 ```
 
 ### §9.1.5 Durcissement SSH en production
@@ -236,7 +238,7 @@ Un verrou `asyncio.Lock` empêche deux synchronisations simultanées. Si une pas
 
 ### §9.3.4 Restriction réseau
 
-Le port 8080 est restreint aux subnets internes par UFW (§9.1). Ne jamais exposer ce port sur internet.
+Le port 8080 est lié à `127.0.0.1` dans `docker-compose.yml` (§3.4) et n'est pas accessible depuis le LAN. Ne jamais le publier sur internet.
 
 ---
 

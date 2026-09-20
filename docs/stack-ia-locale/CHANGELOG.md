@@ -4,6 +4,23 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.4.0] — Septembre 2026
+
+### Sécurité
+
+**Point 1 de l'audit : exposition LAN de Qdrant et de la RAG API (Docker bypass UFW)**
+
+- `docker-compose.yml` : Qdrant lié à `127.0.0.1:6333` au lieu de `0.0.0.0:6333`. Le corpus n'est plus accessible depuis le LAN sans passer par la RAG API.
+- `docker-compose.yml` : port 8080 (RAG API) supprimé de la section `ports`. La RAG API est joignable uniquement depuis le réseau Compose interne (`http://rag-api:8080`). L'en-tête `X-OpenWebUI-User-Email` ne peut plus être forgé depuis le LAN.
+- Open WebUI : URL de connexion OpenAI mise à jour de `http://<IP-VM>:8080/v1` vers `http://rag-api:8080/v1`.
+- n8n : URL du nœud `/admin/sync` déjà correcte (`http://rag-api:8080/admin/sync`).
+
+### Modifié
+- `section-03-docker-compose.md` : §3.4 mis à jour avec binding `127.0.0.1` et suppression du port 8080, note sur le contournement UFW par Docker.
+- `section-09-securite.md` : §9.1 mis à jour, règles UFW corrigées (8080 et 6333 retirés), note explicite sur le fait que Docker bypass UFW via iptables.
+
+---
+
 ## [2.3.0] — Septembre 2026
 
 ### Ajouté
@@ -48,7 +65,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 **Paramètres ajustés (validés en lab) :**
 - `TOP_K=20` : améliore le recall sur les gros fichiers .md.
 - `CONTEXT_THRESHOLD=0.01` : adapté à l'échelle des scores RRF ([0, 0.016] avec k=60).
-- `MAX_CONTEXT_CHUNKS=12` : validé en lab sur CPU (6 était insuffisant pour les documents denses).
+- `MAX_CONTEXT_CHUNKS=14` : validé en lab sur CPU (12 était insuffisant pour les documents denses).
 
 ### Modifié
 - `section-03-docker-compose.md` : nouvelles variables `.env` documentées, `requirements.txt` mis à jour avec `rank-bm25`.
