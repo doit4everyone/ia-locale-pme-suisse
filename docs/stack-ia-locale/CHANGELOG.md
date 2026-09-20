@@ -4,6 +4,22 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.6.0] — Septembre 2026
+
+### Ajouté
+
+**Chemin UNC dans les citations (`main.py`) :**
+- Nouvelle fonction `enrichir_citations()` : post-traitement côté API qui remplace
+  chaque citation `[nom.docx]` par `[nom.docx — `\\\\SERVEUR\\Partage\\Dossier\\`]`.
+- Le chemin UNC est injecté dans un bloc code inline Markdown : non interprété par
+  Open WebUI, copiable en un clic dans le presse-papiers.
+- L'utilisateur colle le chemin dans la barre d'adresse de l'Explorateur Windows
+  pour ouvrir directement le dossier source du document.
+- Opère côté API après la génération, sans modifier le prompt ni dépendre du LLM.
+- Variable `SMB_SHARE` déjà présente dans le conteneur (transmise via `docker-compose.yml`).
+
+---
+
 ## [2.5.0] — Septembre 2026
 
 ### Sécurité
