@@ -4,6 +4,24 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.5.0] — Septembre 2026
+
+### Sécurité
+
+**Point 2 : `/query` laisse passer sans filtre ACL**
+- `main.py` : `/query` refuse avec 403 si `user_id` ne contient pas `@`.
+- `main.py` : `/query` refuse avec 403 si la résolution LDAP échoue ou retourne zéro groupe.
+- `main.py` : `skip_groundedness` réservé à `ADMIN_TOKEN`. Un appelant avec `API_TOKEN` ne peut plus court-circuiter le groundedness check.
+
+**Point 4 : token et données personnelles en clair dans les logs Docker**
+- `main.py` : suppression des blocs `logger.info` de debug (en-têtes, token `Authorization`, noms, emails, `request.user`). Ces données personnelles étaient hors politique de rétention nLPD.
+
+**Point 13 : `interdits[]` jamais vidé, ACL illisibles restent actives**
+- `acl_resolver.py` : `interdits` toujours écrit dans le payload Qdrant, même vide. Un DENY retiré sur le file server est maintenant écrasé au prochain passage du résolveur.
+- `acl_resolver.py` : fichier avec ACL illisible → `autorises` vidé dans Qdrant (deny by default). Avant cette correction, le fichier conservait ses anciennes ACL indéfiniment.
+
+---
+
 ## [2.4.0] — Septembre 2026
 
 ### Sécurité

@@ -526,6 +526,10 @@ La fonction `check_access()` dans `auth.py` implémente la logique NTFS : accès
 
 > **Chemin DENY validé en lab, septembre 2026.** Voir §9.4.5 pour les résultats complets. En résumé : `test-client`, membre de `GRP-Clients` (dans `autorises[]`) mais visé par un ACE de refus nominatif (dans `interdits[]`), ne voit pas `test-deny-explicite.docx`, alors qu'un compte sans DENY dans le même groupe y accède normalement. Le DENY nominatif l'emporte sur l'autorisation par groupe, y compris sur le chemin d'extension de contexte.
 
+> **Comportement sur les cas limites (corrigé en v2.5.0) :**
+> - `interdits` est toujours écrit dans Qdrant, même vide (`[]`). Si un DENY est retiré sur le file server, il sera écrasé au prochain passage du résolveur ACL.
+> - Si les ACL d'un fichier sont illisibles (panne SMB, droits insuffisants), `autorises` est vidé dans Qdrant : le fichier devient invisible pour tous les utilisateurs filtrés jusqu'au prochain passage où les ACL redeviennent lisibles (deny by default).
+
 ---
 
 ## §5.8 Validation du cloisonnement

@@ -240,6 +240,16 @@ Un verrou `asyncio.Lock` empêche deux synchronisations simultanées. Si une pas
 
 Le port 8080 est lié à `127.0.0.1` dans `docker-compose.yml` (§3.4) et n'est pas accessible depuis le LAN. Ne jamais le publier sur internet.
 
+### Comportement des endpoints selon le token
+
+| Endpoint | Token requis | Filtre ACL | Comportement si groupes vides |
+|---|---|---|---|
+| `/v1/chat/completions` | `API_TOKEN` | Oui, via LDAP depuis en-tête Open WebUI | 403 Forbidden |
+| `/query` | `API_TOKEN` | Oui, via LDAP depuis `user_id` fourni par le client | 403 Forbidden |
+| `/admin/sync` | `ADMIN_TOKEN` | N/A | N/A |
+
+> **`/query` est un endpoint machine à machine.** L'identité est déclarée par l'appelant, pas vérifiée via Open WebUI. À n'utiliser que depuis des systèmes internes de confiance. `skip_groundedness` est réservé à `ADMIN_TOKEN` : un appelant avec `API_TOKEN` ne peut pas court-circuiter le groundedness check.
+
 ---
 
 ## §9.4 Journalisation nLPD
