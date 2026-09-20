@@ -4,7 +4,10 @@ services:
     image: qdrant/qdrant:latest
     container_name: qdrant
     ports:
-      - "6333:6333"
+      # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
+      # le binding 127.0.0.1 est la seule protection fiable contre
+      # un accès LAN non authentifié au corpus Qdrant.
+      - "127.0.0.1:6333:6333"
     volumes:
       - ./qdrant_data:/qdrant/storage
     restart: unless-stopped
@@ -28,8 +31,9 @@ services:
   rag-api:
     build: ./api
     container_name: rag-api
-    ports:
-      - "8080:8080"
+    # Port 8080 non publié sur le LAN : joignable uniquement depuis le réseau
+    # Compose interne (open-webui via http://rag-api:8080, n8n idem).
+    # L'en-tête X-OpenWebUI-User-Email ne peut plus être forgé depuis le LAN.
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
@@ -82,7 +86,7 @@ services:
       # Les rapports JSON sont écrits dans /var/log/rag (monté en écriture).
       - /root/rag-pipeline:/rag-pipeline:ro
       # Partage SMB monté sur l'hôte (accès aux fichiers pour l'indexeur)
-      - /mnt/fileservice-root:/mnt/fileservice-root:ro
+      - /mnt/corpus-root:/mnt/corpus-root:ro
       # Certificat CA du contrôleur de domaine pour la validation TLS LDAP
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
       # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
