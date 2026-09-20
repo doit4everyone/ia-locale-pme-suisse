@@ -381,14 +381,58 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
         return []
 
 
+def build_source_link(source: str) -> str:
+    """Construit un lien file:// cliquable vers le fichier source sur le partage SMB.
+    Exemple : CLIENTS/Baumont/contrat.docx
+           → file:////<NOM-FILESERVER>/PartageDocuments/CLIENTS/Baumont/contrat.docx
+    Cliquable depuis Windows (Edge, Chrome, Explorateur de fichiers).
+    Retourne une chaîne vide si SMB_SHARE n'est pas configuré.
+    """
+    if not SMB_SHARE:
+        return ""
+    base = "file://" + SMB_SHARE.rstrip("/")
+    path = source.replace("\\", "/").lstrip("/")
+    return f"{base}/{path}"
+
+
+def enrichir_citations(answer: str, chunks: list[dict]) -> str:
+    """Post-traitement : enrichit les citations [nom.docx] avec le chemin UNC
+    du dossier parent sur le file server. Opère côté API, sans dépendre du LLM.
+    Exemple : [contrat.docx] → [contrat.docx — \\\\SERVEUR\\Partage\\Dossier\\]
+    """
+    if not SMB_SHARE or not chunks:
+        return answer
+    source_map: dict[str, str] = {}
+    for chunk in chunks:
+        fname = chunk["source"].split("/")[-1]
+        if fname not in source_map:
+            unc_base = SMB_SHARE.replace("/", "\\")
+            parent = "/".join(chunk["source"].split("/")[:-1])
+            unc_folder = unc_base + "\\" + parent.replace("/", "\\")
+            source_map[fname] = unc_folder
+    import re
+    def _replace(m):
+        fname = m.group(1)
+        if fname in source_map:
+            return f"[{fname} — `{source_map[fname]}\\`]"
+        return m.group(0)
+    return re.sub(r'\[([^\[\]]+\.(?:docx|pdf|pptx|txt|md))\]', _replace, answer)
+
+
 def build_context(chunks: list[dict]) -> str:
-    """Construit le contexte à injecter dans le prompt."""
+    """Construit le contexte à injecter dans le prompt.
+    Chaque chunk est précédé d'un en-tête avec le nom du fichier et,
+    si SMB_SHARE est configuré, un lien cliquable vers le fichier source.
+    """
     if not chunks:
         return "Aucun document disponible."
     parts = []
     for i, chunk in enumerate(chunks, 1):
         filename = chunk['source'].split('/')[-1]
-        parts.append(f"→ {filename}\n{chunk['text']}")
+        # Chemin UNC du dossier parent : permet à l'utilisateur de copier-coller
+        # le chemin dans l'Explorateur Windows pour ouvrir directement le dossier.
+        header = f"→ {filename}"
+        parts.append(f"{header}\n{chunk['text']}")
     return "\n\n".join(parts)
 
 
@@ -608,6 +652,7 @@ async def query(
     chunks = await search_qdrant(request.query, user_groups=user_groups)
     context = build_context(chunks)
     answer = await generate_answer(request.query, context)
+    answer = enrichir_citations(answer, chunks)
 
     # skip_groundedness réservé à ADMIN_TOKEN uniquement.
     skip = request.skip_groundedness and credentials.credentials == ADMIN_TOKEN
@@ -725,6 +770,7 @@ async def openai_chat_completions(
     chunks = await search_qdrant(user_query, user_groups=user_groups)
     context = build_context(chunks)
     answer = await generate_answer(user_query, context)
+    answer = enrichir_citations(answer, chunks)
     gc_result = await groundedness_check(answer, chunks)
     log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
 
