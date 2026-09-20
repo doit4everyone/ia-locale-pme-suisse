@@ -322,7 +322,9 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             # plutôt qu'un scroll aléatoire. Garantit que le chunk pertinent
             # reste dans le contexte et que les chunks sont dans l'ordre du document.
             if best_chunk_index is not None:
-                radius = MAX_CONTEXT_CHUNKS // 2
+                # radius calculé pour que la fenêtre tienne dans MAX_CONTEXT_CHUNKS.
+                # (MAX_CONTEXT_CHUNKS - 1) // 2 garantit idx_max - idx_min + 1 <= MAX_CONTEXT_CHUNKS.
+                radius = (MAX_CONTEXT_CHUNKS - 1) // 2
                 idx_min = max(0, best_chunk_index - radius)
                 idx_max = best_chunk_index + radius
                 scroll_filter_conditions = [
@@ -330,7 +332,9 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                     FieldCondition(key="chunk_index", range={"gte": idx_min, "lte": idx_max}),
                 ]
             else:
-                # Fallback : scroll sans chunk_index (anciens chunks sans ce champ)
+                # Fallback : scroll sans chunk_index (anciens chunks sans ce champ).
+                # idx_min et idx_max initialisés à None pour le log et le limit ci-dessous.
+                idx_min = idx_max = None
                 scroll_filter_conditions = [
                     FieldCondition(key="source", match=MatchValue(value=best_source))
                 ]
@@ -342,7 +346,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             source_points = qdrant.scroll(
                 collection_name=best_collection,
                 scroll_filter=Filter(must=scroll_filter_conditions),
-                limit=MAX_CONTEXT_CHUNKS,
+                limit=(idx_max - idx_min + 1) if idx_min is not None else MAX_CONTEXT_CHUNKS,
                 with_payload=True
             )[0]
             # Trier par chunk_index pour respecter l'ordre du document
@@ -381,20 +385,6 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
         return []
 
 
-def build_source_link(source: str) -> str:
-    """Construit un lien file:// cliquable vers le fichier source sur le partage SMB.
-    Exemple : CLIENTS/Baumont/contrat.docx
-           → file:////<NOM-FILESERVER>/PartageDocuments/CLIENTS/Baumont/contrat.docx
-    Cliquable depuis Windows (Edge, Chrome, Explorateur de fichiers).
-    Retourne une chaîne vide si SMB_SHARE n'est pas configuré.
-    """
-    if not SMB_SHARE:
-        return ""
-    base = "file://" + SMB_SHARE.rstrip("/")
-    path = source.replace("\\", "/").lstrip("/")
-    return f"{base}/{path}"
-
-
 def enrichir_citations(answer: str, chunks: list[dict]) -> str:
     """Post-traitement : enrichit les citations [nom.docx] avec le chemin UNC
     du dossier parent sur le file server. Opère côté API, sans dépendre du LLM.
@@ -414,23 +404,22 @@ def enrichir_citations(answer: str, chunks: list[dict]) -> str:
     def _replace(m):
         fname = m.group(1)
         if fname in source_map:
-            return f"[{fname} — `{source_map[fname]}\\`]"
+            return f"[{fname} : `{source_map[fname]}\\`]"
         return m.group(0)
     return re.sub(r'\[([^\[\]]+\.(?:docx|pdf|pptx|txt|md))\]', _replace, answer)
 
 
 def build_context(chunks: list[dict]) -> str:
     """Construit le contexte à injecter dans le prompt.
-    Chaque chunk est précédé d'un en-tête avec le nom du fichier et,
-    si SMB_SHARE est configuré, un lien cliquable vers le fichier source.
+    Chaque chunk est précédé d'un en-tête "→ nom_fichier" que le modèle
+    doit reproduire dans ses citations. Le chemin UNC est ajouté en
+    post-traitement par enrichir_citations(), après les contrôles.
     """
     if not chunks:
         return "Aucun document disponible."
     parts = []
     for i, chunk in enumerate(chunks, 1):
         filename = chunk['source'].split('/')[-1]
-        # Chemin UNC du dossier parent : permet à l'utilisateur de copier-coller
-        # le chemin dans l'Explorateur Windows pour ouvrir directement le dossier.
         header = f"→ {filename}"
         parts.append(f"{header}\n{chunk['text']}")
     return "\n\n".join(parts)
@@ -613,7 +602,7 @@ async def stats():
         count_doc = 0
         if DOCUMENTATION_COLLECTION in col_names:
             count_doc = qdrant.count(DOCUMENTATION_COLLECTION).count
-    except Exception as e:
+    except Exception:
         col_names = []
         count = 0
         count_doc = 0
@@ -652,7 +641,6 @@ async def query(
     chunks = await search_qdrant(request.query, user_groups=user_groups)
     context = build_context(chunks)
     answer = await generate_answer(request.query, context)
-    answer = enrichir_citations(answer, chunks)
 
     # skip_groundedness réservé à ADMIN_TOKEN uniquement.
     skip = request.skip_groundedness and credentials.credentials == ADMIN_TOKEN
@@ -673,6 +661,9 @@ async def query(
             }
         )
 
+    # enrichir_citations après tous les contrôles : le juge et verifier_citations
+    # voient la citation brute [nom.docx], pas la citation enrichie.
+    answer = enrichir_citations(answer, chunks)
     return QueryResponse(
         answer=answer,
         sources=[{"source": c["source"], "score": round(c["score"], 3)} for c in chunks],
@@ -739,10 +730,8 @@ async def openai_chat_completions(
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
-    owui_user  = raw_request.headers.get("X-Forwarded-User", "")
-    owui_email = raw_request.headers.get("X-Forwarded-Email", "")
-    owui_token = raw_request.headers.get("Authorization", "")
-    owui_user2  = raw_request.headers.get("X-OpenWebUI-User-Name", "")
+    # owui_email2 : identité transmise par Open WebUI, utilisée pour la résolution LDAP.
+    # owui_id : conservé pour une future corrélation dans le journal nLPD.
     owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
     owui_id     = raw_request.headers.get("X-OpenWebUI-User-Id", "")
 
@@ -755,7 +744,6 @@ async def openai_chat_completions(
     if not user_query:
         raise HTTPException(status_code=400, detail="Aucun message utilisateur trouvé")
 
-    owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
     if not owui_email2:
         logger.warning("[AUTH] /v1 : aucun email utilisateur, accès refusé")
         raise HTTPException(status_code=403, detail="Identité utilisateur manquante")
@@ -770,10 +758,11 @@ async def openai_chat_completions(
     chunks = await search_qdrant(user_query, user_groups=user_groups)
     context = build_context(chunks)
     answer = await generate_answer(user_query, context)
-    answer = enrichir_citations(answer, chunks)
     gc_result = await groundedness_check(answer, chunks)
     log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
 
+    # enrichir_citations après tous les contrôles (même logique que /query).
+    answer = enrichir_citations(answer, chunks)
     return OpenAIChatResponse(
         choices=[OpenAIChoice(
             message=OpenAIMessage(role="assistant", content=answer)
