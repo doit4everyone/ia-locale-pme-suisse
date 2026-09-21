@@ -160,7 +160,7 @@ sudo chown root:root /etc/smbcredentials/svc-rag
 
 # Créer le point de montage et monter
 sudo mkdir -p /mnt/corpus-root
-sudo mount -t cifs //<NOM-FILESERVER>/PartageDocuments /mnt/corpus-root \
+sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
     -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000
 
 # Vérifier
@@ -173,7 +173,7 @@ Rendre le montage persistant :
 sudo tee -a /etc/fstab << 'FSTAB'
 
 # Partage SMB corpus RAG (monté par svc-rag)
-//<NOM-FILESERVER>/PartageDocuments /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
 FSTAB
 
 # Tester sans rebooter
@@ -252,7 +252,7 @@ LDAP_DOMAIN=VOTREDOMAINE
 LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 
 # SMB : partage à indexer
-SMB_SHARE=//NOM-FILESERVER/PartageDocuments
+SMB_SHARE=//NOM-FILESERVER/FileService
 SMB_MOUNT=/mnt/corpus-root
 SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe-svc-rag>
@@ -340,7 +340,7 @@ ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} \
 Tester la connexion SMB :
 
 ```bash
-smbclient //<NOM-FILESERVER>/PartageDocuments \
+smbclient //<NOM-FILESERVER>/FileService \
     -U svc-rag%<mot-de-passe> \
     -c "ls" 2>&1 | head -10
 # Attendu : liste des dossiers racines du partage
@@ -374,7 +374,7 @@ curl -s http://localhost:6333/collections/documentation | \
     print('documentation :', r['result']['points_count'])"
 ```
 
-> **Quarantaine :** les fichiers problématiques (PDF scanné sans OCR, fichier corrompu) sont listés dans le rapport JSON sous `quarantine`. Ils ne bloquent pas l'indexation des autres fichiers.
+> **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable par la cascade de détection est mis en quarantaine et n'est pas indexé. Il apparaît dans le rapport JSON avec le statut `quarantaine`. Un PDF scanné sans couche texte ou un fichier corrompu ne produit aucun chunk et prend le statut `vide`. Un document court est indexé en un seul chunk.
 
 ---
 
@@ -382,7 +382,7 @@ curl -s http://localhost:6333/collections/documentation | \
 
 ```bash
 python acl_resolver.py \
-    --share //<NOM-FILESERVER>/PartageDocuments \
+    --share //<NOM-FILESERVER>/FileService \
     --mount /mnt/corpus-root \
     --rapport /var/log/rag/rapport_acl_initial.json
 
@@ -419,7 +419,10 @@ Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau.
 2. Activer LDAP
 3. Server Address : `<NOM-DC>.votre-domaine.ch`
 4. Port : `636`, TLS activé
-5. Attribute : `sAMAccountName`
+5. Attribute : `userPrincipalName`
+
+> **`userPrincipalName` est obligatoire**, pas `sAMAccountName`. Open WebUI transmet l'email de l'utilisateur dans `X-OpenWebUI-User-Email`. `auth.py` cherche cet email dans le champ `userPrincipalName` de l'AD. Sans cet attribut, la résolution LDAP échoue et tout le monde reçoit un 403.
+
 6. Base DN : `DC=votre-domaine,DC=ch`
 7. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`
 8. Bind Password : mot de passe de `svc-rag`

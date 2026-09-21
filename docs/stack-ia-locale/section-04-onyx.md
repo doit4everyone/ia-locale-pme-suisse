@@ -67,11 +67,14 @@ Onyx est accessible sur `http://<IP-VM>:3000`.
 
 ### §4.1.2 Optimisation mémoire OpenSearch
 
-OpenSearch consomme 2 Go de RAM par défaut. Limiter à 512 Mo pour un lab :
+OpenSearch consomme 2 Go de RAM par défaut. Limiter à 512 Mo pour un lab.
 
-```bash
-# Dans .env
-OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+> **Note :** la variable `OPENSEARCH_JAVA_OPTS` dans `.env` n'est pas lue par le conteneur OpenSearch d'Onyx. Le heap doit être codé en dur dans `docker-compose.dev.yml`, dans la section `environment` du service `index` :
+
+```yaml
+  index:
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
 ```
 
 ### §4.1.3 Validation du backend
@@ -140,7 +143,7 @@ Dans **Settings → Admin → Authentication → LDAP** :
 | Hôte | `<NOM-DC>.domaine.ch` | Nom DNS, pas l'IP |
 | Port | `636` | LDAPS obligatoire |
 | TLS | Activé | |
-| Validate Certificate | Désactivé | **Lab uniquement.** En production, activer avec le vrai certificat CA du DC (§9.3) |
+| Validate Certificate | Désactivé | **Lab uniquement.** En production, activer avec le vrai certificat CA du DC (§9.2) |
 | DN de l'application | `CN=svc-rag,...` | |
 | Mot de passe DN | mot de passe svc-rag | |
 | Attribut email | `userPrincipalName` | `mail` souvent non renseigné dans l'AD |

@@ -127,7 +127,7 @@ Dans `/root/rag-stack/.env`, ajouter :
 ADMIN_TOKEN=<token-admin-fort>
 SYNC_SCRIPTS_DIR=/rag-pipeline
 SMB_SHARE=//<NOM-FILESERVER>/FileService
-SMB_MOUNT=/mnt/fileservice-root
+SMB_MOUNT=/mnt/corpus-root
 SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe-svc-rag>
 SMB_DOMAIN=DOMAINE
@@ -177,7 +177,7 @@ En fonctionnement normal, le pipeline se termine silencieusement sans envoyer d'
 **Email d'erreur :**
 
 ```
-RAPPORT DE SYNCHRONISATION RAG — ERREUR
+RAPPORT DE SYNCHRONISATION RAG : ERREUR
 Horodatage : 11.09.2026 10:08:48
 
 Erreurs détectées :
@@ -193,7 +193,7 @@ Erreurs détectées :
 **Email de quarantaine :**
 
 ```
-RAPPORT DE SYNCHRONISATION RAG — QUARANTAINE
+RAPPORT DE SYNCHRONISATION RAG : QUARANTAINE
 Horodatage : 11.09.2026 10:08:48
 Synchronisation : succès
 
@@ -267,7 +267,7 @@ Pour éviter ce problème, définir `TZ=Europe/Zurich` dans les variables d'envi
 
 ### §7.3.4 Validation en lab
 
-Email reçu avec la procédure complète en 7 étapes. Sujet : `[RAG Stack] Rappel : rotation du mot de passe svc-rag — septembre 2026`.
+Email reçu avec la procédure complète en 7 étapes. Sujet : `[RAG Stack] Rappel : rotation du mot de passe svc-rag : septembre 2026`.
 
 ---
 
@@ -323,7 +323,7 @@ Ce pipeline surveille un dossier de réception de factures, extrait les données
 ### §7.5.1 Architecture du pipeline
 
 ```
-Watch Folder → /mnt/fileservice-root/FACTURES/entrant (polling 5 min)
+Watch Folder → /mnt/corpus-root/FACTURES/entrant (polling 5 min)
     ↓
 HTTP Request → POST vLLM /v1/chat/completions
     Model: Qwen2-VL-7B (multimodal)

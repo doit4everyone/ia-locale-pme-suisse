@@ -81,4 +81,27 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 
 ---
 
+## Corrections documentaires v2.11.0 (septembre 2026)
+
+| Section | Correction |
+|---|---|
+| §0 étape 10 | Note de quarantaine corrigée : statut `quarantaine` vs `vide`, PDF scanné → aucun chunk |
+| §0 étape 12 | `userPrincipalName` obligatoire (pas `sAMAccountName`) documenté |
+| §0 | `FileService` aligné (au lieu de `PartageDocuments`) |
+| §3.7 | Commande `localhost:8080` → `docker compose exec n8n wget` |
+| §3 / §4 / §5 | Renvois `§9.3` → `§9.2` (certificat CA du DC) |
+| §4.1.2 | Heap OpenSearch codé en dur dans le Compose, pas dans `.env` |
+| §4.2.4 | Rôle par défaut `en attente` (pas `utilisateur`), cohérent avec §4.2.4 |
+| §5 l.222 | `EXCLUDE_PATTERNS` → `EXCLUDE_DIR_PATTERNS` |
+| §5.6.3 | Rôle par défaut `en attente` documenté |
+| §5.9 | `PartageDocuments` → `FileService` + quarantaine corrigée |
+| §7 | 3 tirets cadratins retirés (l.180, l.196, l.270) |
+| §9.4.1 | `"verification": "effectuee"` ajouté à l'exemple de log. Note élargie aux contrôles déterministes |
+| §9.5.2 | Comportement svc-rag désactivé corrigé : garde-fou, bind LDAP, fichiers inchangés |
+| §9.6.1 | Limites de la neutralisation documentées, test de validation nuancé |
+| §9.6.3 | Quarantaine corrigée, dernière phrase nuancée |
+| §9.6 | `§9.5.1` commande `localhost:8080` corrigée |
+
+---
+
 *Dernière mise à jour : septembre 2026.*

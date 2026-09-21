@@ -209,19 +209,22 @@ sudo chown root:root /etc/smbcredentials/svc-rag
 ### §5.3.3 Monter le partage racine
 
 ```bash
-sudo mkdir -p /mnt/fileservice-root
+sudo mkdir -p /mnt/corpus-root
 
-sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/fileservice-root \
+sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
     -o credentials=/etc/smbcredentials/svc-rag,uid=1000,gid=1000
 
 # Vérifier
-ls /mnt/fileservice-root/
+ls /mnt/corpus-root/
 # doit afficher : CLIENTS  COMPTABILITE  DIRECTION  RH  SERVICE INFO  ...
 # Le répertoire DfsrPrivate est un répertoire système de réplication DFS,
 # ainsi que System Volume Information et $RECYCLE.BIN.
-# Ces répertoires sont dans EXCLUDE_PATTERNS d'indexer.py et ne sont pas indexés.
+# Ces répertoires sont dans EXCLUDE_DIR_PATTERNS d'indexer.py et ne sont pas indexés.
 # Formats indexés : .docx, .pdf, .pptx, .txt, .md
-# Les PDF scannés sans couche texte produisent un avertissement et tombent en quarantaine.
+# Un fichier dont l'organisation propriétaire n'est pas identifiable est mis en quarantaine
+# (statut "quarantaine" dans le rapport JSON).
+# Un PDF scanné sans couche texte ou un fichier corrompu ne produit aucun chunk
+# (statut "vide"). Un document court est indexé en un seul chunk.
 # Les tables et SmartArt PowerPoint ne sont pas extraits.
 ```
 
@@ -231,7 +234,7 @@ Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab`
 sudo tee -a /etc/fstab << 'FSTAB'
 
 # Partage SMB FileService (corpus RAG, monté par svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/fileservice-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
 FSTAB
 ```
 
@@ -242,12 +245,12 @@ Tester sans rebooter :
 ```bash
 sudo mount -a
 mount | grep fileservice
-ls /mnt/fileservice-root | head -5
+ls /mnt/corpus-root | head -5
 ```
 
 > **Rotation du mot de passe :** le fichier `/etc/smbcredentials/svc-rag` doit être mis à jour en même temps que `.env` lors de la rotation (§9.5.1). Si le fichier contient l'ancien mot de passe, le montage tombe au prochain reboot sans message d'erreur explicite.
 
-> **Pourquoi le partage racine ?** L'indexeur et le résolveur d'ACL doivent partager la même racine pour que les chemins relatifs soient identiques dans Qdrant. Si l'indexeur tourne depuis `/mnt/fileservice-root` et stocke `CLIENTS/ClientA/contrat.docx`, le résolveur doit calculer ce chemin depuis la même racine.
+> **Pourquoi le partage racine ?** L'indexeur et le résolveur d'ACL doivent partager la même racine pour que les chemins relatifs soient identiques dans Qdrant. Si l'indexeur tourne depuis `/mnt/corpus-root` et stocke `CLIENTS/ClientA/contrat.docx`, le résolveur doit calculer ce chemin depuis la même racine.
 
 ---
 
@@ -307,7 +310,7 @@ Toujours tester en dry-run avant d'écrire dans Qdrant.
 ```bash
 python acl_resolver.py \
     --share //<NOM-FILESERVER>/FileService \
-    --mount /mnt/fileservice-root \
+    --mount /mnt/corpus-root \
     --dry-run
 ```
 
@@ -326,7 +329,7 @@ Autorises (3) : DOMAINE\Administrateur, DOMAINE\Admins du domaine, DOMAINE\GRP-C
 ```bash
 python acl_resolver.py \
     --share //<NOM-FILESERVER>/FileService \
-    --mount /mnt/fileservice-root
+    --mount /mnt/corpus-root
 ```
 
 ### §5.4.5 Vérifier le payload Qdrant
@@ -488,7 +491,7 @@ Dans l'interface admin Open WebUI, naviguer vers **Settings → Admin → Authen
 
 Dans **Settings → Admin → Authentication → User Access** :
 
-- **Rôle utilisateur par défaut :** `utilisateur` (pas `en attente`). Sans ce réglage, les nouveaux comptes LDAP sont bloqués en attente d'activation manuelle.
+- **Rôle utilisateur par défaut :** `en attente` (pas `utilisateur`). Conforme à §4.2.4 : chaque nouveau compte LDAP est examiné par un administrateur avant d'accéder aux documents. Un compte activé reçoit ensuite le rôle `utilisateur`.
 
 Dans **Settings → Admin → Models** :
 
@@ -631,7 +634,7 @@ Le routage se fait automatiquement à l'indexation selon le chemin relatif du fi
 > **Ces règles sont structurelles.** Leur non-respect produit un routage silencieusement incorrect sans message d'erreur : des documents confidentiels peuvent se retrouver dans `documentation` sans cloisonnement ACL effectif.
 
 **Règle 1 : dossiers de documentation uniquement à la racine du partage.**
-Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\PartageDocuments`. Jamais dans un sous-dossier. Si `CLIENTS\DOIT4EVERYONE\` existe, ses fichiers partent en `documentation` sans cloisonnement ACL.
+Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\FileService`. Jamais dans un sous-dossier. Si `CLIENTS\DOIT4EVERYONE\` existe, ses fichiers partent en `documentation` sans cloisonnement ACL.
 
 **Règle 2 : droits AD sur les dossiers racine.**
 Seul un administrateur peut créer des dossiers à la racine du partage.
@@ -643,8 +646,11 @@ Seul un administrateur peut créer des dossiers à la racine du partage.
 docker compose build --no-cache rag-api && docker compose up -d rag-api
 cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
-python indexer.py --corpus /mnt/fileservice-root --reset
-curl -X POST http://localhost:8080/admin/sync -H "Authorization: Bearer <ADMIN_TOKEN>"
+python indexer.py --corpus /mnt/corpus-root --reset
+# Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
+docker compose exec n8n wget -qO- \
+  --header="Authorization: Bearer <ADMIN_TOKEN>" \
+  http://rag-api:8080/admin/sync
 ```
 
 **Règle 4 : vérifier les deux compteurs après chaque réindexation.**

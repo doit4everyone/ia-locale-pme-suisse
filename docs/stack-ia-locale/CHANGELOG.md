@@ -4,7 +4,41 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.10.0] — Septembre 2026
+## [2.11.0] : Septembre 2026
+
+### Sécurité
+
+**`main.py` : A1 neutralisation des délimiteurs dans `build_context`**
+- `neutraliser_delimiteurs()` : neutralise `[FIN DES DONNÉES]` et variantes (accents, espaces, sans accent) en les remplaçant par des parenthèses. Remplace `→` en début de ligne par `->` pour empêcher les en-têtes de source factices.
+- `_BALISE` compilé au niveau du module pour la performance.
+- `import re` ajouté au niveau du module, requis par `_BALISE` (l'ancienne version importait `re` localement dans chaque fonction).
+
+**Limite documentée :** la neutralisation ne protège pas contre les instructions en texte libre. Protection renforcée prévue après installation du GPU (modèle Qwen3 30B+).
+
+**`main.py` : A2 ordre des contrôles dans `groundedness_check`**
+- Le refus standard est testé avant l'absence de chunks. Les refus légitimes ne polluent plus le journal avec `ancree: false`.
+
+**`main.py` : A3 validation stricte du verdict du juge**
+- `result.get("ancree") is not True` : une chaîne `"false"` ou une clé absente est maintenant traitée comme `False`.
+
+**`acl_resolver.py` : A4 exclusion des répertoires système**
+- `EXCLUDE_DIR_PATTERNS` : `DfsrPrivate`, `System Volume Information`, `$RECYCLE.BIN` exclus par égalité insensible à la casse. Plus de faux positifs dans le garde-fou 20%.
+
+### Documentation
+
+- Point de montage `/mnt/corpus-root` et nom de partage `FileService` alignés dans `section-00`, `section-03`, `section-05`, `section-07`, `section-09`.
+- Note de quarantaine corrigée dans §0, §5 et §9.6.3 : distinction entre statut `quarantaine` (organisation non identifiable) et statut `vide` (PDF scanné ou corrompu).
+- §5.6.3 : rôle par défaut `en attente` (pas `utilisateur`), cohérent avec §4.2.4.
+- Renvois `§9.3` corrigés en `§9.2` dans §3.4 et §3.5 (certificat CA du DC).
+- §5 l.222 : `EXCLUDE_PATTERNS` corrigé en `EXCLUDE_DIR_PATTERNS`.
+- `section-00` §0 étape 12 : `userPrincipalName` obligatoire (pas `sAMAccountName`) dans la configuration LDAP Open WebUI, avec note explicative.
+- `section-09` §9.4.1 : `"verification": "effectuee"` ajouté à l'exemple de log. Note sur les cas où `non_effectuee` apparaît.
+- `section-09` §9.5.2 : comportement corrigé sur svc-rag désactivé (garde-fou, bind LDAP, fichiers inchangés).
+- `section-09` §9.6.1 : limites de la neutralisation documentées.
+
+---
+
+## [2.10.0] : Septembre 2026
 
 ### Documentation : corrections et mises à jour complètes
 
@@ -28,7 +62,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.9.0] — Septembre 2026
+## [2.9.0] : Septembre 2026
 
 ### Sécurité
 
@@ -45,7 +79,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.8.0] — Septembre 2026
+## [2.8.0] : Septembre 2026
 
 ### Nettoyage
 
@@ -61,7 +95,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.7.0] — Septembre 2026
+## [2.7.0] : Septembre 2026
 
 ### Corrigé
 
@@ -79,13 +113,13 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.6.0] — Septembre 2026
+## [2.6.0] : Septembre 2026
 
 ### Ajouté
 
 **Chemin UNC dans les citations (`main.py`) :**
 - Nouvelle fonction `enrichir_citations()` : post-traitement côté API qui remplace
-  chaque citation `[nom.docx]` par `[nom.docx — `\\\\SERVEUR\\Partage\\Dossier\\`]`.
+  chaque citation `[nom.docx]` par `[nom.docx : `\\\\SERVEUR\\Partage\\Dossier\\`]`.
 - Le chemin UNC est injecté dans un bloc code inline Markdown : non interprété par
   Open WebUI, copiable en un clic dans le presse-papiers.
 - L'utilisateur colle le chemin dans la barre d'adresse de l'Explorateur Windows
@@ -95,7 +129,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.5.0] — Septembre 2026
+## [2.5.0] : Septembre 2026
 
 ### Sécurité
 
@@ -113,7 +147,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.4.0] — Septembre 2026
+## [2.4.0] : Septembre 2026
 
 ### Sécurité
 
@@ -130,7 +164,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.3.0] — Septembre 2026
+## [2.3.0] : Septembre 2026
 
 ### Ajouté
 
@@ -156,7 +190,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.2.0] — Septembre 2026
+## [2.2.0] : Septembre 2026
 
 ### Ajouté
 
@@ -182,7 +216,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.1.0] — Septembre 2026
+## [2.1.0] : Septembre 2026
 
 ### Ajouté
 
@@ -207,7 +241,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [2.0.0] — Septembre 2026
+## [2.0.0] : Septembre 2026
 
 ### Ajouté
 
@@ -244,11 +278,11 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
-## [1.0.0] — Août 2026
+## [1.0.0] : Août 2026
 
 ### Ajouté
-- Guide décisionnel « IA locale pour PME suisse » v1.0 (août 2026) — 25 pages, sources vérifiées
-- Plan d'apprentissage RAG local — 12 phases, architecture LABO-G9 + VM-RAG-LAB
+- Guide décisionnel « IA locale pour PME suisse » v1.0 (août 2026) : 25 pages, sources vérifiées
+- Plan d'apprentissage RAG local : 12 phases, architecture LABO-G9 + VM-RAG-LAB
 - Structure initiale du repo : `docs/`, `guides/`, `scripts/`
 - Index des procédures opérationnelles à venir
 

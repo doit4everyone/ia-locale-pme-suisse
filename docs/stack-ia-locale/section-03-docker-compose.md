@@ -94,7 +94,7 @@ LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 
 # Synchronisation corpus (§7)
 SYNC_SCRIPTS_DIR=/rag-pipeline
-SMB_SHARE=//SERVEUR/PartageDocuments
+SMB_SHARE=//SERVEUR/FileService
 SMB_MOUNT=/mnt/corpus-root
 SMB_USER=svc-rag
 SMB_PASSWORD=REMPLACER
@@ -316,7 +316,7 @@ services:
 
 > **Montage en lecture seule pour `/rag-pipeline` :** le conteneur exécute `indexer.py` et `acl_resolver.py` mais ne doit pas pouvoir les modifier. Si un lecteur suit ce guide avec un dépôt Git, ce montage protège les scripts d'une altération accidentelle depuis le conteneur.
 >
-> **Montage du certificat AD :** `/etc/ssl/certs/ad-chain.pem` doit exister sur l'hôte avant le lancement. En son absence, le montage échoue et le conteneur ne démarre pas. Voir §9.3 pour l'export et l'installation du certificat.
+> **Montage du certificat AD :** `/etc/ssl/certs/ad-chain.pem` doit exister sur l'hôte avant le lancement. En son absence, le montage échoue et le conteneur ne démarre pas. Voir §9.2 pour l'export et l'installation du certificat.
 
 ---
 
@@ -330,7 +330,7 @@ sudo chmod 750 /var/log/rag
 # Certificat CA du DC : le fichier doit exister avant docker compose up,
 # même vide, sinon le montage Docker bloque le démarrage de rag-api et open-webui.
 # auth.py détecte un fichier vide et retombe sur CERT_NONE avec un avertissement.
-# Une fois le vrai certificat exporté depuis le DC (§9.3), redémarrer les conteneurs :
+# Une fois le vrai certificat exporté depuis le DC (§9.2), redémarrer les conteneurs :
 #   docker compose restart rag-api open-webui
 [ -f /etc/ssl/certs/ad-chain.pem ] || sudo touch /etc/ssl/certs/ad-chain.pem
 
@@ -360,7 +360,7 @@ docker compose down
 
 > **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`.
 >
-> **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.3) avant toute connexion LDAP.
+> **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.2) avant toute connexion LDAP.
 
 ```bash
 # Certificat temporaire pour débloquer le démarrage (à remplacer par le vrai)
@@ -479,8 +479,10 @@ docker compose up -d
 > **Après une restauration :** relancer impérativement `acl_resolver.py` pour vérifier que les ACL sont cohérentes avec les permissions actuelles du file server. Un snapshot peut dater de plusieurs heures : des permissions modifiées entre-temps ne seraient pas reflétées.
 
 ```bash
-curl -X POST http://localhost:8080/admin/sync \
-  -H "Authorization: Bearer <ADMIN_TOKEN>"
+# Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
+docker compose exec n8n wget -qO- \
+  --header="Authorization: Bearer <ADMIN_TOKEN>" \
+  http://rag-api:8080/admin/sync
 ```
 
 ---
