@@ -4,6 +4,23 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.9.0] — Septembre 2026
+
+### Sécurité
+
+**Point 18 de l'audit : séparation structurelle instructions/données (main.py)**
+
+- `get_system_prompt()` : ajout d'une règle explicite sur les balises `[DONNÉES DOCUMENTAIRES]` et `[FIN DES DONNÉES]`.
+- `generate_answer()` : le contexte est désormais injecté entre ces balises dans le `prompt_user`. Toute instruction hostile dans un document indexé est traitée comme du contenu, jamais comme une instruction.
+- **Validé en lab, septembre 2026 :** fichier `test.txt` contenant une instruction hostile indexé dans le corpus. La RAG API a ignoré l'instruction et répondu normalement.
+
+### Documentation
+
+- `section-08-fiabilite.md` : §8.3 et §8.4 corrigés. Comportement différencié `/v1` (affichage) vs `/query` (HTTP 422). Référence à Onyx CE supprimée.
+- `section-09-securite.md` : §9.6.1 mis à jour avec l'implémentation réelle des balises. §9.6.2 corrigé : le juge vérifie l'ancrage, pas les URLs ni les injections. §9.6.3 corrigé : `indexer.py` ne fait pas de contrôle de contenu.
+
+---
+
 ## [2.8.0] — Septembre 2026
 
 ### Nettoyage

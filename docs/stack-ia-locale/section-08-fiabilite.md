@@ -95,10 +95,12 @@ RAG API (port 8080)
     ├── Groundedness check : qwen3:4b
     └── Journalisation nLPD
     ↓
-Réponse affichée ou bloquée
+Réponse affichée (endpoint /v1) ou bloquée avec HTTP 422 (endpoint /query)
 ```
 
-Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG API, compatible OpenAI. Onyx CE reste en place pour l'indexation et les connecteurs SharePoint.
+> **Comportement selon l'endpoint :** sur `/v1/chat/completions` (chemin Open WebUI), la réponse est toujours renvoyée à l'utilisateur, quel que soit le résultat du groundedness check. Le champ `ancree` est journalisé pour l'audit nLPD mais ne bloque pas l'affichage : bloquer sur `/v1` casserait la compatibilité OpenAI et afficherait une erreur dans Open WebUI. Sur `/query` (endpoint machine à machine), une réponse non ancrée retourne HTTP 422 avec la réponse dans `reponse_bloquee`. C'est un choix délibéré documenté : la supervision humaine reste la mitigation principale sur le chemin utilisateur.
+
+Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG API, compatible OpenAI. Open WebUI remplace Onyx CE pour l'interface utilisateur depuis la v2.0 : l'indexation est assurée par `indexer.py` et les ACL par `acl_resolver.py` (voir §5).
 
 ---
 
@@ -107,7 +109,7 @@ Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG A
 Quatre contrôles s'exécutent avant le juge LLM, sans coût de calcul.
 
 **Contrôle 1 : aucun chunk récupéré.**
-Si Qdrant ne retourne aucun chunk, il n'y a aucune source possible. La réponse est bloquée immédiatement.
+Si Qdrant ne retourne aucun chunk, il n'y a aucune source possible. Le prompt strict déclenche la réponse de refus standard ("Cette information ne figure pas dans les documents disponibles."), qui passe le contrôle 2 et est renvoyée à l'utilisateur.
 
 **Contrôle 2 : réponse de refus standard.**
 Si la réponse est courte (moins de 200 caractères) et contient "ne figure pas dans les documents disponibles", c'est un refus légitimé par le prompt strict. La vérification passe. La limite de 200 caractères est importante : une réponse longue qui contient cette phrase en passant n'est pas un refus.
@@ -140,7 +142,7 @@ def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
 ```
 
 **Contrôle 4 : réponse longue sans citation.**
-Si une réponse dépasse 200 caractères sans aucune citation entre crochets, le modèle a répondu sans ancrer ses affirmations. La réponse est bloquée.
+Si une réponse dépasse 200 caractères sans aucune citation entre crochets, le modèle a répondu sans ancrer ses affirmations. Ce contrôle alimente le champ `ancree: false` dans le journal nLPD. Sur `/v1`, la réponse est affichée avec ce statut journalisé. Sur `/query`, elle est bloquée avec HTTP 422.
 
 ### Résultats de validation
 
@@ -151,7 +153,7 @@ Ces contrôles ont été testés sur le corpus Axonix SA en septembre 2026 :
 | Conditions contrat Baumont Industries | `true` | `21_Contrat_Maintenance_Baumont_Industries.docx` (×2) | Aucun |
 | Conditions contrat ClientB | `true` | `03_Contrat_Maintenance_Etude_Rochat.docx` (×2) | Aucun |
 | Chiffrage migration Azure Sarrasin | `true` | `04_Reponse_AO_Migration_Azure_Sarrasin.docx` (×3) | Aucun |
-| "Fais pareil pour Baumont" (hors contexte) | `false` | Aucun chunk Baumont pertinent | Contrôle 4 : réponse sans citation |
+| "Fais pareil pour Baumont" (hors contexte) | `false` | Aucun chunk Baumont pertinent | Contrôle 4 : réponse sans citation. Sur `/v1` : journalisé, affiché. Sur `/query` : HTTP 422. |
 
 > **Format de citation confirmé en lab, septembre 2026.** Le modèle produit des citations entre crochets du type `[CLIENTS/test-deny-explicite.docx]`, format que `verifier_citations()` sait lire. Le contrôle 3 est donc fonctionnel sur ce format. Il n'a pas déclenché lors des sessions de test car aucune réponse n'a cité de document inexistant : les réponses incorrectes ont été interceptées par le contrôle 1 (aucun chunk récupéré) ou par le contrôle 4 (réponse longue sans citation). L'hallucination documentée en §8.2 a été observée dans Onyx CE, pas dans la RAG API avec les contrôles actifs.
 
