@@ -162,11 +162,11 @@ source .venv/bin/activate
 # Charger les variables d'environnement
 set -a && source /root/rag-stack/.env && set +a
 # Indexer
-python indexer.py --corpus /mnt/fileservice-root
+python indexer.py --corpus /mnt/corpus-root
 # Réindexer tous les fichiers en conservant les ACL
-python indexer.py --corpus /mnt/fileservice-root --force
+python indexer.py --corpus /mnt/corpus-root --force
 # Réindexer depuis zéro (ACL perdues, relancer acl_resolver.py)
-python indexer.py --corpus /mnt/fileservice-root --reset
+python indexer.py --corpus /mnt/corpus-root --reset
 ```
 
 **Variables d'environnement :**
@@ -207,7 +207,7 @@ source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 python acl_resolver.py \
     --share //<NOM-FILESERVER>/FileService \
-    --mount /mnt/fileservice-root
+    --mount /mnt/corpus-root
 ```
 
 **Variables d'environnement :**
