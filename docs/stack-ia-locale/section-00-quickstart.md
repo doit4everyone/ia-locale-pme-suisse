@@ -110,10 +110,11 @@ openssl x509 -in /etc/ssl/certs/ad-chain.pem -noout -subject -dates
 
 ```bash
 # Dépendances système
+# python3.11 n'est pas dans les dépôts Ubuntu 26.04 (python3 → 3.12+).
 sudo apt update && sudo apt install -y \
     cifs-utils smbclient samba-common-bin \
     ldap-utils curl wget git \
-    python3.11 python3-pip python3-venv
+    python3 python3-pip python3-venv
 
 # Configurer le DNS pour résoudre les noms AD
 sudo nano /etc/systemd/resolved.conf
@@ -533,6 +534,54 @@ ls /mnt/corpus-root/ | head -5
 ldapwhoami -H ldaps://<NOM-DC>:636 \
     -D "CN=svc-rag,..." -w "<mot-de-passe>"
 ```
+
+
+---
+
+## §0.14 Script de déploiement automatisé (beta)
+
+> **Statut beta :** le script a été relu et corrigé mais n'a pas encore été testé en conditions réelles sur une VM neuve. À valider sur une VM de lab avant tout déploiement en production.
+
+Le script `deploy.sh` automatise les étapes 4 à 9 de ce guide (installation des dépendances, génération du `.env`, copie des fichiers, montage SMB, lancement Docker, venv Python). Il ne remplace pas la lecture du guide : les choix techniques qu'il applique (paramètres RAG, configuration LDAP, exclusions SMB) sont documentés dans les sections §3 à §9.
+
+### Ce que le script fait
+
+- Vérifie les prérequis (Docker, curl, openssl) et teste la joignabilité d'Ollama avant de modifier le système
+- Collecte les paramètres : organisation, IP Ollama, IP VM, DC, domaine, OU de svc-rag, mot de passe, file server, partage, dossier de documentation
+- Génère les tokens automatiquement si aucune valeur n'est saisie
+- Copie les fichiers, génère `.env` et `/etc/smbcredentials/svc-rag` (chmod 600)
+- Monte le partage SMB en lecture seule et ajoute l'entrée fstab
+- Lance `docker compose build` et `docker compose up -d`
+- Crée le venv Python avec les dépendances de `indexer.py` et `acl_resolver.py`
+- Valide la stack via `/health` (RAG API) et `/collections` (Qdrant)
+
+### Ce que le script ne fait pas
+
+- La configuration LDAP dans Open WebUI (interface graphique, voir étape 12 ci-dessus)
+- La première indexation et le résolveur ACL (à lancer manuellement, voir résumé final du script)
+- L'export et l'installation du certificat CA du DC (proposé mais non automatisable)
+
+### Prérequis avant de lancer
+
+- Docker et Docker Compose installés (§1.4)
+- Compte `svc-rag` créé dans l'AD avec les droits sur le partage (§5.2)
+- Modèles Ollama présents sur l'hôte Windows :
+  ```bash
+  ollama pull nomic-embed-text && ollama pull qwen2.5:14b && ollama pull qwen3:4b
+  ```
+- Pas d'apostrophe dans le mot de passe de `svc-rag` (limitation du `.env`)
+- Pas d'espace dans le nom du partage SMB (limitation fstab)
+
+### Lancement
+
+Depuis la VM, dans le répertoire `scripts/stack-ia-locale/` du dépôt cloné :
+
+```bash
+chmod +x deploy.sh && sudo ./deploy.sh
+```
+
+Le script est disponible sur GitHub :
+[scripts/stack-ia-locale/deploy.sh](https://github.com/doit4everyone/ia-locale-pme-suisse/blob/main/scripts/stack-ia-locale/deploy.sh)
 
 ---
 
