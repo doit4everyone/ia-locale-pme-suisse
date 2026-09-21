@@ -11,6 +11,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 import httpx
 import json
+import re
 import os
 import hashlib
 import logging
@@ -410,11 +411,31 @@ def enrichir_citations(answer: str, chunks: list[dict]) -> str:
     return re.sub(r'\[([^\[\]]+\.(?:docx|pdf|pptx|txt|md))\]', _replace, answer)
 
 
+# Regex de neutralisation compilée au niveau du module (performance).
+# Tolérante aux accents, aux espaces et à la casse.
+_BALISE = re.compile(
+    r'\[\s*(FIN\s+DES\s+DONN[ÉE]ES|DONN[ÉE]ES\s+DOCUMENTAIRES)\s*\]',
+    re.IGNORECASE,
+)
+
+
+def neutraliser_delimiteurs(text: str) -> str:
+    """Neutralise les séquences qui pourraient fermer la zone de données
+    ou imiter un en-tête de source dans le prompt.
+    - Balises de zone : crochets remplacés par des parenthèses.
+    - Toute ligne commençant par "→" (avec ou sans retrait) : flèche ASCII.
+    Appelé sur le texte de chaque chunk avant injection.
+    """
+    text = _BALISE.sub(lambda m: f"({m.group(1)})", text)
+    return re.sub(r'(?m)^\s*→', '->', text)
+
+
 def build_context(chunks: list[dict]) -> str:
     """Construit le contexte à injecter dans le prompt.
     Chaque chunk est précédé d'un en-tête "→ nom_fichier" que le modèle
     doit reproduire dans ses citations. Le chemin UNC est ajouté en
     post-traitement par enrichir_citations(), après les contrôles.
+    Les délimiteurs de zone et les en-têtes factices sont neutralisés.
     """
     if not chunks:
         return "Aucun document disponible."
@@ -422,7 +443,8 @@ def build_context(chunks: list[dict]) -> str:
     for i, chunk in enumerate(chunks, 1):
         filename = chunk['source'].split('/')[-1]
         header = f"→ {filename}"
-        parts.append(f"{header}\n{chunk['text']}")
+        text_neutralise = neutraliser_delimiteurs(chunk['text'])
+        parts.append(f"{header}\n{text_neutralise}")
     return "\n\n".join(parts)
 
 
@@ -496,13 +518,16 @@ async def warmup_judge() -> None:
 
 async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
     """Vérifie que chaque affirmation de la réponse est ancrée dans les chunks."""
-    # Contrôle 1 : aucun chunk
-    if not chunks:
-        return {"ancree": False, "affirmations_non_sourcees": ["Aucun document source récupéré"]}
-
-    # Contrôle 2 : réponse de refus standard
+    # Contrôle 1 : réponse de refus standard (prioritaire sur le reste).
+    # Tester avant l'absence de chunks : une réponse de refus est toujours
+    # correcte même sans chunks, et ne doit pas polluer le journal nLPD
+    # avec ancree: false.
     if len(answer) < 200 and "ne figure pas dans les documents" in answer:
         return {"ancree": True, "affirmations_non_sourcees": []}
+
+    # Contrôle 2 : aucun chunk
+    if not chunks:
+        return {"ancree": False, "affirmations_non_sourcees": ["Aucun document source récupéré"]}
 
     # Contrôle 3 : sources citées inexistantes
     inventees = verifier_citations(answer, chunks)
@@ -558,6 +583,11 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
             )
             r.raise_for_status()
             result = json.loads(r.json()["message"]["content"])
+            # Valider strictement : accepter uniquement True booléen.
+            # {"ancree": "false"} en chaîne ou clé absente vaut True par défaut
+            # sans cette validation, ce qui laisserait passer des réponses non ancrées.
+            if result.get("ancree") is not True:
+                result["ancree"] = False
             return result
     except Exception as e:
         logger.warning(f"Groundedness check échoué : {e}")
