@@ -249,16 +249,17 @@ Chaque requête RAG est journalisée dans `/var/log/rag/rag-queries.jsonl` :
 ```json
 {
   "timestamp": "2026-09-11T16:49:07Z",
-  "user_id": "admin@domaine.ch",
+  "user_id": "admin@votre-domaine.ch",
   "question_hash": "85136820969d55d3",
   "sources_accessed": [
-    "RH/POLITIQUE RH/10_Politique_RH_Axonix_v3.1.docx",
+    "RH/POLITIQUE RH/10_Politique_RH_v3.1.docx",
     "DIRECTION/02_PV_CA_Mars_2026.docx"
   ],
-  "ancree": true,
-  "verification": "non_effectuee"
+  "ancree": true
 }
 ```
+
+> **Note sur `verification` :** le champ `verification: non_effectuee` n'apparaît dans le log que si l'appel au juge LLM a échoué (timeout, erreur réseau). Dans ce cas, `juge_error` est également présent. Une entrée sans ces champs signifie que le juge a répondu normalement. La combinaison `"ancree": true` avec `"verification": "non_effectuee"` et sans `juge_error` n'est jamais produite par le code.
 
 | Champ | Contenu | Conformité nLPD |
 |---|---|---|

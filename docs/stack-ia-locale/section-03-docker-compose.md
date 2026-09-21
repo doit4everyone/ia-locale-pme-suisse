@@ -387,25 +387,33 @@ docker compose exec n8n wget -qO- http://rag-api:8080/health
 # RAG API stats (vérifie la connectivité Qdrant et la config LLM)
 docker compose exec n8n wget -qO- http://rag-api:8080/stats
 
-# Test requête authentifiée
-curl -X POST http://localhost:8080/query \
+# Test requête authentifiée via /query (endpoint machine à machine)
+# user_id doit être un email valide, sinon retourne 403
+docker run --rm --network rag-stack_default curlimages/curl \
+  -s -X POST http://rag-api:8080/query \
   -H "Authorization: Bearer changeme-api-token" \
   -H "Content-Type: application/json" \
-  -d '{"query": "Test RAG", "user_id": "test"}'
+  -d '{"query": "Test RAG", "user_id": "admin@votre-domaine.ch"}'
 
-# Test rejet sans token (doit retourner 403)
-curl -X POST http://localhost:8080/query \
+# Test rejet sans token (doit retourner 401)
+docker run --rm --network rag-stack_default curlimages/curl \
+  -s -X POST http://rag-api:8080/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "test", "user_id": "test"}'
+  -d '{"query": "test", "user_id": "admin@votre-domaine.ch"}'
+
+# Test rejet user_id sans @ (doit retourner 403)
+docker run --rm --network rag-stack_default curlimages/curl \
+  -s -X POST http://rag-api:8080/query \
+  -H "Authorization: Bearer changeme-api-token" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "test", "user_id": "invalide"}'
 
 # Test endpoint OpenAI-Compatible (pour Open WebUI)
-curl -X POST http://localhost:8080/v1/chat/completions \
+docker run --rm --network rag-stack_default curlimages/curl \
+  -s -X POST http://rag-api:8080/v1/chat/completions \
   -H "Authorization: Bearer changeme-api-token" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "rag",
-    "messages": [{"role": "user", "content": "Test"}]
-  }'
+  -d '{"model": "rag", "messages": [{"role": "user", "content": "Test"}]}'
 
 # Vérifier la création du log nLPD
 ls -la /var/log/rag/
