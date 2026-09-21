@@ -271,13 +271,34 @@ Copier `acl_resolver.py` dans `/root/rag-pipeline/`.
 ### §5.4.2 Variables d'environnement
 
 ```bash
-# Variables requises (à ajouter dans le fichier .env ou à exporter)
-export SMB_USER=svc-rag
-export SMB_CREDENTIALS=/etc/smbcredentials/svc-rag
-export SMB_DOMAIN=DOMAINE
-export QDRANT_URL=http://localhost:6333
-export QDRANT_COLLECTION=documents
+# Les variables sont lues depuis le fichier .env via :
+set -a && source ~/rag-stack/.env && set +a
+
+# Variables utilisées par acl_resolver.py :
+# SMB_USER, SMB_PASSWORD, SMB_DOMAIN  : credentials svc-rag
+# SMB_SHARE, SMB_MOUNT                : partage et point de montage
+# QDRANT_URL (ou QDRANT_HOST)          : http://localhost:6333
+# QDRANT_COLLECTION                   : documents (défaut)
+# DOCUMENTATION_COLLECTION            : documentation (défaut)
+# DOCUMENTATION_PATHS                 : préfixes routés vers documentation
+
+# Note : SMB_CREDENTIALS n'est pas une variable du script.
+# Le fichier /etc/smbcredentials/svc-rag est utilisé uniquement
+# pour le montage CIFS (fstab). acl_resolver.py utilise SMB_USER,
+# SMB_PASSWORD et SMB_DOMAIN directement via smbcacls.
 ```
+
+### §5.4.2b Garde-fou en cas de panne globale
+
+Si plus de 20% des fichiers du partage sont illisibles lors d'une passe (svc-rag verrouillé, DC injoignable, montage SMB tombé), `acl_resolver.py` abandonne sans modifier Qdrant et retourne le code de sortie 1 :
+
+```
+[GARDE-FOU] 66/66 fichiers en ACL illisible (100% > seuil 20%).
+[GARDE-FOU] Abandon sans modification de Qdrant.
+[GARDE-FOU] Verifier : svc-rag actif, DC joignable, montage SMB present.
+```
+
+Le workflow n8n détecte le code 1 et envoie un email d'alerte. Les ACL dans Qdrant ne sont pas modifiées : les accès restent tels qu'ils étaient avant la passe échouée.
 
 ### §5.4.3 Premier lancement en dry-run
 
@@ -482,11 +503,18 @@ La RAG API extrait l'email du header `x-openwebui-user-email`, résout les group
 ### §5.7.1 Filtre Qdrant par identité
 
 ```python
-from auth import get_user_groups, check_access
+from auth import get_user_groups
 
-# Dans l'endpoint /v1/chat/completions :
-owui_email = raw_request.headers.get("X-OpenWebUI-User-Email", "")
-user_groups = get_user_groups(owui_email) if owui_email else []
+# Dans l'endpoint /v1/chat/completions (comportement réel depuis v2.5.0) :
+# Si owui_email2 est absent → 403 Forbidden
+# Si la résolution LDAP échoue → 403 Forbidden
+# Aucun accès non filtré n'est possible
+owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
+if not owui_email2:
+    raise HTTPException(status_code=403, detail="Identité utilisateur manquante")
+user_groups = get_user_groups(owui_email2)
+if not user_groups:
+    raise HTTPException(status_code=403, detail="Résolution des droits impossible")
 
 # Dans search_qdrant() :
 query_filter = None
@@ -594,9 +622,11 @@ La stack utilise deux collections Qdrant distinctes pour séparer le corpus d'en
 | Collection | Contenu | Cloisonnement ACL |
 |---|---|---|
 | `documents` | Corpus entreprise (CLIENTS, RH, DIRECTION, etc.) | Oui, par groupes AD |
-| `documentation` | Documentation technique (DOIT4EVERYONE/) | Oui, accessible à tous les utilisateurs authentifiés |
+| `documentation` | Documentation technique (DOIT4EVERYONE/) | Oui, selon les ACL NTFS du dossier dans Qdrant |
 
 Le routage se fait automatiquement à l'indexation selon le chemin relatif du fichier. Les dossiers dont le chemin commence par un préfixe de `DOCUMENTATION_PATHS` vont dans `documentation`. Tout le reste va dans `documents`.
+
+> **Le filtre ACL s'applique identiquement aux deux collections.** L'accès "universel" à `documentation` dépend des ACL NTFS posées sur le dossier correspondant sur le file server, pas du code. Si le dossier `DOIT4EVERYONE/` a des ACL restrictives, ses chunks ne seront visibles que pour les utilisateurs autorisés.
 
 > **Ces règles sont structurelles.** Leur non-respect produit un routage silencieusement incorrect sans message d'erreur : des documents confidentiels peuvent se retrouver dans `documentation` sans cloisonnement ACL effectif.
 

@@ -382,10 +382,10 @@ curl http://localhost:6333/collections
 curl http://localhost:5678/healthz
 
 # RAG API health
-curl http://localhost:8080/health
+docker compose exec n8n wget -qO- http://rag-api:8080/health
 
 # RAG API stats (vérifie la connectivité Qdrant et la config LLM)
-curl http://localhost:8080/stats
+docker compose exec n8n wget -qO- http://rag-api:8080/stats
 
 # Test requête authentifiée
 curl -X POST http://localhost:8080/query \

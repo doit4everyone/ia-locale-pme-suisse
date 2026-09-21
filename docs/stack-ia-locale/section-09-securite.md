@@ -565,6 +565,12 @@ Mécanisme : comparaison entre la liste des `source_name` dans Qdrant et la list
 
 Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 
+### §9.7.1b Garde-fou : abandon si panne globale
+
+Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc-rag verrouillé, DC injoignable, montage SMB tombé), le résolveur abandonne avec le code de sortie 1 sans modifier Qdrant. Le workflow n8n détecte le code 1 et envoie un email d'alerte. Voir §5.4.2b pour la procédure de reprise.
+
+**Validé en lab, septembre 2026 :** `SMB_PASSWORD=faux python acl_resolver.py ...` déclenche le garde-fou sur 100% des fichiers. Code de sortie 1, Qdrant intact.
+
 ### §9.7.2 Cycle complet validé en lab
 
 1. Fichier déplacé sur <NOM-FILESERVER> : `CLIENTS/ClientA/contrat.docx` → `DIRECTION/contrat.docx`
@@ -582,13 +588,13 @@ Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
 | Point | Commande de vérification | Résultat attendu |
 |---|---|---|
 | UFW actif | `sudo ufw status` | `Status: active` |
-| Réseau Docker autorisé | `sudo ufw status \| grep 172.18` | Règles présentes |
+| Réseau Docker interne | `docker network ls \| grep rag-stack` | `rag-stack_default` présent |
 | TLS LDAP avec certificat | `docker logs rag-api \| grep TLS` | `TLS avec certificat CA` |
 | LDAP_HOST en DNS | `grep LDAP_HOST /root/rag-stack/.env` | Nom DNS, pas IP |
 | Log nLPD persistant | `ls /var/log/rag/` | `rag-queries.jsonl` présent |
 | Logrotate configuré | `cat /etc/logrotate.d/rag-nlpd` | Fichier présent, rotate 365 |
 | ADMIN_TOKEN fort | `grep ADMIN_TOKEN /root/rag-stack/.env` | Token de 32+ caractères |
-| Port 8080 non exposé | `sudo ufw status \| grep 8080` | Subnet interne uniquement |
+| Port 8080 non exposé | `docker compose ps rag-api` | Aucun port publié dans la colonne PORTS |
 | SSH restreint (prod) | `sudo ufw status \| grep 22` | Subnet interne uniquement |
 | DENY validé | Voir §9.4.5 | Test positif + test négatif effectués |
 | Groupes imbriqués | Voir §9.4.5 | Résolution récursive validée |

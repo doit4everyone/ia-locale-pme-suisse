@@ -4,6 +4,30 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.10.0] — Septembre 2026
+
+### Documentation : corrections et mises à jour complètes
+
+**Corrections de fond (affirmations incorrectes) :**
+- `section-07-n8n.md` §7.2.3 : encadré port 8080 corrigé (non publié depuis v2.4.0).
+- `section-07-n8n.md` §7.2.4 : section remplacée par renvoi vers §3.3/§3.4 (Dockerfile et volumes documentés là).
+- `section-07-n8n.md` §7.2.5 : MD5 → SHA-256 tronqué. Ligne "fichier inchangé : aucun traitement" ajoutée.
+- `section-05-connecteurs.md` §5.4.2 : `SMB_CREDENTIALS` supprimée (variable inexistante). `DOCUMENTATION_COLLECTION` et `DOCUMENTATION_PATHS` ajoutées.
+- `section-05-connecteurs.md` §5.7.1 : extrait de code mis à jour (403 si résolution échoue).
+- `section-05-connecteurs.md` §5.9 : collection `documentation` : accès selon ACL NTFS, pas accès universel.
+- `section-08-fiabilite.md` §8.5 doublon → §8.6. `MAX_CONTEXT_CHUNKS` corrigé de 12 à 14.
+- `section-09-securite.md` §9.8 : checklist corrigée (ligne 172.18 et port 8080 UFW).
+
+**6 commandes `localhost:8080` remplacées** dans `section-00`, `section-03`, `section-07`, `section-09` par `docker compose exec n8n wget -qO- http://rag-api:8080/...`
+
+**Ajouts :**
+- `section-05-connecteurs.md` §5.4.2b : garde-fou 20% ACL illisibles documenté.
+- `section-08-fiabilite.md` §8.7 : citations enrichies avec chemin UNC documentées.
+- `section-09-securite.md` §9.7.1b : garde-fou ACL documenté avec validation lab.
+- `suivi-corrections.md` : remis à jour, statuts corrigés, points ouverts précisés.
+
+---
+
 ## [2.9.0] — Septembre 2026
 
 ### Sécurité

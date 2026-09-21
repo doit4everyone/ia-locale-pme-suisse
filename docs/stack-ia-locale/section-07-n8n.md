@@ -97,9 +97,11 @@ async def admin_sync(
 Tester l'endpoint directement avant de construire le pipeline :
 
 ```bash
-curl -s -X POST http://localhost:8080/admin/sync \
-  -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  | python3 -m json.tool
+# Le port 8080 n'est pas publié sur le LAN (voir §3.4).
+# Tester depuis le réseau Compose via le conteneur n8n :
+docker compose exec n8n wget -qO- \
+  --header="Authorization: Bearer <ADMIN_TOKEN>" \
+  http://rag-api:8080/admin/sync
 ```
 
 Résultat attendu en fonctionnement normal :
@@ -137,46 +139,13 @@ SMB_DOMAIN=DOMAINE
 >
 > **Chevauchement de synchronisations :** un verrou global (`asyncio.Lock`) empêche deux synchronisations simultanées. Si une passe est déjà en cours, l'endpoint retourne HTTP 409. Sans ce verrou, deux appels simultanés (Schedule + appel manuel) pourraient corrompre les métadonnées Qdrant en écrivant les mêmes chunks en parallèle.
 >
-> **Exposition réseau :** avec `ports: 8080:8080` dans le `docker-compose.yml`, l'endpoint est joignable depuis tout le réseau local. Il ne doit pas être exposé sur internet. La règle UFW correspondante est documentée dans §9 : restreindre le port 8080 au subnet interne uniquement.
+> **Exposition réseau :** le port 8080 n'est pas publié sur le LAN depuis la v2.4.0 (voir §3.4). `docker-compose.yml` ne comporte plus de section `ports` pour `rag-api`. Open WebUI et n8n joignent la RAG API via `http://rag-api:8080` sur le réseau Compose interne. Ne jamais publier ce port sur internet.
 >
 > **`ADMIN_TOKEN` distinct de `API_TOKEN` :** un token séparé permet de révoquer l'accès admin sans impacter les utilisateurs de la RAG API.
 
-### §7.2.4 Modifications du Dockerfile et du docker-compose.yml
+### §7.2.4 Dockerfile et volumes
 
-`smbcacls` (utilisé par `acl_resolver.py`) n'est pas présent dans l'image `python:3.11-slim`. L'ajouter dans le Dockerfile :
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-RUN apt-get update && apt-get install -y \
-    smbclient \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
-COPY auth.py .
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
-```
-
-Ajouter dans `requirements.txt` :
-
-```
-python-docx
-```
-
-Monter les volumes dans le service `rag-api` du `docker-compose.yml` :
-
-```yaml
-rag-api:
-  volumes:
-    # Scripts indexeur et résolveur ACL (lecture-écriture pour les rapports)
-    - /root/rag-pipeline:/rag-pipeline
-    # Partage SMB monté sur l'hôte
-    - /mnt/fileservice-root:/mnt/fileservice-root:ro
-```
-
-> **Pourquoi lecture-écriture pour `/rag-pipeline` ?** Les scripts `indexer.py` et `acl_resolver.py` sauvegardent leurs rapports JSON dans ce dossier. Un montage `:ro` provoque une erreur `OSError: Read-only file system` à chaque exécution.
+> **Cette section est remplacée par §3.3 et §3.4.** Le Dockerfile, `requirements.txt` et les volumes de `rag-api` sont documentés et maintenus dans la section §3. Les rapports JSON sont écrits dans `/var/log/rag/` (monté en écriture), et `/rag-pipeline` est monté en lecture seule (`:ro`). Voir §3.4 pour la configuration complète.
 
 ### §7.2.5 Fenêtre de péremption des ACL
 
@@ -185,7 +154,8 @@ Entre deux passes du résolveur, un droit révoqué dans AD reste actif dans Qdr
 | Événement | Délai avant prise en compte |
 |---|---|
 | Nouveau fichier déposé | 0 à 60 minutes |
-| Fichier modifié | 0 à 60 minutes (hash MD5 détecte le changement) |
+| Fichier modifié | 0 à 60 minutes (hash SHA-256 tronqué détecte le changement) |
+| Fichier inchangé | Aucun traitement : l'indexeur compare le hash et saute le fichier |
 | Permission révoquée | 0 à 60 minutes |
 | Permission accordée | 0 à 60 minutes |
 

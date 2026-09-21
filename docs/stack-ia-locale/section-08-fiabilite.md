@@ -221,7 +221,7 @@ Les valeurs CPU sont mesurées. Les valeurs GPU sont des estimations à mesurer 
 
 ---
 
-## §8.5 Retrieval hybride BM25 et paramètres clés
+## §8.6 Retrieval hybride BM25 et paramètres clés
 
 Le retrieval combine deux approches fusionnées par Reciprocal Rank Fusion (RRF) :
 
@@ -242,7 +242,7 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 |---|---|---|
 | `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
 | `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
-| `MAX_CONTEXT_CHUNKS` | 12 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 15-20 après GPU. |
+| `MAX_CONTEXT_CHUNKS` | 14 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 15-20 après GPU. |
 
 ### Limite sur les très gros fichiers
 
@@ -256,7 +256,13 @@ La température est fixée à 0.2 (validé en lab). En dessous de 0.1, les répo
 
 ---
 
-## §8.6 Règles de formation utilisateurs
+## §8.7 Citations enrichies avec chemin UNC
+
+Depuis la v2.6.0, `enrichir_citations()` remplace chaque citation `[nom.docx]` par `[nom.docx : `\\\\SERVEUR\\Partage\\Dossier\\`]` en post-traitement côté API, après le groundedness check. Le chemin UNC est dans un bloc code inline Markdown : Open WebUI l'affiche tel quel et un clic le copie dans le presse-papiers. L'utilisateur colle ensuite le chemin dans la barre d'adresse de l'Explorateur Windows.
+
+Cette opération est effectuée après tous les contrôles : `verifier_citations()` et le juge voient la citation brute `[nom.docx]`, pas la citation enrichie.
+
+## §8.8 Règles de formation utilisateurs
 
 La formation est la première ligne de défense, gratuite et sans développement.
 

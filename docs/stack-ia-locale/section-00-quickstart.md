@@ -464,7 +464,7 @@ docker logs rag-api 2>&1 | grep "sync\|indexer\|acl" | tail -10
 | Qdrant collections | `curl http://localhost:6333/collections` | `documents` et `documentation` présentes |
 | Chunks indexés | Voir étape 10 | Nombre > 0 dans les deux collections |
 | ACL propagées | Voir étape 11 | `autorises` non vide dans le payload |
-| RAG API santé | `curl http://localhost:8080/health` | `{"status":"ok"}` |
+| RAG API santé | `docker compose exec n8n wget -qO- http://rag-api:8080/health` | `{"status":"ok"}` |
 | BM25 chargé | `docker logs rag-api \| grep BM25` | Nombre de chunks |
 | Cloisonnement positif | Question dans Open WebUI sur document accessible | Réponse avec citation et chemin UNC |
 | Cloisonnement négatif | Compte sans droits, question sur document restreint | "Cette information ne figure pas..." |
