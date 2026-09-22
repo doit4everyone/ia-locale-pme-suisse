@@ -85,6 +85,8 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | Document | Contenu |
 |---|---|
 | [suivi-corrections.md](suivi-corrections.md) | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
+| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
+| [Workflows n8n](../../scripts/N8N/) | `n8n-sync-corpus.json` (synchronisation horaire du corpus + email quarantaine) et `n8n-rappel-rotation-svc-rag.json` (rappel mensuel rotation mot de passe). Fichiers JSON importables directement dans n8n. |
 
 ---
 
