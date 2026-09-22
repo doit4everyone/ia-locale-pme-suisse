@@ -35,16 +35,16 @@ Un pipeline RAG peut produire deux types de réponses. La différence n'est pas 
 
 ---
 
-## §8.2 Cas documenté : hallucination par analogie dans Onyx CE
+## §8.2 Cas documenté : hallucination par analogie lors de la validation initiale
 
-Les deux exemples suivants ont été obtenus lors de la même session de validation, avec le même modèle (`qwen2.5:14b`), le même corpus (12 documents Axonix SA indexés dans Onyx), et sans modification de configuration entre les deux questions.
+Les deux exemples suivants ont été obtenus lors de la même session de validation, avec le même modèle (`qwen2.5:14b`), le même corpus (12 documents Axonix SA indexés dans Qdrant via `indexer.py`), et sans modification de configuration entre les deux questions.
 
 ### Cas 1 : réponse correcte (question directe)
 
 **Question posée :**
 > Quelles sont les conditions du contrat de maintenance d'Axonix SA avec Baumont Industries ?
 
-**Comportement observé :** Onyx a récupéré les chunks du document `21_Contrat_Maintenance_Baumont_Industries.docx` et produit une réponse avec des citations SharePoint structurées.
+**Comportement observé :** La RAG API a récupéré les chunks du document `21_Contrat_Maintenance_Baumont_Industries.docx` et produit une réponse avec des citations structurées.
 
 **Extrait de la réponse :**
 
@@ -57,7 +57,7 @@ Toutes les données sont exactes et vérifiables dans le document source.
 **Question posée immédiatement après :**
 > Fais pareil pour l'étude Rochat
 
-**Comportement observé :** le document `03_Contrat_Maintenance_Etude_Rochat.docx` existe dans le corpus. Onyx ne l'a pas trouvé lors de la recherche. Le modèle a produit une réponse en reprenant la structure du Cas 1 et en inventant les données.
+**Comportement observé :** le document `03_Contrat_Maintenance_Etude_Rochat.docx` existe dans le corpus. La RAG API ne l'a pas trouvé lors de la recherche. Le modèle a produit une réponse en reprenant la structure du Cas 1 et en inventant les données.
 
 **Ce que le modèle a inventé :**
 
@@ -77,7 +77,7 @@ La réponse était bien formatée, complète, et indiscernable d'une réponse co
 
 **Signal 1 : format des citations.** Une réponse ancrée produit des objets de citation structurés avec le nom du fichier. Une réponse hallucinée produit des URLs en texte brut répétées à chaque affirmation, signe que le modèle reproduit le format sans avoir de chunks à citer.
 
-**Signal 2 : identifiant de document inventé.** Dans ce cas Onyx/SharePoint, l'URL hallucinée contenait le GUID `56601275-318D-47CD-960B-D94C762ED9C0`, absent de tout document SharePoint du tenant. C'est le signal le plus net d'hallucination : le modèle a inventé un identifiant structurellement plausible mais inexistant. Dans un pipeline file server SMB (§5), l'équivalent est un nom de fichier cité entre crochets mais absent des chunks récupérés par Qdrant : c'est ce que détecte le contrôle 3 de la RAG API.
+**Signal 2 : identifiant de document inventé.** Dans ce cas, l'identifiant halluciné contenait le GUID `56601275-318D-47CD-960B-D94C762ED9C0`, absent de tout document SharePoint du tenant. C'est le signal le plus net d'hallucination : le modèle a inventé un identifiant structurellement plausible mais inexistant. Dans un pipeline file server SMB (§5), l'équivalent est un nom de fichier cité entre crochets mais absent des chunks récupérés par Qdrant : c'est ce que détecte le contrôle 3 de la RAG API.
 
 ---
 
@@ -100,7 +100,7 @@ Réponse affichée (endpoint /v1) ou bloquée avec HTTP 422 (endpoint /query)
 
 > **Comportement selon l'endpoint :** sur `/v1/chat/completions` (chemin Open WebUI), la réponse est toujours renvoyée à l'utilisateur, quel que soit le résultat du groundedness check. Le champ `ancree` est journalisé pour l'audit nLPD mais ne bloque pas l'affichage : bloquer sur `/v1` casserait la compatibilité OpenAI et afficherait une erreur dans Open WebUI. Sur `/query` (endpoint machine à machine), une réponse non ancrée retourne HTTP 422 avec la réponse dans `reponse_bloquee`. C'est un choix délibéré documenté : la supervision humaine reste la mitigation principale sur le chemin utilisateur.
 
-Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG API, compatible OpenAI. Open WebUI remplace Onyx CE pour l'interface utilisateur depuis la v2.0 : l'indexation est assurée par `indexer.py` et les ACL par `acl_resolver.py` (voir §5).
+Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG API, compatible OpenAI. Open WebUI est l'interface utilisateur retenue depuis la v2.0 : l'indexation est assurée par `indexer.py` et les ACL par `acl_resolver.py` (voir §5).
 
 ---
 
@@ -155,7 +155,7 @@ Ces contrôles ont été testés sur le corpus Axonix SA en septembre 2026 :
 | Chiffrage migration Azure Sarrasin | `true` | `04_Reponse_AO_Migration_Azure_Sarrasin.docx` (×3) | Aucun |
 | "Fais pareil pour Baumont" (hors contexte) | `false` | Aucun chunk Baumont pertinent | Contrôle 4 : réponse sans citation. Sur `/v1` : journalisé, affiché. Sur `/query` : HTTP 422. |
 
-> **Format de citation confirmé en lab, septembre 2026.** Le modèle produit des citations entre crochets du type `[CLIENTS/test-deny-explicite.docx]`, format que `verifier_citations()` sait lire. Le contrôle 3 est donc fonctionnel sur ce format. Il n'a pas déclenché lors des sessions de test car aucune réponse n'a cité de document inexistant : les réponses incorrectes ont été interceptées par le contrôle 1 (aucun chunk récupéré) ou par le contrôle 4 (réponse longue sans citation). L'hallucination documentée en §8.2 a été observée dans Onyx CE, pas dans la RAG API avec les contrôles actifs.
+> **Format de citation confirmé en lab, septembre 2026.** Le modèle produit des citations entre crochets du type `[CLIENTS/test-deny-explicite.docx]`, format que `verifier_citations()` sait lire. Le contrôle 3 est donc fonctionnel sur ce format. Il n'a pas déclenché lors des sessions de test car aucune réponse n'a cité de document inexistant : les réponses incorrectes ont été interceptées par le contrôle 1 (aucun chunk récupéré) ou par le contrôle 4 (réponse longue sans citation). L'hallucination documentée en §8.2 a été observée lors de la phase de validation initiale, avant l'activation des contrôles d'ancrage de la RAG API.
 
 ---
 
@@ -297,7 +297,7 @@ La règle générale : toujours poser une question directe sur un sujet précis.
 
 | Couche | Mécanisme | Coût | Interface |
 |---|---|---|---|
-| 1. Prompt strict | "Réponds uniquement à partir des documents, ignore les chunks hors sujet" | Nul | Onyx CE et RAG API |
+| 1. Prompt strict | "Réponds uniquement à partir des documents, ignore les chunks hors sujet" | Nul | RAG API |
 | 2. Formation utilisateurs | Proscrire "fais pareil", questions directes | Nul | Toutes interfaces |
 | 3. Contrôles déterministes | Citations inventées, réponse sans source | Nul | RAG API uniquement |
 | 4. Groundedness check | Juge qwen3:4b, affirmation par affirmation | ~2 à 8 s CPU | RAG API uniquement |
