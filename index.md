@@ -44,52 +44,23 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 
 ## Procédures opérationnelles
 
-### Guide de déploiement stack IA locale
+| Ressource | Contenu | Lien |
+|---|---|---|
+| **Guide de déploiement stack IA locale** | Déploiement complet en 9 sections : VM, Docker Compose, cloisonnement ACL NTFS, authentification LDAP AD, pipelines n8n, fiabilité, sécurité | → [Accéder au guide](docs/stack-ia-locale/index.md) |
+| **Scripts Python** | `indexer.py`, `acl_resolver.py`, `main.py`, `auth.py`, `docker-compose.yml` : valeurs sensibles remplacées par des placeholders, prêts à adapter | → [Accéder aux scripts](scripts/stack-ia-locale/index.md) |
+| **Workflows n8n** | Synchronisation corpus + email quarantaine, rappel mensuel rotation svc-rag : fichiers JSON importables directement dans n8n | → [Accéder aux workflows](scripts/N8N/) |
 
-Ce guide documente le déploiement complet d'un pipeline RAG local fonctionnel, validé en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c'est une stack opérationnelle, avec cloisonnement documentaire réel, authentification Active Directory, journalisation nLPD et contrôle d'ancrage des réponses.
+### Ce que la stack fait concrètement
 
-**Ce que la stack fait concrètement :**
+Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c'est une stack opérationnelle.
 
-- Les utilisateurs s'authentifient via leur compte Active Directory dans Open WebUI.
-- Chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
-- Les réponses du LLM sont vérifiées par un juge LLM secondaire avant d'être affichées.
-- Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
-- La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
+- Authentification via compte Active Directory dans Open WebUI.
+- Cloisonnement documentaire réel : chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
+- Contrôle d'ancrage : les réponses du LLM sont vérifiées par un juge LLM secondaire avant affichage.
+- Journalisation nLPD : chaque requête est tracée avec l'identité de l'utilisateur et les sources consultées.
+- Synchronisation et résolution des permissions automatisées via n8n.
 
-**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation technique) + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
-
-→ [Guide de déploiement stack IA locale](docs/stack-ia-locale/index.md)
-
----
-
-## Scripts
-
-Scripts Python du pipeline RAG local, publiés avec les valeurs sensibles remplacées par des placeholders. Validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026.
-
-**Hôte Ubuntu (hors conteneur) :**
-
-| Script | Rôle |
-|---|---|
-| `indexer.py` | Parcours SMB, indexation incrémentale, extraction de texte, embedding, écriture Qdrant (deux collections) |
-| `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant |
-
-**Image Docker `rag-api` (sous-dossier `api/`) :**
-
-| Fichier | Rôle |
-|---|---|
-| `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel (RRF), génération, journalisation nLPD, endpoint `/admin/sync` |
-| `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage ACL |
-| `Dockerfile` | Image basée sur Python 3.11-slim avec `smbclient`, `ldap3`, `python-docx`, `rank-bm25` |
-| `requirements.txt` | Dépendances Python de l'image |
-
-**Configuration :**
-
-| Fichier | Rôle |
-|---|---|
-| `docker-compose.yml` | Stack complète : Qdrant, n8n, RAG API, Open WebUI |
-| `.env.example` | Template de configuration à copier en `.env` et adapter |
-
-→ [Documentation et téléchargement des scripts](scripts/stack-ia-locale/index.md)
+**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 ---
 
