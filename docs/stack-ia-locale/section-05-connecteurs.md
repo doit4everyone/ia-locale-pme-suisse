@@ -664,4 +664,8 @@ curl -s http://localhost:6333/collections/documentation | python3 -m json.tool |
 
 ---
 
+[Suite : §6 Cline : agent de codage](section-06-cline.md)
+
+---
+
 *Validé en lab sur VM-RAG-LAB, septembre 2026. Les commandes et résultats présentés sont issus de sessions de test réelles.*
