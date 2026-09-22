@@ -53,6 +53,17 @@ N8N_BASIC_AUTH_PASSWORD=<mot-de-passe>
 
 Dans n8n : **Workflows → Import from file** → sélectionner le fichier JSON. Après import, rattacher les credentials SMTP via le nœud email, puis cliquer sur **Publish** pour activer le Schedule.
 
+Les deux workflows validés en lab sont publiés dans le dépôt :
+
+| Workflow | Fichier JSON |
+|---|---|
+| Synchronisation corpus + email quarantaine | [`n8n-sync-corpus.json`](../../scripts/N8N/n8n-sync-corpus.json) |
+| Rappel mensuel rotation svc-rag | [`n8n-rappel-rotation-svc-rag.json`](../../scripts/N8N/n8n-rappel-rotation-svc-rag.json) |
+
+> **Avant import :** remplacer les placeholders `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` par les valeurs réelles de l'environnement.
+
+> **Credential SMTP obligatoire :** les deux workflows utilisent un nœud email. Créer le credential dans n8n avant d'importer : **Settings → Credentials → Add credential → SMTP**. Renseigner le serveur, le port, l'utilisateur et le mot de passe. Après import du workflow, ouvrir le nœud email et sélectionner ce credential dans le champ "Credential". Sans cette étape, le workflow s'exécute mais le nœud email échoue silencieusement.
+
 ---
 
 ## §7.2 Pipeline 1 : synchronisation corpus
@@ -220,6 +231,8 @@ Email reçu     : non (pas d'erreur, pas de quarantaine)
 
 Test de déclenchement email (condition IF forcée à true) : email reçu sur `<destinataire>` avec le rapport correct.
 
+Fichier importable : [`n8n-sync-corpus.json`](../../scripts/N8N/n8n-sync-corpus.json)
+
 ---
 
 ## §7.3 Pipeline 2 : rappel mensuel de rotation du compte svc-rag
@@ -268,6 +281,8 @@ Pour éviter ce problème, définir `TZ=Europe/Zurich` dans les variables d'envi
 ### §7.3.4 Validation en lab
 
 Email reçu avec la procédure complète en 7 étapes. Sujet : `[RAG Stack] Rappel : rotation du mot de passe svc-rag : septembre 2026`.
+
+Fichier importable : [`n8n-rappel-rotation-svc-rag.json`](../../scripts/N8N/n8n-rappel-rotation-svc-rag.json)
 
 ---
 

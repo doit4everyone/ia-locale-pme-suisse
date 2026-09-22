@@ -435,22 +435,33 @@ Settings → Admin → Models → `rag-api` → Make Public → Enregistrer.
 
 ---
 
-## Étape 13 : configurer le workflow n8n
+## Étape 13 : configurer les workflows n8n
 
 Ouvrir `http://<IP-VM>:5678`.
 
-Le workflow "RAG Stack - Synchronisation corpus" déclenche `/admin/sync` toutes les heures. Si le workflow n'existe pas encore, l'importer depuis le fichier JSON du dépôt.
+**Étape préalable : créer le credential SMTP**
 
-Vérifier la configuration du nœud "POST /admin/sync" :
+Les deux workflows envoient des emails. Créer le credential avant d'importer les workflows : **Settings → Credentials → Add credential → SMTP**. Renseigner le serveur, le port, l'utilisateur et le mot de passe de l'expéditeur.
+
+**Importer les deux workflows**
+
+Dans n8n : **Workflows → Import from file**. Importer les deux fichiers depuis `scripts/N8N/` du dépôt :
+
+- `n8n-sync-corpus.json` : synchronisation du corpus toutes les heures
+- `n8n-rappel-rotation-svc-rag.json` : rappel mensuel de rotation du mot de passe svc-rag
+
+Après chaque import, ouvrir le nœud email et sélectionner le credential SMTP créé ci-dessus. Remplacer `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` par les valeurs réelles.
+
+Vérifier la configuration du nœud "POST /admin/sync" dans le workflow de synchronisation :
 
 - URL : `http://rag-api:8080/admin/sync`
 - Method : POST
 - Header : `Authorization: Bearer <ADMIN_TOKEN>`
 
-Activer le workflow et lancer une exécution manuelle pour valider :
+Activer les deux workflows et lancer une exécution manuelle du workflow de synchronisation pour valider :
 
 ```
-Workflows → RAG Stack → Execute workflow
+Workflows → RAG Stack - Synchronisation corpus → Execute workflow
 ```
 
 Résultat attendu dans les logs :
