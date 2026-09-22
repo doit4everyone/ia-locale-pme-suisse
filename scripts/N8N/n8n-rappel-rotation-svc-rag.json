@@ -1,0 +1,91 @@
+{
+  "name": "RAG Stack - Rappel mensuel rotation mot de passe svc-rag",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 1 * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "name": "Schedule Trigger (1er du mois, 09h00)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst mois = now.toLocaleString('fr-CH', { month: 'long', year: 'numeric', timeZone: 'Europe/Zurich' });\n\nconst sujet = `🔐 [RAG Stack] Rappel : rotation du mot de passe svc-rag — ${mois}`;\n\nconst corps = `RAPPEL MENSUEL — ROTATION DU MOT DE PASSE svc-rag\\n`\n  + `Date : ${now.toLocaleDateString('fr-CH', { timeZone: 'Europe/Zurich' })}\\n\\n`\n  + `Le compte svc-rag est un compte à privilèges qui peut lire l'intégralité\\n`\n  + `du file server et de l'annuaire AD. Son mot de passe doit être changé\\n`\n  + `régulièrement selon la politique de sécurité de l'organisation.\\n\\n`\n  + `PROCÉDURE DE ROTATION (à effectuer dans cet ordre) :\\n\\n`\n  + `1. Générer un nouveau mot de passe fort (gestionnaire de mots de passe)\\n\\n`\n  + `2. Changer dans Active Directory :\\n`\n  + `   Set-ADAccountPassword -Identity svc-rag -Reset\\n`\n  + `   -NewPassword (ConvertTo-SecureString \"<nouveau-mdp>\" -AsPlainText -Force)\\n\\n`\n  + `3. Mettre à jour sur VM-RAG-LAB :\\n`\n  + `   sudo nano /etc/smbcredentials/svc-rag\\n`\n  + `   → Modifier la ligne : password=<nouveau-mdp>\\n\\n`\n  + `4. Mettre à jour dans /root/rag-stack/.env :\\n`\n  + `   LDAP_BIND_PWD=<nouveau-mdp>\\n`\n  + `   SMB_PASSWORD=<nouveau-mdp>\\n\\n`\n  + `5. Redémarrer la RAG API :\\n`\n  + `   cd /root/rag-stack && docker compose up -d rag-api\\n\\n`\n  + `6. Vérifier que tout fonctionne :\\n`\n  + `   curl -s -X POST http://localhost:8080/admin/sync\\n`\n  + `   -H \"Authorization: Bearer <ADMIN_TOKEN>\"\\n`\n  + `   → Vérifier success: true dans la réponse\\n\\n`\n  + `7. Tester l'authentification LDAP dans Open WebUI :\\n`\n  + `   Se connecter avec un compte AD et poser une question\\n`\n  + `   → Vérifier que les groupes AD sont correctement résolus dans les logs\\n\\n`\n  + `Si une étape est oubliée, le pipeline tombe silencieusement.\\n`\n  + `En cas de problème, consulter §9 du guide de déploiement.\\n`;\n\nreturn [{ json: { sujet, corps } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "name": "Formater rappel rotation"
+    },
+    {
+      "parameters": {
+        "fromEmail": "<EMAIL_EXPEDITEUR>",
+        "toEmail": "<EMAIL_DESTINATAIRE>",
+        "subject": "={{ $json.sujet }}",
+        "emailFormat": "text",
+        "text": "={{ $json.corps }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        0
+      ],
+      "name": "Email rappel rotation",
+      "credentials": {
+        "smtp": {
+          "id": "<SMTP_CREDENTIAL_ID>",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (1er du mois, 09h00)": {
+      "main": [
+        [
+          {
+            "node": "Formater rappel rotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formater rappel rotation": {
+      "main": [
+        [
+          {
+            "node": "Email rappel rotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

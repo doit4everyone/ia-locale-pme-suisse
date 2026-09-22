@@ -1,0 +1,178 @@
+{
+  "name": "RAG Stack - Synchronisation corpus (Schedule + Email quarantaine)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        64
+      ],
+      "name": "Schedule Trigger (toutes les heures)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://rag-api:8080/admin/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer <ADMIN_TOKEN>"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 720000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        64
+      ],
+      "name": "POST /admin/sync"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "7df49421-984c-4012-8ed0-27a03b6f9d8b"
+            },
+            {
+              "leftValue": "={{ $json.quarantine_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "id": "ae9780f3-0948-4596-baa4-d525b17429f4"
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        64
+      ],
+      "name": "Erreur ou quarantaine ?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst ts = new Date(r.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' });\n\nlet sujet, corps;\n\nif (!r.success) {\n  sujet = `⚠️ [RAG SYNC] Erreur de synchronisation — ${new Date().toISOString().split('T')[0]}`;\n  corps = `RAPPORT DE SYNCHRONISATION RAG — ERREUR\\n`;\n  corps += `Horodatage : ${ts}\\n\\n`;\n  corps += `Erreurs détectées :\\n`;\n  for (const e of r.errors) corps += `  • ${e}\\n`;\n  corps += `\\n--- Détail indexeur ---\\n`;\n  corps += r.indexer.stdout || '(aucune sortie)';\n  if (r.indexer.stderr) corps += `\\nSTDERR:\\n${r.indexer.stderr}`;\n  corps += `\\n--- Détail acl_resolver ---\\n`;\n  corps += r.acl_resolver.stdout || '(aucune sortie)';\n  if (r.acl_resolver.stderr) corps += `\\nSTDERR:\\n${r.acl_resolver.stderr}`;\n} else {\n  sujet = `📋 [RAG SYNC] Fichiers en quarantaine — ${new Date().toISOString().split('T')[0]}`;\n  corps = `RAPPORT DE SYNCHRONISATION RAG — QUARANTAINE\\n`;\n  corps += `Horodatage : ${ts}\\n`;\n  corps += `Synchronisation : succès\\n\\n`;\n  corps += `${r.quarantine_count} fichier(s) en quarantaine :\\n`;\n  for (const f of r.quarantine) corps += `  • ${f}\\n`;\n  corps += `\\nCes fichiers sont présents sur le partage mais non indexés.\\n`;\n  corps += `Action requise : vérifier le contenu et relancer l'indexation manuellement si nécessaire.\\n`;\n}\n\nreturn [{ json: { sujet, corps } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "name": "Formater email"
+    },
+    {
+      "parameters": {
+        "fromEmail": "<EMAIL_EXPEDITEUR>",
+        "toEmail": "<EMAIL_DESTINATAIRE>",
+        "subject": "={{ $json.sujet }}",
+        "emailFormat": "text",
+        "text": "={{ $json.corps }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        0
+      ],
+      "name": "Email notification",
+      "credentials": {
+        "smtp": {
+          "id": "<SMTP_CREDENTIAL_ID>",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (toutes les heures)": {
+      "main": [
+        [
+          {
+            "node": "POST /admin/sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /admin/sync": {
+      "main": [
+        [
+          {
+            "node": "Erreur ou quarantaine ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erreur ou quarantaine ?": {
+      "main": [
+        [
+          {
+            "node": "Formater email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formater email": {
+      "main": [
+        [
+          {
+            "node": "Email notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
