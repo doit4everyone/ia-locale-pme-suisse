@@ -25,13 +25,13 @@ description: "Installation de vLLM en mode CPU sur Ubuntu 26.04, configuration p
 >
 > vLLM est documenté dans cette section pour deux usages précis : valider la configuration du pipeline avant migration vers un DGX Spark, et servir de moteur d'inférence en production sur DGX Spark avec Qwen3-30B-A3B.
 >
-> Pour la démonstration Onyx sur le matériel de lab (LABO-G9, CPU), le backend retenu est **Ollama** sur le poste hôte. Les raisons sont techniques : les timeouts d'Onyx, même portés à 300 secondes, sont incompatibles avec les vitesses d'inférence de vLLM en mode CPU, et la RAM de la VM (16 Go) est insuffisante pour faire cohabiter vLLM et Onyx simultanément.
+> Pour la validation sur le matériel de lab (LABO-G9, CPU), le backend retenu est **Ollama** sur le poste hôte. Onyx CE a été testé en §4 comme outil de validation du backend, puis abandonné au profit d'Open WebUI + RAG API FastAPI qui constituent la stack finale avec cloisonnement ACL NTFS réel.
 >
-> En production sur DGX Spark, le passage d'Ollama à vLLM se résume à modifier une seule ligne dans la configuration Onyx : l'URL du provider LLM. Le reste de la stack (connecteurs, pipelines n8n, configuration Qdrant) est identique.
+> En production sur DGX Spark, le passage d'Ollama à vLLM se résume à modifier l'URL du provider LLM dans le fichier `.env`. Le reste de la stack (Docker Compose, Qdrant, n8n, Open WebUI, RAG API) est identique.
 
-Architecture validée pour la démonstration : `WIN11-AD-TESTS → Onyx (VM-RAG-LAB) → Ollama qwen2.5:14b (LABO-G9)`
+Architecture validée pour la démonstration : `WIN11-AD-TESTS → Open WebUI (VM-RAG-LAB, port 3001) → RAG API FastAPI → Ollama qwen2.5:14b (LABO-G9)`
 
-Architecture cible pour la production DGX Spark : `Utilisateurs → Onyx → vLLM Qwen3-30B-A3B (DGX Spark)`
+Architecture cible pour la production DGX Spark : `Utilisateurs → Open WebUI → RAG API FastAPI → vLLM Qwen3-30B-A3B (DGX Spark)`
 
 ---
 
@@ -79,7 +79,7 @@ python -m vllm.entrypoints.openai.api_server \
   --port 8000
 ```
 
-> **Sur `--gpu-memory-utilization` en mode CPU :** malgré son nom, ce paramètre contrôle la fraction de RAM système réservée par vLLM. La valeur 0.82 signifie que vLLM peut utiliser 82% de la RAM totale de la VM. La VM est dimensionnée à 16 Go dans ce guide parce que l'inférence est déportée sur Ollama et qu'Onyx seul tient dans cette enveloppe. Pour exécuter vLLM dans la VM à des fins de validation, il faut porter temporairement la VM à 20 Go : 16 Go se sont révélés insuffisants pour Qwen3 1.7B en float32 avec un KV cache de 8192 tokens. Avec 20 Go, la valeur 0.82 convient.
+> **Sur `--gpu-memory-utilization` en mode CPU :** malgré son nom, ce paramètre contrôle la fraction de RAM système réservée par vLLM. La valeur 0.82 signifie que vLLM peut utiliser 82% de la RAM totale de la VM. La VM est dimensionnée à 16 Go dans ce guide parce que l'inférence est déportée sur Ollama et que la stack Open WebUI + RAG API tient dans cette enveloppe sans vLLM. Pour exécuter vLLM dans la VM à des fins de validation, il faut porter temporairement la VM à 20 Go : 16 Go se sont révélés insuffisants pour Qwen3 1.7B en float32 avec un KV cache de 8192 tokens. Avec 20 Go, la valeur 0.82 convient.
 
 > **Sur le mode thinking Qwen3 :** Qwen3 active par défaut un mode de raisonnement interne (balises `<think>`) qui consomme des tokens inutilement pour les tâches RAG factuelles. Il faut le désactiver explicitement dans chaque requête (voir §2.4).
 
@@ -171,7 +171,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 > **Sur la quantification NVFP4 :** le paramètre `--dtype` n'accepte pas `fp4`. La quantification NVFP4 relève de `--quantization modelopt_fp4`. Les modèles publiés par Nvidia sous la forme `nvidia/*-NVFP4` intègrent la quantification dans les poids : vLLM la détecte automatiquement sans flag supplémentaire. La disponibilité du modèle `nvidia/Qwen3-30B-A3B-NVFP4` est à vérifier au moment du déploiement : les références de modèles Nvidia évoluent.
 
-Toutes les autres configurations (Docker Compose, Qdrant, n8n, Onyx, FastAPI, pipelines) sont identiques à ce qui est validé sur VM-RAG-LAB.
+Toutes les autres configurations (Docker Compose, Qdrant, n8n, Open WebUI, RAG API FastAPI, pipelines) sont identiques à ce qui est validé sur VM-RAG-LAB.
 
 ---
 

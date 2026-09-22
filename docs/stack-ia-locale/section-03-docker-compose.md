@@ -17,17 +17,17 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 
 [Retour au sommaire](index.md) | [Section précédente : §2 vLLM](section-02-vllm.md)
 
-**Statut :** validé sur VM-RAG-LAB, septembre 2026. La RAG API complète (avec authentification OIDC et filtrage ACL) fait l'objet de la Partie 2 : ce guide déploie la version production sans cloisonnement fin, valide pour un corpus homogène.
+**Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (à venir) documentera les connecteurs Microsoft 365.
 
 ---
 
 > **Ce que cette section déploie**
 >
-> Quatre composants via Docker Compose : Qdrant (vector store), n8n (orchestration des pipelines), la RAG API FastAPI (retrieval, génération, journalisation nLPD) et Open WebUI (interface utilisateur). Onyx n'est pas dans cette stack : il dispose de sa propre stack déployée séparément en §4, uniquement pour la phase de validation.
+> Quatre composants via Docker Compose : Qdrant (vector store), n8n (orchestration des pipelines), la RAG API FastAPI (retrieval, génération, journalisation nLPD) et Open WebUI (interface utilisateur). Onyx CE est déployé séparément en §4 uniquement pour valider le backend Ollama, puis remplacé par cette stack.
 >
-> La RAG API est le composant central de la Partie 1. Elle reçoit les requêtes utilisateurs, interroge Qdrant, appelle le LLM et journalise chaque échange. Sans authentification LDAP ni filtrage fin par ACL (Partie 2), elle convient pour un corpus dont tous les utilisateurs peuvent légitimement consulter tous les documents.
+> La RAG API est le composant central de la stack. Elle reçoit les requêtes utilisateurs via Open WebUI, résout l'identité AD via LDAP, interroge Qdrant avec filtrage ACL NTFS, appelle le LLM et journalise chaque échange pour l'audit nLPD.
 >
-> **Avertissement rappelé de §0 :** ne pas indexer un partage contenant des données à accès restreint avant d'avoir déployé la Partie 2.
+
 
 ---
 
@@ -113,8 +113,9 @@ TOP_K=20
 # 20 améliore le recall sur les gros fichiers .md (100+ chunks). Valeur validée en lab.
 CONTEXT_THRESHOLD=0.01
 # Score RRF minimum pour déclencher l'extension de contexte.
-# Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche
-# l'extension sur presque toutes les questions. Ne pas dépasser 0.05.
+# Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes.
+# 0.01 déclenche l'extension sur presque toutes les questions.
+# Ne pas dépasser 0.05.
 MAX_CONTEXT_CHUNKS=14
 # Nombre maximum de chunks par extension de contexte.
 # 14 validé en lab sur CPU. Augmenter à 15-20 une fois le GPU installé.
@@ -419,7 +420,7 @@ docker run --rm --network rag-stack_default curlimages/curl \
 ls -la /var/log/rag/
 ```
 
-> **Collection Qdrant vide à ce stade :** `/query` renvoie une réponse du LLM sans sources tant qu'aucun document n'a été indexé. C'est le comportement attendu. L'indexation se fait via `indexer.py` (§5) ou via le pipeline n8n (§7).
+> **Collection Qdrant vide à ce stade :** si aucun document n'a encore été indexé, `/query` renvoie HTTP 422 (aucun chunk, réponse non ancrée). Le test avec un `user_id` sans `@` retourne 403, pas 401. Pour tester `/query`, utiliser un email d'un compte existant dans l'AD. L'indexation se fait via `indexer.py` (§5) ou via le pipeline n8n (§7).
 
 ---
 
