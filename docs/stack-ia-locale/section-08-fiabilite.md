@@ -83,7 +83,7 @@ La réponse était bien formatée, complète, et indiscernable d'une réponse co
 
 ## §8.3 Architecture de contrôle : RAG API et Open WebUI
 
-La réponse architecturale est de ne pas laisser Onyx gérer seul la génération. La RAG API déployée en §3 implémente quatre couches de contrôle entre la récupération et l'affichage.
+La réponse architecturale est de ne pas laisser le LLM gérer seul la génération sans guardrails. La RAG API déployée en §3 implémente quatre couches de contrôle entre la récupération et l'affichage.
 
 ```
 Utilisateur (Open WebUI, port 3001)
@@ -241,7 +241,7 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 | Paramètre | Valeur | Justification |
 |---|---|---|
 | `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
-| `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, 0.016] avec k=60. 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
+| `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes (vectorielle + BM25). 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
 | `MAX_CONTEXT_CHUNKS` | 14 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 15-20 après GPU. |
 
 ### Limite sur les très gros fichiers
@@ -258,7 +258,13 @@ La température est fixée à 0.2 (validé en lab). En dessous de 0.1, les répo
 
 ## §8.7 Citations enrichies avec chemin UNC
 
-Depuis la v2.6.0, `enrichir_citations()` remplace chaque citation `[nom.docx]` par `[nom.docx : `\\\\SERVEUR\\Partage\\Dossier\\`]` en post-traitement côté API, après le groundedness check. Le chemin UNC est dans un bloc code inline Markdown : Open WebUI l'affiche tel quel et un clic le copie dans le presse-papiers. L'utilisateur colle ensuite le chemin dans la barre d'adresse de l'Explorateur Windows.
+Depuis la v2.6.0, `enrichir_citations()` remplace chaque citation `[nom.docx]` par une citation enrichie avec le chemin UNC du dossier parent, sous cette forme :
+
+```
+[nom.docx : `\\\\SERVEUR\\Partage\\Dossier\\`]
+```
+
+Le chemin est affiché dans un bloc code inline : Open WebUI l'affiche tel quel et un clic le copie dans le presse-papiers. L'utilisateur colle ensuite le chemin dans la barre d'adresse de l'Explorateur Windows.
 
 Cette opération est effectuée après tous les contrôles : `verifier_citations()` et le juge voient la citation brute `[nom.docx]`, pas la citation enrichie.
 
@@ -296,7 +302,7 @@ La règle générale : toujours poser une question directe sur un sujet précis.
 | 3. Contrôles déterministes | Citations inventées, réponse sans source | Nul | RAG API uniquement |
 | 4. Groundedness check | Juge qwen3:4b, affirmation par affirmation | ~2 à 8 s CPU | RAG API uniquement |
 
-Les couches 1 et 2 s'appliquent à Onyx CE sans développement. Les couches 3 et 4 nécessitent la RAG API déployée en §3.
+Les couches 1 et 2 s'appliquent à toute interface sans développement spécifique. Les couches 3 et 4 nécessitent la RAG API déployée en §3.
 
 ---
 

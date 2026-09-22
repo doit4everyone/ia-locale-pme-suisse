@@ -278,17 +278,18 @@ Copier `acl_resolver.py` dans `/root/rag-pipeline/`.
 set -a && source ~/rag-stack/.env && set +a
 
 # Variables utilisées par acl_resolver.py :
-# SMB_USER, SMB_PASSWORD, SMB_DOMAIN  : credentials svc-rag
-# SMB_SHARE, SMB_MOUNT                : partage et point de montage
-# QDRANT_URL (ou QDRANT_HOST)          : http://localhost:6333
+# SMB_USER, SMB_PASSWORD, SMB_DOMAIN  : credentials svc-rag (pour smbcacls)
+# QDRANT_URL                          : http://localhost:6333
+#                                       (QDRANT_HOST n'est pas lu par acl_resolver.py)
 # QDRANT_COLLECTION                   : documents (défaut)
 # DOCUMENTATION_COLLECTION            : documentation (défaut)
 # DOCUMENTATION_PATHS                 : préfixes routés vers documentation
 
-# Note : SMB_CREDENTIALS n'est pas une variable du script.
-# Le fichier /etc/smbcredentials/svc-rag est utilisé uniquement
-# pour le montage CIFS (fstab). acl_resolver.py utilise SMB_USER,
-# SMB_PASSWORD et SMB_DOMAIN directement via smbcacls.
+# Note : SMB_SHARE et SMB_MOUNT ne sont pas lus par acl_resolver.py.
+# Ils sont passés en arguments --share et --mount sur la ligne de commande
+# (ou lus par main.py pour les transmettre au sous-processus /admin/sync).
+# SMB_CREDENTIALS n'est pas une variable du script :
+# acl_resolver.py utilise SMB_USER, SMB_PASSWORD et SMB_DOMAIN directement.
 ```
 
 ### §5.4.2b Garde-fou en cas de panne globale

@@ -4,6 +4,21 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.12.0] : Septembre 2026
+
+### Documentation
+
+- `section-03` §3.6 : encadré "collection vide" corrigé : `/query` retourne HTTP 422 (aucun chunk), pas une réponse LLM sans sources. 401 vs 403 clarifiés. Adresse de test : email d'un compte AD existant requis.
+- `section-03` §3.2 et `section-08` §8.6 : borne RRF corrigée de 0,016 à ~0,033 (deux listes, k=60).
+- `section-05` §5.4.2 : `QDRANT_URL` (pas `QDRANT_HOST`). `SMB_SHARE` et `SMB_MOUNT` lus par `main.py`, pas par `acl_resolver.py`.
+- `section-08` §8.7 : accents graves imbriqués dans l'exemple de citation UNC corrigés.
+- `section-00` étape 3 : `python3.11` remplacé par `python3` (python3.11 absent des dépôts Ubuntu 26.04).
+- `suivi-corrections.md` : justification du point 10 corrigée (les chunks BM25 ne repassent pas par Qdrant).
+- `index.md` scripts : `fileservice-root` → `corpus-root`.
+- `docker-compose.yml` : `WEBHOOK_URL` → `N8N_WEBHOOK_URL`.
+
+---
+
 ## [2.11.0] : Septembre 2026
 
 ### Sécurité

@@ -135,7 +135,7 @@ Pour un développeur seul dans une PME, la capacité à déléguer une tâche en
 
 ## §6.6 Points d'attention
 
-- **OLLAMA_HOST sur LABO-G9 :** Ollama doit écouter sur le réseau. Vérifier que la variable d'environnement `OLLAMA_HOST=0.0.0.0:11434` est définie sur LABO-G9 (déjà configuré si Onyx fonctionne).
+- **OLLAMA_HOST sur LABO-G9 :** Ollama doit écouter sur le réseau. Vérifier que la variable d'environnement `OLLAMA_HOST=0.0.0.0:11434` est définie sur LABO-G9 (déjà configuré si Open WebUI fonctionne).
 - **Auto-approve :** Cline demande confirmation avant d'écrire des fichiers ou d'exécuter des commandes. Le mode Auto-approve accélère les tâches répétitives mais doit être utilisé avec précaution sur des projets en production.
 - **Workspace Cline :** les fichiers créés par Cline se trouvent dans `%USERPROFILE%\.cline\data\workspaces\chat\` par défaut. Ouvrir un dossier de projet dans VS Code pour que Cline travaille directement dans le bon répertoire.
 

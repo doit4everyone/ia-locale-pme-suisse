@@ -28,7 +28,7 @@ Ce guide a été validé sur la configuration suivante, dans VMware Workstation 
 | Ressource | Minimum | Recommandé | Remarque |
 |---|---|---|---|
 | vCPU | 4 | 6 | Épingler sur P-cores physiques (voir §1.3) |
-| RAM | 16 Go | 16 Go | Onyx + Docker Compose complet : environ 8 à 10 Go en charge. Pour exécuter vLLM dans la VM, porter à 20 Go (voir §2) |
+| RAM | 16 Go | 16 Go | Open WebUI + RAG API + Docker Compose complet : environ 8 à 10 Go en charge. Pour exécuter vLLM dans la VM, porter à 20 Go (voir §2) |
 | Disque | 80 Go | 100 Go | Type NVMe recommandé dans VMware Workstation |
 | Réseau | NAT | Réseau lab dédié | Un réseau lab donne accès aux ressources AD, SMB, DNS |
 

@@ -48,11 +48,11 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | Point | Description | Priorité | Remarque |
 |---|---|---|---|
 | 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. |
-| 10 | BM25 garde un instantané des ACL figées au démarrage | Faible | Impact limité : BM25 est un filtre de pré-sélection, le filtre ACL Qdrant reste actif. |
+| 10 | BM25 garde un instantané des ACL figées au démarrage | Faible | Les chunks BM25 ne repassent pas par Qdrant : le filtre ACL Qdrant ne s'applique pas sur le chemin BM25. Un utilisateur dont les droits changent peut voir un chunk via BM25 jusqu'au prochain redémarrage du conteneur. Impact limité en pratique : le chunk doit encore passer le filtre ACL Qdrant dans le scroll d'extension. Correction prévue : relire le payload Qdrant par ID pour les candidats BM25. |
 | 14 | ACL par noms plutôt que par SIDs, masque ALLOWED non vérifié, permissions de partage ignorées | Moyenne | Identités intégrées à mesurer sur le partage avant de corriger. |
 | auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. |
 | auth.2 | Identités intégrées (`AUTORITE NT\Utilisateurs authentifiés`) dans `autorises[]` sans être dans les groupes LDAP | Moyenne | Fichiers concernés invisibles. Décision à prendre : ignorer ou injecter dans `get_user_groups`. |
-| doc.1 | `§9.8` checklist et commandes sur port 8080 | Corrigé | v2.9.0 documentation |
+| doc.1 | `§9.8` checklist et commandes sur port 8080 | Corrigé | v2.9.0 et v2.11.0 |
 | doc.2 | `GROUPS_CACHE_TTL`, `SYNC_PYTHON`, `SYNC_TIMEOUT_*` absents du Compose | Faible | Variables sans effet, valeurs coïncident avec les défauts du code. |
 | doc.3 | n8n : port 5678 publié sur LAN, `N8N_BASIC_AUTH_*` sans effet depuis n8n 1.0 | Faible | Accès admin uniquement, acceptable en lab. |
 
