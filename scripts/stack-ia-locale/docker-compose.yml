@@ -74,7 +74,12 @@ services:
       - LDAP_BIND_PWD=${LDAP_BIND_PWD}
       - LDAP_DOMAIN=${LDAP_DOMAIN}
       - LDAP_CA_CERT=${LDAP_CA_CERT}
+      # Durée du cache des groupes AD en secondes (auth.py, défaut 300)
+      - GROUPS_CACHE_TTL=${GROUPS_CACHE_TTL}
       - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
+      - SYNC_PYTHON=${SYNC_PYTHON}
+      - SYNC_TIMEOUT_INDEXER=${SYNC_TIMEOUT_INDEXER}
+      - SYNC_TIMEOUT_ACL=${SYNC_TIMEOUT_ACL}
       - SMB_SHARE=${SMB_SHARE}
       - SMB_MOUNT=${SMB_MOUNT}
       - SMB_USER=${SMB_USER}
