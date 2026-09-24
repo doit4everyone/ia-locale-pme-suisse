@@ -36,40 +36,56 @@ sudo ufw default deny incoming
 sudo ufw default allow outgoing
 ```
 
-### §9.1.2 Règles d'accès
+### §9.1.2 Ce que UFW protège, et ce qu'il ne protège pas
+
+> **Docker contourne UFW.** Les ports publiés par Docker (section `ports` du `docker-compose.yml`) sont ouverts par Docker directement dans iptables, avant que les règles UFW ne s'appliquent. Une règle `ufw allow from <subnet> to any port 3001` ne restreint donc rien : le port reste joignable depuis n'importe quelle source du réseau, que la règle existe ou non. UFW ne protège efficacement que les services qui tournent directement sur l'hôte, comme SSH.
+
+La protection des services Docker repose donc sur la façon dont chaque port est publié, pas sur UFW :
+
+| Service | Publication dans `docker-compose.yml` | Accessible depuis |
+|---|---|---|
+| RAG API (8080) | Aucune (pas de section `ports`) | Réseau Compose uniquement (Open WebUI, n8n) |
+| Qdrant (6333) | `127.0.0.1:6333:6333` | La VM elle-même uniquement |
+| Open WebUI (3001) | `3001:8080` | Tout le réseau |
+| n8n (5678) | `5678:5678` | Tout le réseau |
+
+Open WebUI et n8n sont les deux seuls services exposés sur le réseau. Open WebUI exige une authentification LDAP AD, n8n une authentification basique. En lab, c'est acceptable. En production, restreindre ces deux ports aux subnets internes demande une règle au niveau de Docker (chaîne `DOCKER-USER`, voir la documentation Docker) ou un reverse proxy TLS devant les services. Cette partie est documentaire, non validée en lab.
+
+### §9.1.3 Règles d'accès
 
 > **Vérifier la connexion SSH active avant d'activer UFW :** `ss -tn | grep :22`. L'IP source doit être dans les subnets autorisés. Si elle n'y figure pas, la règle SSH doit être adaptée avant d'activer le pare-feu, sous peine de perdre l'accès à la VM.
 
 ```bash
 # SSH : depuis n'importe quelle source en lab
-# En production : restreindre aux subnets connus
+# En production : restreindre aux subnets connus (§9.1.6)
 sudo ufw allow 22/tcp
-
-# Services RAG : depuis les subnets internes uniquement
-# Adapter aux subnets de l'organisation
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 8080   # RAG API
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 3001   # Open WebUI
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 5678   # n8n
-sudo ufw allow from <SUBNET-SITE-1>/24 to any port 6333   # Qdrant
-
-# Second subnet si nécessaire
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 8080
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 3001
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 5678
-sudo ufw allow from <SUBNET-SITE-2>/24 to any port 6333
 ```
 
-### §9.1.3 Réseau Docker interne
+Aucune règle n'est nécessaire pour les services Docker, pour la raison expliquée en §9.1.2.
 
-> **Piège critique :** les conteneurs Docker communiquent via un réseau bridge interne (`172.18.0.0/16`), pas via le subnet physique. Sans les règles ci-dessous, Open WebUI ne peut pas joindre la RAG API même s'ils sont sur la même VM. Le mode de défaillance est silencieux : Open WebUI affiche "OpenAI: Network Problem" sans autre indication.
+### §9.1.4 Réseau Docker interne
+
+Open WebUI joint la RAG API par `http://rag-api:8080` et n8n par la même adresse. Ce trafic reste sur le réseau bridge Compose (`rag-stack_default`) et ne passe pas par les règles UFW de l'hôte. Aucune règle `172.18.0.0/16` n'est nécessaire.
+
+> **Historique :** avant la version 2.4.0, Open WebUI joignait la RAG API par l'IP de la VM (`http://<IP-VM>:8080/v1`). Ce trafic sortait du réseau Compose et exigeait des règles UFW `172.18.0.0/16` sur les ports 8080 et 6333, faute de quoi Open WebUI affichait « OpenAI: Network Problem ». Depuis que la connexion passe par `http://rag-api:8080/v1`, ces règles sont inutiles.
+
+Sur une installation antérieure à la version 2.4.0, supprimer les règles devenues inutiles :
 
 ```bash
-# Réseau bridge Docker : communication inter-conteneurs via l'hôte
-sudo ufw allow from 172.18.0.0/16 to any port 8080
-sudo ufw allow from 172.18.0.0/16 to any port 6333
+sudo ufw status numbered
+# Supprimer les règles 8080 et 6333 (subnets internes et 172.18.0.0/16) :
+sudo ufw delete allow from <SUBNET-SITE-1>/24 to any port 8080
+sudo ufw delete allow from <SUBNET-SITE-1>/24 to any port 6333
+sudo ufw delete allow from 172.18.0.0/16 to any port 8080
+sudo ufw delete allow from 172.18.0.0/16 to any port 6333
+# Idem pour <SUBNET-SITE-2> si un second subnet avait été ajouté.
+# Les règles 3001 et 5678 sont sans effet (§9.1.2) : elles peuvent
+# être supprimées de la même façon pour ne pas laisser croire à une protection.
 ```
 
-### §9.1.4 Activation et vérification
+Vérifier ensuite que la chaîne fonctionne toujours : une question posée dans Open WebUI doit obtenir une réponse avec citations, et la commande de l'étape 6 de §9.5.1 doit retourner `"success": true`.
+
+### §9.1.5 Activation et vérification
 
 ```bash
 sudo ufw enable
@@ -82,15 +98,40 @@ sudo ufw status verbose
 Status: active
 To                         Action      From
 22/tcp                     ALLOW IN    Anywhere
-8080                       ALLOW IN    <SUBNET-SITE-1>/24
-3001                       ALLOW IN    <SUBNET-SITE-1>/24
-5678                       ALLOW IN    <SUBNET-SITE-1>/24
-6333                       ALLOW IN    <SUBNET-SITE-1>/24
-8080                       ALLOW IN    172.18.0.0/16
-6333                       ALLOW IN    172.18.0.0/16
 ```
 
-### §9.1.5 Durcissement SSH en production
+Vérifier la publication réelle des ports Docker :
+
+```bash
+cd /root/rag-stack && docker compose ps
+# qdrant     : 127.0.0.1:6333->6333/tcp
+# rag-api    : aucun port publié
+# open-webui : 0.0.0.0:3001->8080/tcp
+# n8n        : 0.0.0.0:5678->5678/tcp
+```
+
+**Validé en lab, septembre 2026 :** toutes les règles UFW supprimées à l'exception de SSH. La chaîne interne reste fonctionnelle : `/health` répond depuis n8n et depuis Open WebUI, `/stats` liste les deux collections Qdrant, `/admin/sync` retourne `"success": true`, et une question posée dans Open WebUI obtient une réponse avec citations.
+
+Test d'exposition depuis une autre machine du même segment réseau que la VM (PowerShell) :
+
+```powershell
+5678, 3001, 8080, 6333 | ForEach-Object {
+    "{0,5} : {1}" -f $_, (Test-NetConnection <IP-VM> -Port $_ -WarningAction SilentlyContinue).TcpTestSucceeded
+}
+```
+
+Résultat obtenu :
+
+```
+ 5678 : True
+ 3001 : True
+ 8080 : False
+ 6333 : False
+```
+
+n8n et Open WebUI restent joignables sans aucune règle UFW : c'est la publication Docker qui les expose. La RAG API et Qdrant ne sont pas joignables, parce qu'ils ne sont pas publiés sur le réseau. Le test doit être lancé depuis le même segment réseau que la VM : un pare-feu intermédiaire fausserait le résultat.
+
+### §9.1.6 Durcissement SSH en production
 
 En production, restreindre SSH aux subnets internes :
 
@@ -236,7 +277,7 @@ Un verrou `asyncio.Lock` empêche deux synchronisations simultanées. Si une pas
 
 ### §9.3.4 Restriction réseau
 
-Le port 8080 est restreint aux subnets internes par UFW (§9.1). Ne jamais exposer ce port sur internet.
+Le port 8080 n'est pas publié par Docker : `/admin/sync` n'est joignable que depuis le réseau Compose, par n8n (§7.2). Aucun poste du réseau ne peut l'appeler directement, même avec le bon token. Ne jamais ajouter de section `ports` au service `rag-api`, ni exposer ce port sur internet.
 
 ---
 
@@ -470,11 +511,19 @@ cd /root/rag-stack && docker compose up -d rag-api
 **Étape 6 :** vérifier la synchronisation :
 
 ```bash
-# Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
-docker compose exec n8n wget -qO- \
-  --header="Authorization: Bearer <ADMIN_TOKEN>" \
+# Le port 8080 n'est pas publié. Tester depuis le réseau Compose.
+# --post-data est obligatoire : /admin/sync n'accepte que POST,
+# sans cette option wget envoie un GET et la RAG API répond 405.
+# Le token est lu depuis le .env : ni copié à la main, ni conservé
+# dans l'historique du shell. Un token absent ou erroné retourne 401.
+cd /root/rag-stack
+TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2-)
+docker compose exec n8n wget -qO- --post-data='' \
+  --header="Authorization: Bearer $TOKEN" \
   http://rag-api:8080/admin/sync | python3 -m json.tool
+unset TOKEN
 # Vérifier : "success": true
+# Sans réponse : une synchronisation est peut-être déjà en cours (HTTP 409)
 ```
 
 **Étape 7 :** tester l'authentification LDAP dans Open WebUI :
@@ -601,6 +650,8 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 | Logrotate configuré | `cat /etc/logrotate.d/rag-nlpd` | Fichier présent, rotate 365 |
 | ADMIN_TOKEN fort | `grep ADMIN_TOKEN /root/rag-stack/.env` | Token de 32+ caractères |
 | Port 8080 non exposé | `docker compose ps rag-api` | Aucun port publié dans la colonne PORTS |
+| Qdrant sur la boucle locale | `docker compose ps qdrant` | `127.0.0.1:6333->6333/tcp` |
+| Aucune règle UFW obsolète | `sudo ufw status` | Pas de règle 8080, 6333 ni `172.18.0.0/16` |
 | SSH restreint (prod) | `sudo ufw status \| grep 22` | Subnet interne uniquement |
 | DENY validé | Voir §9.4.5 | Test positif + test négatif effectués |
 | Groupes imbriqués | Voir §9.4.5 | Résolution récursive validée |

@@ -16,6 +16,18 @@ Toutes les modifications notables de ce repo sont documentées ici.
 - `suivi-corrections.md` : justification du point 10 corrigée (les chunks BM25 ne repassent pas par Qdrant).
 - `index.md` scripts : `fileservice-root` → `corpus-root`.
 - `docker-compose.yml` : `WEBHOOK_URL` → `N8N_WEBHOOK_URL`.
+- `section-09` §9.1 réécrit : Docker contourne UFW pour les ports publiés. Règles UFW 8080, 6333 et `172.18.0.0/16` supprimées (inutiles depuis 2.4.0), tableau d'exposition réelle des services, procédure de nettoyage pour les installations antérieures. Sous-sections renumérotées §9.1.1 à §9.1.6.
+- `section-09` §9.1.5 : suppression des règles UFW validée en lab (chaîne interne fonctionnelle, test d'exposition des ports depuis le segment réseau de la VM).
+- `section-09` §9.3.4 : port 8080 non publié (et non « restreint par UFW »).
+- `section-09` §9.5.1 étape 6 : `--post-data=''` ajouté (`/admin/sync` n'accepte que POST, un GET retourne 405). Token lu depuis le `.env` au lieu d'être copié à la main.
+- `section-09` §9.8 : vérifications Qdrant sur `127.0.0.1` et absence de règles UFW obsolètes ajoutées.
+- `CHANGELOG.md` [2.0.0] : récursion `memberOf` attribuée à `auth.py` (et non à `acl_resolver.py`).
+
+### Scripts
+
+- `n8n-rappel-rotation-svc-rag.json` : étape 6 corrigée (plus de `localhost:8080`, POST depuis le réseau Compose, token lu depuis le `.env`), étape 7 alignée sur §9.5.1, renvoi vers §9.5.1. Tirets cadratins retirés de l'objet et de l'en-tête du mail.
+- `n8n-sync-corpus.json` : tirets cadratins retirés des objets et en-têtes de mail.
+- `env.example` : `MAX_CONTEXT_CHUNKS` corrigé de 12 à 14 (valeur validée en 2.2.0), variables rangées par bloc avec commentaires, renvoi vers §9.5.1 pour la rotation de `svc-rag`.
 
 ---
 
@@ -273,7 +285,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 **Scripts Python du pipeline RAG local (répertoire `scripts/stack-ia-locale/`) :**
 - `indexer.py` : indexeur v5, cascade de détection org à 5 niveaux, support `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`, exclusion `DfsrPrivate`, seuil minimal chunk configurable (`MIN_CHUNK_WORDS`)
-- `acl_resolver.py` : v3 avec détection des chunks orphelins, résolution LDAP récursive (`memberOf`), DENY explicites
+- `acl_resolver.py` : v3 avec détection des chunks orphelins, DENY explicites
 - `main.py` : RAG API FastAPI complète, filtrage Qdrant par ACL NTFS, groundedness check (`qwen3:4b`), `warmup_judge()`, journalisation nLPD, endpoint `/admin/sync`
 - `auth.py` : résolution LDAP email → groupes AD, récursion `memberOf`, `CERT_REQUIRED`, cache TTL
 - `docker-compose.yml` : stack complète Qdrant + n8n + RAG API + Open WebUI
