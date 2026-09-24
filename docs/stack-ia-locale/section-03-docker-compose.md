@@ -212,7 +212,7 @@ services:
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
       # le binding 127.0.0.1 est la seule protection fiable contre un accès LAN
-      # non authentifié au corpus Qdrant (voir §9.1).
+      # non authentifié au corpus Qdrant (voir §9.1.2).
       - "127.0.0.1:6333:6333"
     volumes:
       - ./qdrant_data:/qdrant/storage
@@ -480,10 +480,16 @@ docker compose up -d
 > **Après une restauration :** relancer impérativement `acl_resolver.py` pour vérifier que les ACL sont cohérentes avec les permissions actuelles du file server. Un snapshot peut dater de plusieurs heures : des permissions modifiées entre-temps ne seraient pas reflétées.
 
 ```bash
-# Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
-docker compose exec n8n wget -qO- \
-  --header="Authorization: Bearer <ADMIN_TOKEN>" \
-  http://rag-api:8080/admin/sync
+# Le port 8080 n'est pas publié. Tester depuis le réseau Compose.
+# Le token est lu depuis le .env : ni copié à la main, ni conservé
+# dans l'historique du shell. --post-data est obligatoire : /admin/sync
+# n'accepte que POST, sans cette option wget envoie un GET (réponse 405).
+cd /root/rag-stack
+TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2-)
+docker compose exec n8n wget -qO- --post-data='' \
+  --header="Authorization: Bearer $TOKEN" \
+  http://rag-api:8080/admin/sync | python3 -m json.tool
+unset TOKEN
 ```
 
 ---

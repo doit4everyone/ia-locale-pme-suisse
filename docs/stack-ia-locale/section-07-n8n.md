@@ -109,19 +109,25 @@ Tester l'endpoint directement avant de construire le pipeline :
 
 ```bash
 # Le port 8080 n'est pas publié sur le LAN (voir §3.4).
-# Tester depuis le réseau Compose via le conteneur n8n :
-docker compose exec n8n wget -qO- \
-  --header="Authorization: Bearer <ADMIN_TOKEN>" \
-  http://rag-api:8080/admin/sync
+# Tester depuis le réseau Compose via le conteneur n8n.
+# Le token est lu depuis le .env : ni copié à la main, ni conservé
+# dans l'historique du shell. --post-data est obligatoire : /admin/sync
+# n'accepte que POST, sans cette option wget envoie un GET (réponse 405).
+cd /root/rag-stack
+TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2-)
+docker compose exec n8n wget -qO- --post-data='' \
+  --header="Authorization: Bearer $TOKEN" \
+  http://rag-api:8080/admin/sync | python3 -m json.tool
+unset TOKEN
 ```
 
 Résultat attendu en fonctionnement normal :
 
 ```json
 {
-    "timestamp": "2026-09-11T08:08:48Z",
-    "indexer":     {"returncode": 0, "stdout": "...68 chunks indexés..."},
-    "acl_resolver": {"returncode": 0, "stdout": "...68 chunks mis à jour..."},
+    "timestamp": "2026-09-24T14:59:49.859944+00:00",
+    "indexer": {"returncode": 0},
+    "acl_resolver": {"returncode": 0},
     "quarantine": [],
     "errors": [],
     "success": true,
@@ -194,12 +200,14 @@ Horodatage : 11.09.2026 10:08:48
 Erreurs détectées :
   • indexer.py a retourné code 1
 
---- Détail indexeur ---
-[stdout de indexer.py]
+Codes de retour : indexer.py = 1, acl_resolver.py = 0
 
---- Détail acl_resolver ---
-[stdout de acl_resolver.py]
+Détail sur VM-RAG-LAB :
+  docker logs rag-api 2>&1 | grep SYNC | tail -20
+  ls -la /var/log/rag/rapport_*.json
 ```
+
+> **Où trouver le détail d'une erreur :** l'endpoint `/admin/sync` ne renvoie que les codes de retour des deux scripts, pas leur sortie. Le détail est dans les logs du conteneur (`[SYNC]`, avec la fin de la sortie d'erreur du script en échec) et dans les rapports JSON écrits dans `/var/log/rag/`. L'email indique où chercher.
 
 **Email de quarantaine :**
 
@@ -258,7 +266,7 @@ L'email contient la procédure complète en 7 étapes dans l'ordre exact à suiv
 3. Mettre à jour `/etc/smbcredentials/svc-rag` sur VM-RAG-LAB
 4. Mettre à jour `LDAP_BIND_PWD` et `SMB_PASSWORD` dans `.env`
 5. Redémarrer la RAG API : `docker compose up -d rag-api`
-6. Vérifier via `POST /admin/sync` : `success: true`
+6. Vérifier via `POST /admin/sync` : `success: true` (commande en §9.5.1)
 7. Tester l'authentification LDAP dans Open WebUI
 
 > **Pourquoi l'ordre est critique :** si l'étape 2 (AD) est faite avant l'étape 3 (fichier credentials), le montage SMB tombe immédiatement. Si l'étape 5 (restart) est oubliée, la RAG API continue d'utiliser l'ancien mot de passe pour LDAP et les requêtes tombent silencieusement sans message d'erreur visible pour l'utilisateur.

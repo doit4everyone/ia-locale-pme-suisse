@@ -21,12 +21,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 - `section-09` §9.3.4 : port 8080 non publié (et non « restreint par UFW »).
 - `section-09` §9.5.1 étape 6 : `--post-data=''` ajouté (`/admin/sync` n'accepte que POST, un GET retourne 405). Token lu depuis le `.env` au lieu d'être copié à la main.
 - `section-09` §9.8 : vérifications Qdrant sur `127.0.0.1` et absence de règles UFW obsolètes ajoutées.
+- `section-03` §3.7 et `section-07` §7.2.2 : commande de test de `/admin/sync` corrigée (`--post-data=''`, token lu depuis le `.env`). Renvoi du commentaire Qdrant en §3.4 mis à jour vers §9.1.2.
+- `section-07` §7.2.2 : résultat attendu aligné sur la réponse réelle de l'endpoint (`indexer` et `acl_resolver` ne contiennent que `returncode`). §7.3.2 : renvoi vers la commande de §9.5.1. §7.2.7 : exemple d'email d'erreur aligné sur le contenu réel.
 - `CHANGELOG.md` [2.0.0] : récursion `memberOf` attribuée à `auth.py` (et non à `acl_resolver.py`).
 
 ### Scripts
 
 - `n8n-rappel-rotation-svc-rag.json` : étape 6 corrigée (plus de `localhost:8080`, POST depuis le réseau Compose, token lu depuis le `.env`), étape 7 alignée sur §9.5.1, renvoi vers §9.5.1. Tirets cadratins retirés de l'objet et de l'en-tête du mail.
-- `n8n-sync-corpus.json` : tirets cadratins retirés des objets et en-têtes de mail.
+- `n8n-sync-corpus.json` : tirets cadratins retirés des objets et en-têtes de mail. Email d'erreur : les blocs « Détail indexeur » et « Détail acl_resolver » affichaient toujours « (aucune sortie) », l'endpoint ne renvoyant pas la sortie des scripts ; remplacés par les codes de retour et les commandes pour consulter les logs et les rapports JSON.
+- `docker-compose.yml` : `GROUPS_CACHE_TTL`, `SYNC_PYTHON`, `SYNC_TIMEOUT_INDEXER` et `SYNC_TIMEOUT_ACL` transmises au conteneur `rag-api` (définies dans `.env` mais ignorées jusqu'ici).
 - `env.example` : `MAX_CONTEXT_CHUNKS` corrigé de 12 à 14 (valeur validée en 2.2.0), variables rangées par bloc avec commentaires, renvoi vers §9.5.1 pour la rotation de `svc-rag`.
 
 ---
