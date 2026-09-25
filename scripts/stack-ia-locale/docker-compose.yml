@@ -76,6 +76,15 @@ services:
       - LDAP_CA_CERT=${LDAP_CA_CERT}
       # Durée du cache des groupes AD en secondes (auth.py, défaut 300)
       - GROUPS_CACHE_TTL=${GROUPS_CACHE_TTL}
+      # Extension Entra ID (Partie 3) : résolution des groupes cloud via Graph.
+      # Désactivée par défaut (ENTRA_ENABLED=false) : comportement identique
+      # à la stack SMB seule.
+      - ENTRA_ENABLED=${ENTRA_ENABLED}
+      - ENTRA_TENANT_ID=${ENTRA_TENANT_ID}
+      - ENTRA_CLIENT_ID=${ENTRA_CLIENT_ID}
+      - ENTRA_CERT_PATH=${ENTRA_CERT_PATH}
+      - ENTRA_KEY_PATH=${ENTRA_KEY_PATH}
+      - ENTRA_CERT_THUMBPRINT=${ENTRA_CERT_THUMBPRINT}
       - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
       - SYNC_PYTHON=${SYNC_PYTHON}
       - SYNC_TIMEOUT_INDEXER=${SYNC_TIMEOUT_INDEXER}
@@ -96,6 +105,8 @@ services:
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
       # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
       - /var/log/rag:/var/log/rag
+      # Certificat et clé de l'App Registration Entra (lecture seule)
+      - /etc/rag-certs:/etc/rag-certs:ro
     depends_on:
       - qdrant
     restart: unless-stopped

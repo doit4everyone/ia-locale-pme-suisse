@@ -14,8 +14,8 @@ contrairement à org_name qui est une donnée déduite. C'est autorisés[] qui
 sert au cloisonnement dans auth.py. org_name ne sert qu'à la navigation.
 
 Usage :
-  python acl_resolver.py --share //<NOM-FILESERVER>/CLIENTS --mount /mnt/fileservice
-  python acl_resolver.py --share //<NOM-FILESERVER>/CLIENTS --mount /mnt/fileservice --dry-run
+  python acl_resolver.py --share //<NOM-FILESERVER>/PartageDocuments --mount /mnt/corpus-root
+  python acl_resolver.py --share //<NOM-FILESERVER>/PartageDocuments --mount /mnt/corpus-root --dry-run
 
 Variables d'environnement :
   SMB_USER       : compte AD avec accès lecture des ACL (ex: svc-rag)
@@ -24,7 +24,17 @@ Variables d'environnement :
   QDRANT_URL     : URL Qdrant
   COLLECTION     : nom de la collection Qdrant
 
-Validé sur VM-RAG-LAB avec <NOM-FILESERVER> (VOTRE-DOMAINE.CH), septembre 2026
+Validé sur VM-RAG-LAB, septembre 2026
+
+v4 (Partie 3, compatible v3) :
+  - Le nettoyage des orphelins ne concerne que les chunks issus du partage SMB.
+    Un chunk sans champ source_type est traité comme SMB (chunks indexés
+    avant la v4). Les chunks source_type="sharepoint" ne sont jamais
+    supprimés par ce script : ils ne figurent pas sur le partage et seraient
+    sinon tous considérés comme orphelins.
+  - Suppression des orphelins par filtre (FilterSelector) au lieu d'un scroll
+    limité à 500 points : un fichier de plus de 500 chunks était supprimé
+    partiellement.
 """
 
 import argparse
@@ -35,13 +45,13 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
 
 # ─────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────
 
-SMB_USER     = os.getenv("SMB_USER",     "administrateur")
+SMB_USER     = os.getenv("SMB_USER",     "svc-rag")
 SMB_PASSWORD = os.getenv("SMB_PASSWORD", "")
 SMB_DOMAIN   = os.getenv("SMB_DOMAIN",   "VOTRE-DOMAINE")
 QDRANT_URL   = os.getenv("QDRANT_URL",   "http://localhost:6333")
@@ -132,9 +142,21 @@ def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
     Le chemin relatif SMB utilise des backslashes (format Windows).
     """
     supported = ('.docx', '.pdf', '.pptx', '.txt', '.md')
+    # Répertoires système à exclure : ils contiennent des fichiers non indexables
+    # et fausseraient le calcul du garde-fou 20% en remontant comme "non indexés".
+    # Répertoires à exclure : comparaison par égalité insensible à la casse
+    # (même liste que indexer.py, sans .git pour aligner les deux scripts).
+    # Égalité exacte pour éviter d'exclure .github ou Projet.git-archive.
+    EXCLUDE_DIR_PATTERNS = {
+        "dfsrprivate",
+        "system volume information",
+        "$recycle.bin",
+    }
     fichiers = []
 
     for root, dirs, files in os.walk(mount_point):
+        # Élager les répertoires exclus avant la descente (dirs[:] modifie en place)
+        dirs[:] = [d for d in dirs if d.lower() not in EXCLUDE_DIR_PATTERNS]
         for f in sorted(files):
             ext = os.path.splitext(f)[1].lower()
             if ext not in supported:
@@ -392,9 +414,13 @@ def resoudre_acl(
                     collection_name=col,
                     limit=100,
                     offset=next_offset,
-                    with_payload=["source"]
+                    with_payload=["source", "source_type"]
                 )
                 for point in batch:
+                    # Seuls les chunks issus du partage SMB sont comparés au partage.
+                    # Absence de source_type = chunk indexé avant la v4 = SMB.
+                    if point.payload.get("source_type", "smb") != "smb":
+                        continue
                     src = point.payload.get("source", "")
                     if src:
                         sources_qdrant.add(src)
@@ -417,24 +443,24 @@ def resoudre_acl(
             nb_supprimes = 0
             for src in orphelins:
                 try:
-                    # Compter les chunks avant suppression
+                    # Filtre : cette source, et jamais un chunk non SMB.
                     col_src = get_collection_for_path(src)
-                    points_orphelins, _ = qdrant.scroll(
-                        collection_name=col_src,
-                        scroll_filter=Filter(must=[
-                            FieldCondition(key="source", match=MatchValue(value=src))
-                        ]),
-                        limit=500,
-                        with_payload=False
+                    filtre = Filter(
+                        must=[FieldCondition(key="source", match=MatchValue(value=src))],
+                        must_not=[FieldCondition(key="source_type", match=MatchValue(value="sharepoint"))]
                     )
-                    ids_a_supprimer = [p.id for p in points_orphelins]
-                    if ids_a_supprimer:
+                    nb = qdrant.count(
+                        collection_name=col_src, count_filter=filtre, exact=True
+                    ).count
+                    if nb:
+                        # Suppression par filtre : tous les chunks de la source,
+                        # quel que soit leur nombre (plus de limite à 500).
                         qdrant.delete(
                             collection_name=col_src,
-                            points_selector=ids_a_supprimer
+                            points_selector=FilterSelector(filter=filtre)
                         )
-                        nb_supprimes += len(ids_a_supprimer)
-                        print(f"  → {len(ids_a_supprimer)} chunks supprimés : {src}")
+                        nb_supprimes += nb
+                        print(f"  → {nb} chunks supprimés : {src}")
                 except Exception as e:
                     print(f"  Erreur suppression '{src}' : {e}")
             print(f"\nTotal chunks orphelins supprimés : {nb_supprimes}")
@@ -478,20 +504,20 @@ if __name__ == "__main__":
 Exemples :
   # Tester sans écrire dans Qdrant
   SMB_PASSWORD=xxx python acl_resolver.py \\
-    --share //<NOM-FILESERVER>/CLIENTS --mount /mnt/fileservice --dry-run
+    --share //<NOM-FILESERVER>/PartageDocuments --mount /mnt/corpus-root --dry-run
 
   # Exécution réelle
   SMB_PASSWORD=xxx python acl_resolver.py \\
-    --share //<NOM-FILESERVER>/CLIENTS --mount /mnt/fileservice
+    --share //<NOM-FILESERVER>/PartageDocuments --mount /mnt/corpus-root
 
 Variables d'environnement :
-  SMB_USER       Compte AD (défaut: administrateur)
+  SMB_USER       Compte AD (défaut: svc-rag)
   SMB_PASSWORD   Mot de passe (requis)
   SMB_DOMAIN     Domaine AD (défaut: VOTRE-DOMAINE)
   QDRANT_URL     URL Qdrant (défaut: http://localhost:6333)
         """
     )
-    parser.add_argument("--share",    required=True, help="Partage SMB (ex: //<NOM-FILESERVER>/CLIENTS)")
+    parser.add_argument("--share",    required=True, help="Partage SMB (ex: //<NOM-FILESERVER>/PartageDocuments)")
     parser.add_argument("--mount",    required=True, help="Point de montage local")
     parser.add_argument("--dry-run",  action="store_true", help="Simuler sans écrire dans Qdrant")
     parser.add_argument("--rapport",  default="",    help="Chemin du rapport JSON (défaut : dossier du script)")
