@@ -15,6 +15,10 @@ rank-bm25
 # Résolution LDAP des groupes AD (auth.py)
 ldap3
 
+# Résolution Entra ID via Microsoft Graph, authentification par certificat
+# (auth.py, extension Partie 3, active si ENTRA_ENABLED=true)
+msal
+
 # Extraction de texte des documents (indexer.py)
 python-docx
 

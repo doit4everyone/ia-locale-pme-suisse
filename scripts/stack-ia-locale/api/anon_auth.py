@@ -12,7 +12,7 @@ et non sur org_name (données déduites). Cette distinction est documentée dans
 la section §5 du guide de déploiement.
 
 Variables d'environnement :
-  LDAP_HOST      : hôte du contrôleur de domaine (ex: <IP-DC>)
+  LDAP_HOST      : hôte du contrôleur de domaine (ex: <NOM-DC>.votre-domaine.ch)
   LDAP_PORT      : port LDAP (636 pour LDAPS, 389 pour LDAP)
   LDAP_USE_TLS   : true pour LDAPS, false pour LDAP (défaut: true)
   LDAP_BASE_DN   : base de recherche (ex: DC=votre-domaine,DC=ch)
@@ -20,12 +20,40 @@ Variables d'environnement :
   LDAP_BIND_PWD  : mot de passe du compte de service
   LDAP_DOMAIN    : préfixe du domaine pour les groupes (ex: VOTRE-DOMAINE)
 
-Validé sur VM-RAG-LAB avec AD VOTRE-DOMAINE.CH, septembre 2026
+Validé sur VM-RAG-LAB, septembre 2026
+
+Extension Entra ID (Partie 3, désactivée par défaut) :
+  Si ENTRA_ENABLED=true, get_user_groups() ajoute aux groupes AD les
+  identifiants Entra de l'utilisateur, obtenus via Microsoft Graph :
+    entra:usr:<object-id>   le compte lui-même
+    entra:grp:<object-id>   chaque groupe, imbrications comprises
+                            (transitiveMemberOf)
+  Ces identifiants correspondent au format autorisés[] des chunks SharePoint.
+  Les chunks SMB utilisent le format DOMAINE\\Groupe : ils ne sont pas
+  affectés par l'extension.
+
+  Authentification de l'application par certificat (pas de secret client).
+  Permissions Graph (application) : User.Read.All, GroupMember.Read.All.
+
+  Si Graph échoue, les groupes AD sont conservés : l'utilisateur garde
+  l'accès aux documents SMB et n'a simplement aucun accès SharePoint.
+  Ce résultat partiel n'est pas mis en cache, la requête suivante réessaie.
+
+Variables d'environnement de l'extension :
+  ENTRA_ENABLED          : true pour activer (défaut : false)
+  ENTRA_TENANT_ID        : ID de l'annuaire (locataire)
+  ENTRA_CLIENT_ID        : ID d'application (client)
+  ENTRA_CERT_PATH        : certificat public PEM
+  ENTRA_KEY_PATH         : clé privée PEM
+  ENTRA_CERT_THUMBPRINT  : empreinte SHA-1 affichée dans Entra
 """
 
 import os
 import logging
 import ssl
+import urllib.parse
+
+import httpx
 from ldap3 import Server, Connection, ALL, SUBTREE, Tls, BASE
 from ldap3.core.exceptions import LDAPException
 from ldap3.utils.conv import escape_filter_chars
@@ -37,7 +65,7 @@ logger = logging.getLogger(__name__)
 # Configuration LDAP
 # ─────────────────────────────────────────
 
-LDAP_HOST    = os.getenv("LDAP_HOST",    "<IP-DC>")
+LDAP_HOST    = os.getenv("LDAP_HOST",    "<NOM-DC>.votre-domaine.ch")
 LDAP_PORT    = int(os.getenv("LDAP_PORT", "636"))
 LDAP_USE_TLS = os.getenv("LDAP_USE_TLS", "true").lower() == "true"
 LDAP_BASE_DN = os.getenv("LDAP_BASE_DN", "DC=votre-domaine,DC=ch")
@@ -45,6 +73,19 @@ LDAP_BIND_DN = os.getenv("LDAP_BIND_DN",
     "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch")
 LDAP_BIND_PWD = os.getenv("LDAP_BIND_PWD", "")
 LDAP_DOMAIN  = os.getenv("LDAP_DOMAIN",  "VOTRE-DOMAINE")
+
+# ─────────────────────────────────────────
+# Configuration Entra ID (extension Partie 3)
+# ─────────────────────────────────────────
+
+ENTRA_ENABLED         = os.getenv("ENTRA_ENABLED", "false").lower() == "true"
+ENTRA_TENANT_ID       = os.getenv("ENTRA_TENANT_ID", "")
+ENTRA_CLIENT_ID       = os.getenv("ENTRA_CLIENT_ID", "")
+ENTRA_CERT_PATH       = os.getenv("ENTRA_CERT_PATH", "/etc/rag-certs/rag-identity.crt")
+ENTRA_KEY_PATH        = os.getenv("ENTRA_KEY_PATH", "/etc/rag-certs/rag-identity.key")
+ENTRA_CERT_THUMBPRINT = os.getenv("ENTRA_CERT_THUMBPRINT", "")
+GRAPH_URL             = "https://graph.microsoft.com/v1.0"
+GRAPH_TIMEOUT         = 10  # secondes
 
 # TTL du cache des groupes en secondes (évite un appel LDAP par requête)
 # Un utilisateur dont les groupes changent devra attendre ce délai
@@ -75,6 +116,82 @@ def _get_from_cache(email: str) -> list[str] | None:
 def _set_cache(email: str, groups: list[str]):
     """Stocke les groupes dans le cache avec horodatage."""
     _groups_cache[email] = (groups, datetime.now(timezone.utc))
+
+
+# ─────────────────────────────────────────
+# Résolution Entra ID via Microsoft Graph
+# ─────────────────────────────────────────
+
+_msal_app = None
+
+
+def _get_graph_token() -> str:
+    """
+    Jeton d'application Graph, authentification par certificat.
+    MSAL met le jeton en cache et ne le renouvelle qu'à expiration.
+    """
+    global _msal_app
+    if _msal_app is None:
+        import msal  # importé ici : inutile si l'extension est désactivée
+        with open(ENTRA_KEY_PATH, "r", encoding="utf-8") as f:
+            private_key = f.read()
+        _msal_app = msal.ConfidentialClientApplication(
+            client_id=ENTRA_CLIENT_ID,
+            authority=f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}",
+            client_credential={
+                "private_key": private_key,
+                "thumbprint": ENTRA_CERT_THUMBPRINT,
+            },
+        )
+    result = _msal_app.acquire_token_for_client(
+        scopes=["https://graph.microsoft.com/.default"]
+    )
+    if "access_token" not in result:
+        raise RuntimeError(
+            f"Jeton Graph refusé : {result.get('error')} : "
+            f"{result.get('error_description', '')[:200]}"
+        )
+    return result["access_token"]
+
+
+def get_entra_groups(email: str) -> list[str]:
+    """
+    Retourne les identifiants Entra d'un utilisateur au format autorisés[] :
+      entra:usr:<object-id> puis entra:grp:<object-id> pour chaque groupe.
+
+    transitiveMemberOf inclut les groupes imbriqués, comme la récursion
+    memberOf faite côté LDAP. Seuls les groupes sont retenus : les rôles
+    d'annuaire et unités administratives sont ignorés.
+
+    Lève une exception en cas d'échec : l'appelant décide de la suite.
+    """
+    token = _get_graph_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    upn = urllib.parse.quote(email, safe="@")
+
+    with httpx.Client(timeout=GRAPH_TIMEOUT, headers=headers) as client:
+        r = client.get(f"{GRAPH_URL}/users/{upn}", params={"$select": "id"})
+        if r.status_code == 404:
+            logger.warning(f"[AUTH] Utilisateur '{email}' non trouvé dans Entra ID")
+            return []
+        r.raise_for_status()
+        user_id = r.json()["id"]
+
+        ids = [f"entra:usr:{user_id.lower()}"]
+        url = f"{GRAPH_URL}/users/{user_id}/transitiveMemberOf"
+        params = {"$select": "id", "$top": "999"}
+        while url:
+            r = client.get(url, params=params)
+            r.raise_for_status()
+            data = r.json()
+            for obj in data.get("value", []):
+                if obj.get("@odata.type") == "#microsoft.graph.group":
+                    ids.append(f"entra:grp:{obj['id'].lower()}")
+            # nextLink contient déjà les paramètres de la page suivante
+            url = data.get("@odata.nextLink")
+            params = None
+
+    return ids
 
 
 # ─────────────────────────────────────────
@@ -138,7 +255,7 @@ def get_user_groups(email: str) -> list[str]:
                 )
                 raison = "fichier vide" if (ca_certs and os.path.exists(ca_certs)) else "fichier absent ou variable non définie"
                 logger.warning(
-                    f"[AUTH] TLS sans validation du certificat (CERT_NONE) — {raison}. "
+                    f"[AUTH] TLS sans validation du certificat (CERT_NONE) : {raison}. "
                     "Lab uniquement : installer le certificat CA du DC et redémarrer le conteneur."
                 )
             server = Server(
@@ -232,6 +349,18 @@ def get_user_groups(email: str) -> list[str]:
     except Exception as e:
         logger.error(f"[AUTH] Erreur inattendue pour '{email}' : {e}")
         return []
+
+    # Extension Entra ID : ajout des identifiants cloud aux groupes AD
+    if ENTRA_ENABLED:
+        try:
+            entra_ids = get_entra_groups(email)
+            groups.extend(entra_ids)
+            logger.info(f"[AUTH] Entra : {len(entra_ids)} identifiant(s) pour '{email}'")
+        except Exception as e:
+            # Groupes AD conservés : accès SMB intact, aucun accès SharePoint.
+            # Pas de mise en cache : la requête suivante réessaiera Graph.
+            logger.error(f"[AUTH] Résolution Entra échouée pour '{email}' : {e}")
+            return groups
 
     _set_cache(email, groups)
     return groups
