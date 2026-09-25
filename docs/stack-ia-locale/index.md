@@ -66,6 +66,8 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 ## Sommaire
 
+### Parties 1 et 2 : file server Windows
+
 | Section | Contenu | Statut |
 |---|---|---|
 | [§0 Déploiement rapide](section-00-quickstart.md) | Procédure condensée pour redéployer la stack en 30 minutes | Publié |
@@ -80,19 +82,35 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
 
+> **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés en lab pour ces sections sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les scripts du dossier principal évoluent avec la Partie 3, en restant compatibles avec la stack SMB.
+
+### Partie 3 : Microsoft 365
+
+| Section | Contenu | Statut |
+|---|---|---|
+| [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | Microsoft Graph, App Registration par certificat, résolution des groupes Entra ID, mise à niveau compatible des scripts | Publié |
+| Résumé de réunions Teams | Récupération des transcriptions via Graph, compte-rendu structuré, dépôt dans Teams | À venir |
+| Connecteur SharePoint Online | Indexation des documents, propagation des permissions SharePoint et Entra ID vers Qdrant | À venir |
+| Documents protégés par Purview | Indexation des documents chiffrés par une étiquette de confidentialité | À venir |
+| Gouvernance Microsoft 365 | Rotation des certificats, audit des accès, limites et responsabilités | À venir |
+
+Les numéros de section sont attribués à la publication.
+
 ### Référence
 
 | Document | Contenu |
 |---|---|
 | [suivi-corrections.md](suivi-corrections.md) | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
-| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
+| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP, extension Entra ID optionnelle via Microsoft Graph). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
 | [Workflows n8n](../../scripts/N8N/) | `n8n-sync-corpus.json` (synchronisation horaire du corpus + email quarantaine) et `n8n-rappel-rotation-svc-rag.json` (rappel mensuel rotation mot de passe). Fichiers JSON importables directement dans n8n. |
 
 ---
 
-## Partie 3 : connecteurs Microsoft 365 (à venir)
+## Ce qui vient ensuite
 
-La Partie 3 documentera l'intégration de la stack RAG avec Microsoft 365 : connecteur SharePoint Online avec propagation des permissions Entra ID vers Qdrant, pipeline de résumé de réunions Teams (§7.4), et RAG visuel avec ColVec pour les documents PDF complexes. Elle sera publiée après validation en lab avec un tenant MS 365 actif et le GPU RTX 5060 Ti installé.
+La **Partie 3** connecte la stack RAG à Microsoft 365 : résumé des réunions Teams, indexation des documents SharePoint Online avec propagation des permissions Entra ID jusqu'aux chunks Qdrant, prise en charge des documents protégés par Purview et gouvernance de l'ensemble. Elle est publiée section par section, après validation en lab sur un tenant Microsoft 365 synchronisé par Entra Connect. Elle ne nécessite pas de GPU.
+
+Le **RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal) sera documenté comme extension de la Partie 2, après l'installation du GPU RTX 5060 Ti et les mesures de §10.
 
 ---
 

@@ -4,6 +4,29 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.13.0] : Septembre 2026
+
+Début de la Partie 3 (Microsoft 365). Les scripts partagés sont modifiés de façon compatible : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte exactement comme en 2.12.0. La version validée des Parties 1 et 2 reste disponible dans la Release v2.12.0.
+
+### Documentation
+
+- `section-11-prerequis-ms365.md` : nouvelle section. Architecture de la Partie 3, prérequis tenant et réseau, certificat, App Registration `RAG-Identity-Resolver`, mise à niveau compatible des scripts, validation en lab (non-régression SMB, protection des chunks SharePoint, résolution Entra ID).
+
+### Scripts
+
+- `acl_resolver.py` v4 : la détection des chunks orphelins ne concerne que les chunks `source_type` `smb` (ou sans ce champ, indexés avant la v4). Les futurs chunks SharePoint ne sont plus supprimés comme orphelins. Suppression par filtre au lieu d'un parcours limité à 500 points : un fichier orphelin de plus de 500 chunks n'était supprimé que partiellement.
+- `auth.py` : extension Entra ID, désactivée par défaut (`ENTRA_ENABLED`). Résolution des groupes de l'utilisateur via Microsoft Graph (`transitiveMemberOf`), authentification de l'application par certificat (MSAL). Identifiants ajoutés au format `entra:usr:<id>` et `entra:grp:<id>`. En cas d'échec de Graph, les groupes AD sont conservés et le résultat n'est pas mis en cache. Tiret cadratin retiré d'un message de log.
+- `requirements.txt` : ajout de `msal`.
+- `docker-compose.yml` : variables `ENTRA_*` transmises au conteneur `rag-api`, montage en lecture seule de `/etc/rag-certs`.
+- `env.example` : bloc de configuration de l'extension Entra ID.
+
+### Corrigé
+
+- `deploy.sh` : le `.env` généré ne contenait pas `GROUPS_CACHE_TTL`, `SYNC_PYTHON`, `SYNC_TIMEOUT_INDEXER` ni `SYNC_TIMEOUT_ACL`, transmises au conteneur depuis la 2.12.0. Docker les transmettait vides et `rag-api` échouait au démarrage (conversion d'une chaîne vide en entier). Défaut présent dans la Release v2.12.0 : un déploiement neuf par `deploy.sh` doit utiliser la version actuelle du script. Variables `ENTRA_*` ajoutées (extension désactivée).
+- `deploy.sh` : le contrôle de présence porte sur `env.example` (et non plus `env_example`), seul fichier d'exemple conservé dans le dépôt.
+
+---
+
 ## [2.12.0] : Septembre 2026
 
 ### Documentation
