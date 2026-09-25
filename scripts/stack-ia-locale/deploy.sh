@@ -40,7 +40,7 @@ ask()   { echo -e "${YELLOW}[?]${NC} $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-[ -f "env_example" ]          || error "env_example introuvable. Lancer depuis scripts/stack-ia-locale/"
+[ -f "env.example" ]          || error "env.example introuvable. Lancer depuis scripts/stack-ia-locale/"
 [ -f "docker-compose.yml" ]   || error "docker-compose.yml introuvable."
 [ -d "api" ]                  || error "Dossier api/ introuvable."
 
@@ -301,6 +301,20 @@ MIN_CHUNK_WORDS=8
 
 # Scripts de synchronisation
 SYNC_SCRIPTS_DIR=/rag-pipeline
+SYNC_PYTHON=python3
+SYNC_TIMEOUT_INDEXER=600
+SYNC_TIMEOUT_ACL=300
+
+# Cache des groupes AD en secondes (auth.py)
+GROUPS_CACHE_TTL=300
+
+# Extension Entra ID (Partie 3, désactivée par défaut, voir §11)
+ENTRA_ENABLED=false
+ENTRA_TENANT_ID=
+ENTRA_CLIENT_ID=
+ENTRA_CERT_PATH=/etc/rag-certs/rag-identity.crt
+ENTRA_KEY_PATH=/etc/rag-certs/rag-identity.key
+ENTRA_CERT_THUMBPRINT=
 
 # n8n
 N8N_BASIC_AUTH_USER=admin
