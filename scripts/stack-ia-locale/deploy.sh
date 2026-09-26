@@ -203,6 +203,11 @@ mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
 mkdir -p /etc/smbcredentials
+# Certificats des applications Microsoft 365 (Partie 3, §11 et §12).
+# Monté en lecture seule dans rag-api : créé ici avec des droits restreints,
+# sinon Docker le créerait au démarrage avec des droits par défaut.
+mkdir -p /etc/rag-certs
+chmod 700 /etc/rag-certs
 
 ok "Répertoires créés"
 
@@ -479,6 +484,10 @@ echo "  n8n          : http://${VM_IP}:5678"
 echo "  Logs nLPD    : /var/log/rag/rag-queries.jsonl"
 echo "  Tokens       : /root/rag-stack/.env (chmod 600)"
 echo ""
+echo "  Partie 3 (Microsoft 365) : inactive par défaut."
+echo "    Extension Entra ID     : ENTRA_* dans le .env, voir §11 du guide"
+echo "    Synthèse Teams         : TEAMS_* dans le .env, voir §12 du guide"
+echo ""
 echo "  Etapes suivantes :"
 echo "  1. Configurer l'authentification LDAP dans Open WebUI (§0 du guide)"
 echo "     Attribut email : userPrincipalName"
@@ -495,6 +504,7 @@ echo "     b. Importer scripts/N8N/n8n-sync-corpus.json"
 echo "     c. Importer scripts/N8N/n8n-rappel-rotation-svc-rag.json"
 echo "     d. Rattacher le credential SMTP sur chaque noeud email"
 echo "     e. Activer les deux workflows et executer une validation manuelle"
+echo "     f. Optionnel, apres la configuration de la §12 : importer scripts/N8N/n8n-teams-sync.json"
 echo ""
 echo "  Consultez /root/rag-stack/.env pour les tokens générés."
 echo "============================================================"
