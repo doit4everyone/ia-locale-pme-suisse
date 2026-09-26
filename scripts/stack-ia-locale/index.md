@@ -282,7 +282,7 @@ TEAMS_STATE_FILE=/var/log/rag/teams_state.json
 # Optionnel : SUMMARY_MODEL (défaut : LLM_MODEL), SUMMARY_NUM_CTX (défaut : 16384)
 ```
 
-**Tests** (fichiers dans `teams-test/`, scripts à copier dans `/root/rag-pipeline`) :
+**Tests** (fichiers dans `teams-test/`) : ces fichiers servent uniquement à valider l'installation et à évaluer les comptes-rendus. Ils ne sont pas nécessaires au fonctionnement du pipeline. Les deux scripts s'exécutent dans le conteneur `rag-api` et doivent être copiés dans `/root/rag-pipeline`, le dossier monté dans le conteneur, le temps des tests.
 
 ```bash
 # Synthèse sur la transcription fictive, avec contrôles automatiques
