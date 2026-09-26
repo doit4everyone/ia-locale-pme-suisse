@@ -4,6 +4,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.14.1] : Septembre 2026
+
+### Documentation
+
+- `section-12-teams.md` : statut passé à « validé en lab ». Déclenchement planifié validé : une nouvelle réunion a été détectée et traitée par le passage horaire du workflow n8n, sans intervention. Réserve de §12.8 retirée.
+- `scripts/stack-ia-locale/index.md` : statut de la synthèse Teams mis à jour.
+
+---
+
 ## [2.14.0] : Septembre 2026
 
 ### Documentation

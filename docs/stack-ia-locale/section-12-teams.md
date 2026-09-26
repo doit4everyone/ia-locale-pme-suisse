@@ -17,7 +17,7 @@ description: "Récupération des transcriptions Teams via Microsoft Graph, compt
 
 [Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
-**Statut :** validé partiellement, voir les réserves en fin de section. Toute la chaîne a été exécutée en lab sur un tenant Microsoft 365 réel, de la réunion Teams jusqu'à l'email reçu par l'organisateur. Le déclenchement planifié par n8n, sans intervention manuelle, reste à observer sur une nouvelle réunion.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toute la chaîne a été exécutée sur un tenant Microsoft 365 réel, de la réunion Teams jusqu'à l'email reçu par l'organisateur, y compris le déclenchement planifié par n8n sans intervention manuelle.
 
 ---
 
@@ -410,6 +410,8 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 **Validé en lab, septembre 2026 :** un brouillon produit à partir de la transcription récupérée via Graph, adressé à l'organisateur. Un second appel immédiat renvoie 0 brouillon : la transcription est marquée comme traitée. Lancé depuis n8n, le workflow a envoyé le brouillon, reçu par l'organisateur.
 
+**Déclenchement planifié, validé en lab, septembre 2026 :** une fois le workflow activé, une nouvelle réunion planifiée et transcrite a été détectée et traitée par le passage horaire suivant, sans aucune intervention, et le brouillon est arrivé dans la boîte de l'organisateur.
+
 ---
 
 ## §12.8 Limites et points d'attention
@@ -428,7 +430,6 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 **Expiration.** Les transcriptions expirent après 120 jours dans le tenant : une réunion non traitée dans ce délai ne pourra plus l'être.
 
-**Réserve de validation.** Le déclenchement planifié, sans intervention manuelle, sur une nouvelle réunion, reste à observer. Cette section passera au statut « validé en lab » après ce test.
 
 ---
 
