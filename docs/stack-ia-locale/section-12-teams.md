@@ -323,6 +323,8 @@ Toutes les heures → POST /teams/sync
 
 Les fichiers de test sont fournis dans [`scripts/stack-ia-locale/teams-test/`](../../scripts/stack-ia-locale/teams-test/) : transcription fictive, corrigé, script de réunion à lire à deux et scripts de test.
 
+> **Fichiers de test uniquement.** Rien dans `teams-test/` n'est nécessaire au fonctionnement du pipeline, qui repose sur `teams.py`, `teams_graph.py`, `main.py` et le workflow n8n. Les deux scripts (`test_teams_summary.py`, `test_teams_graph.py`) servent à valider l'installation et à évaluer la qualité des comptes-rendus. Ils s'exécutent dans le conteneur `rag-api` : les copier dans `/root/rag-pipeline`, le dossier monté dans le conteneur, uniquement le temps des tests.
+
 ### §12.7.1 Accès Graph
 
 ```bash
