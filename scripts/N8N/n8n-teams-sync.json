@@ -1,0 +1,268 @@
+{
+  "name": "RAG Stack - Synthèse des réunions Teams (brouillon à l'organisateur)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -656,
+        64
+      ],
+      "name": "Schedule Trigger (toutes les heures)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://rag-api:8080/teams/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer <ADMIN_TOKEN>"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        64
+      ],
+      "name": "POST /teams/sync"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.brouillons_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "id": "b1f3c2a0-1111-4c1a-9a01-000000000001"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -48
+      ],
+      "name": "Brouillons produits ?"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "brouillons",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -64
+      ],
+      "name": "Un élément par brouillon"
+    },
+    {
+      "parameters": {
+        "fromEmail": "<EMAIL_EXPEDITEUR>",
+        "toEmail": "={{ $json.destinataire }}",
+        "subject": "={{ $json.objet }}",
+        "emailFormat": "text",
+        "text": "={{ $json.corps }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        -64
+      ],
+      "name": "Email brouillon à l'organisateur",
+      "credentials": {
+        "smtp": {
+          "id": "<SMTP_CREDENTIAL_ID>",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.erreurs.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "id": "b1f3c2a0-1111-4c1a-9a01-000000000002"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        176
+      ],
+      "name": "Erreurs ?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst ts = new Date(r.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' });\nconst sujet = `⚠️ [RAG TEAMS] Erreur de synchronisation : ${new Date().toISOString().split('T')[0]}`;\nlet corps = `RAPPORT DE SYNCHRONISATION TEAMS : ERREUR\\n`;\ncorps += `Horodatage : ${ts}\\n`;\ncorps += `Brouillons produits : ${r.brouillons_count}\\n\\n`;\ncorps += `Erreurs :\\n`;\nfor (const e of r.erreurs) corps += `  • ${e}\\n`;\ncorps += `\\nDétail sur VM-RAG-LAB :\\n`;\ncorps += `  docker logs rag-api 2>&1 | grep TEAMS | tail -20\\n`;\ncorps += `  docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_graph.py\\n`;\nreturn [{ json: { sujet, corps } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        160
+      ],
+      "name": "Formater alerte"
+    },
+    {
+      "parameters": {
+        "fromEmail": "<EMAIL_EXPEDITEUR>",
+        "toEmail": "<EMAIL_ADMIN>",
+        "subject": "={{ $json.sujet }}",
+        "emailFormat": "text",
+        "text": "={{ $json.corps }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        160
+      ],
+      "name": "Email alerte administrateur",
+      "credentials": {
+        "smtp": {
+          "id": "<SMTP_CREDENTIAL_ID>",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (toutes les heures)": {
+      "main": [
+        [
+          {
+            "node": "POST /teams/sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /teams/sync": {
+      "main": [
+        [
+          {
+            "node": "Brouillons produits ?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Erreurs ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brouillons produits ?": {
+      "main": [
+        [
+          {
+            "node": "Un élément par brouillon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Un élément par brouillon": {
+      "main": [
+        [
+          {
+            "node": "Email brouillon à l'organisateur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erreurs ?": {
+      "main": [
+        [
+          {
+            "node": "Formater alerte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formater alerte": {
+      "main": [
+        [
+          {
+            "node": "Email alerte administrateur",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
