@@ -1,6 +1,6 @@
 ---
 title: "Scripts pipeline RAG local | DoIt4Everyone"
-description: "Scripts Python du pipeline RAG local : indexation SMB avec résolution ACL NTFS, RAG API FastAPI avec authentification LDAP Active Directory, journalisation nLPD. Ubuntu Server 26.04, Docker Compose, Qdrant, Ollama."
+description: "Scripts Python du pipeline RAG local : indexation SMB avec résolution ACL NTFS, RAG API FastAPI avec authentification LDAP Active Directory, extension Entra ID, synthèse des réunions Teams, journalisation nLPD. Ubuntu Server 26.04, Docker Compose, Qdrant, Ollama."
 ---
 
 <style>
@@ -18,7 +18,9 @@ description: "Scripts Python du pipeline RAG local : indexation SMB avec résolu
 
 [Retour au sommaire](../../) | [Guide de déploiement](../../docs/stack-ia-locale/)
 
-**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel.
+**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée partiellement (§12).
+
+> **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés avant la Partie 3 sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les modifications de la Partie 3 sont compatibles : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte de la même façon.
 
 ---
 
@@ -35,12 +37,18 @@ Utilisateur (authentifié LDAP via Open WebUI)
     ↓
 RAG API FastAPI (main.py + auth.py)
     ├→ Qdrant                     → chunks filtrés par ACL NTFS
-    └→ Ollama (hôte Windows)      → génération LLM locale
+    ├→ Ollama (hôte Windows)      → génération LLM locale
+    └→ Microsoft Graph            → groupes Entra ID (optionnel, §11)
     ↓
 Journal nLPD (/var/log/rag/rag-queries.jsonl)
+
+n8n (toutes les heures) → POST /teams/sync (teams.py + teams_graph.py)
+    ├→ Microsoft Graph            → transcriptions Teams du groupe d'adhésion
+    ├→ Ollama                     → compte-rendu
+    └→ email                      → brouillon à l'organisateur (§12)
 ```
 
-Les scripts `indexer.py` et `acl_resolver.py` tournent hors conteneur, sur l'hôte Ubuntu, montés en lecture seule dans le conteneur `rag-api` pour les appels via `/admin/sync`.
+Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, dans `/root/rag-pipeline`, monté en lecture seule dans le conteneur `rag-api`. La synchronisation horaire (`/admin/sync`) les exécute **dans le conteneur**. Ils peuvent aussi être lancés manuellement depuis l'hôte, avec leur environnement virtuel.
 
 ---
 
@@ -52,17 +60,24 @@ Les scripts `indexer.py` et `acl_resolver.py` tournent hors conteneur, sur l'hô
 | `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage des chunks par ACL | Dans le conteneur `rag-api` |
 | `indexer.py` | Parcours SMB, extraction de texte, embedding, écriture Qdrant avec payload ACL | Sur l'hôte, via `/admin/sync` ou manuel |
 | `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant | Sur l'hôte, via `/admin/sync` ou manuel |
+| `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
+| `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
+| `teams-test/` | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
+
+Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
 
 ---
 
 ## main.py
 
-RAG API FastAPI. Expose quatre endpoints :
+RAG API FastAPI. Endpoints :
 
 - `POST /query` : requête RAG authentifiée par token
 - `POST /v1/chat/completions` : endpoint compatible OpenAI, utilisé par Open WebUI
 - `GET /health` et `GET /stats` : supervision
 - `POST /admin/sync` : lance `indexer.py` et `acl_resolver.py` en sous-processus
+- `POST /teams/summarize` : compte-rendu à partir d'une transcription VTT fournie (tests), réservé à `ADMIN_TOKEN`
+- `POST /teams/sync` : récupération des nouvelles transcriptions Teams et production des brouillons, réservé à `ADMIN_TOKEN`, appelé par n8n
 
 Fonctionnalités :
 
@@ -126,6 +141,18 @@ Fonctionnalités :
 - Cache TTL configurable (défaut 300 secondes)
 - Ajout automatique du compte nominatif dans les groupes résolus (pour les ACE directs)
 - Deny par défaut en cas d'erreur LDAP
+- **Extension Entra ID (Partie 3, désactivée par défaut)** : si `ENTRA_ENABLED=true`, ajoute aux groupes AD les identifiants Entra de l'utilisateur, obtenus via Microsoft Graph (`transitiveMemberOf`), au format `entra:usr:<id>` et `entra:grp:<id>`. Authentification de l'application par certificat (MSAL). Si Graph échoue, les groupes AD sont conservés et le résultat n'est pas mis en cache. Détails et validation : guide §11.
+
+**Variables de l'extension Entra ID :**
+
+```bash
+ENTRA_ENABLED=false
+ENTRA_TENANT_ID=<ID-ANNUAIRE>
+ENTRA_CLIENT_ID=<ID-APPLICATION>
+ENTRA_CERT_PATH=/etc/rag-certs/rag-identity.crt
+ENTRA_KEY_PATH=/etc/rag-certs/rag-identity.key
+ENTRA_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT>
+```
 
 > **Validation en lab :** la résolution récursive a été testée avec un groupe `GRP-Clients-Niveau2` imbriqué dans `GRP-Clients`. `auth.py` remonte `GRP-Clients` par récursion `memberOf` malgré l'absence d'appartenance directe. Résultats documentés dans le guide §9.4.5.
 
@@ -194,7 +221,7 @@ Fonctionnalités :
 - Lecture des ACL via `smbcacls` (paquet `smbclient` requis sur l'hôte)
 - Résolution des SID en identifiants `DOMAINE\groupe` exploitables par `auth.py`
 - Population de `autorises[]` (ALLOW) et `interdits[]` (DENY explicites)
-- Suppression des chunks dont la source a disparu du partage (orphelins)
+- Suppression des chunks dont la source a disparu du partage (orphelins). Depuis la v4, seuls les chunks `source_type` `smb` (ou sans ce champ) sont concernés : les chunks SharePoint ne sont jamais supprimés comme orphelins. La suppression se fait par filtre, sans limite du nombre de chunks par fichier
 - Rapport JSON produit à l'issue de chaque passe
 
 > **Validation en lab (DENY explicite) :** `test-client`, membre de `GRP-Clients` (`autorises[]`) mais visé par un ACE de refus nominatif (`interdits[]`), ne voit pas le document interdit, même via le chemin d'extension de contexte. Un compte sans DENY dans le même groupe y accède normalement. Résultats documentés dans le guide §9.4.5.
@@ -218,6 +245,55 @@ SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe>
 SMB_DOMAIN=DOMAINE
 ```
+
+---
+
+## teams.py et teams_graph.py
+
+Synthèse des réunions Teams (Partie 3, guide §12). Après chaque réunion planifiée et transcrite, dont l'organisateur est membre du groupe d'adhésion, un compte-rendu est produit par le modèle local et envoyé **en brouillon à l'organisateur seul**.
+
+`teams_graph.py` :
+
+- Membres du groupe d'adhésion, lus avec l'application d'identité de §11 (`GroupMember.Read.All`)
+- `getAllTranscripts` pour chaque membre, avec l'application `RAG-Teams-Reader` (`OnlineMeetingTranscript.Read.All` et stratégie d'accès applicatif attribuée au même groupe)
+- Téléchargement du VTT, nouvel essai au passage suivant si le contenu n'est pas encore disponible
+- Fichier d'état : identifiants des transcriptions traitées, jamais leur contenu, purgés après 130 jours
+
+`teams.py` :
+
+- Lecture du VTT (intervenants, fusion des répliques consécutives)
+- Contrôle de longueur : fenêtre de contexte demandée explicitement à Ollama (16 384 tokens par défaut), refus plutôt que troncature silencieuse
+- Prompt à température 0, sortie JSON, transcription délimitée et neutralisée contre l'injection de prompt
+- Contrôles déterministes : chiffres absents de la transcription, responsable inconnu, termes de santé
+- Complément des échéances à partir du texte des actions, sans invention
+- Brouillon d'email marqué comme tel, avec les points à vérifier en tête
+
+**Variables d'environnement :**
+
+```bash
+TEAMS_CLIENT_ID=<ID-APPLICATION-TEAMS>
+TEAMS_CERT_PATH=/etc/rag-certs/rag-teams.crt
+TEAMS_KEY_PATH=/etc/rag-certs/rag-teams.key
+TEAMS_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT-TEAMS>
+TEAMS_GROUP_ID=<ID-OBJET-GROUPE-ADHESION>
+TEAMS_LOOKBACK_HOURS=48
+TEAMS_MAX_PAR_SYNC=3
+TEAMS_STATE_FILE=/var/log/rag/teams_state.json
+# Optionnel : SUMMARY_MODEL (défaut : LLM_MODEL), SUMMARY_NUM_CTX (défaut : 16384)
+```
+
+**Tests** (fichiers dans `teams-test/`, scripts à copier dans `/root/rag-pipeline`) :
+
+```bash
+# Synthèse sur la transcription fictive, avec contrôles automatiques
+docker cp reunion-test-2026-09-29.vtt rag-api:/tmp/
+docker exec rag-api python3 /rag-pipeline/test_teams_summary.py /tmp/reunion-test-2026-09-29.vtt
+
+# Accès Graph : jeton, groupe, transcriptions, contenu
+docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_graph.py
+```
+
+Le workflow n8n correspondant est [`n8n-teams-sync.json`](../N8N/).
 
 ---
 
@@ -247,6 +323,9 @@ ldap3
 python-docx
 pdfplumber
 python-pptx
+
+# Microsoft Graph, authentification par certificat (extension Entra ID, Teams)
+msal
 ```
 
 **Sur l'hôte (`/root/rag-pipeline/.venv`) :**
@@ -284,6 +363,8 @@ Structure du payload stocké pour chaque chunk :
   "acl_updated_at": "2026-09-14T10:06:02Z"
 }
 ```
+
+Les chunks issus de SharePoint (Partie 3) porteront un champ `source_type` égal à `sharepoint`. Les chunks SMB n'ont pas ce champ : `acl_resolver.py` les traite comme `smb`.
 
 Le champ `autorises` est mis à jour par `acl_resolver.py` indépendamment du contenu. Le champ `interdits` porte les DENY explicites NTFS, prioritaires sur `autorises`.
 
