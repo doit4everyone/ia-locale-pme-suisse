@@ -84,7 +84,7 @@ done
 echo ""
 echo -e "${BLUE}-- Paramètres réseau de la VM --${NC}"
 
-ask "IP de la VM Ubuntu (ex: 10.100.1.15) :"
+ask "IP de la VM Ubuntu (ex: 10.0.0.20) :"
 read -r VM_IP
 
 echo ""
@@ -315,6 +315,16 @@ ENTRA_CLIENT_ID=
 ENTRA_CERT_PATH=/etc/rag-certs/rag-identity.crt
 ENTRA_KEY_PATH=/etc/rag-certs/rag-identity.key
 ENTRA_CERT_THUMBPRINT=
+
+# Synthèse des réunions Teams (Partie 3, inactive tant que les variables sont vides)
+TEAMS_CLIENT_ID=
+TEAMS_CERT_PATH=/etc/rag-certs/rag-teams.crt
+TEAMS_KEY_PATH=/etc/rag-certs/rag-teams.key
+TEAMS_CERT_THUMBPRINT=
+TEAMS_GROUP_ID=
+TEAMS_LOOKBACK_HOURS=48
+TEAMS_MAX_PAR_SYNC=3
+TEAMS_STATE_FILE=/var/log/rag/teams_state.json
 
 # n8n
 N8N_BASIC_AUTH_USER=admin
