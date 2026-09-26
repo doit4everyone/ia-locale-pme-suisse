@@ -19,6 +19,8 @@ import subprocess
 import asyncio
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access
+import teams
+import teams_graph
 from rank_bm25 import BM25Okapi
 
 # ─────────────────────────────────────────
@@ -28,7 +30,7 @@ from rank_bm25 import BM25Okapi
 API_TOKEN    = os.getenv("API_TOKEN", "changeme-api-token")
 ADMIN_TOKEN  = os.getenv("ADMIN_TOKEN", "changeme-admin-token")
 SYNC_SCRIPTS_DIR = os.getenv("SYNC_SCRIPTS_DIR", "/rag-pipeline")
-SMB_SHARE    = os.getenv("SMB_SHARE", "//fileserver/PartageDocuments")
+SMB_SHARE    = os.getenv("SMB_SHARE", "//fileserver/FileService")
 SMB_MOUNT    = os.getenv("SMB_MOUNT", "/mnt/corpus-root")
 SMB_USER     = os.getenv("SMB_USER", "svc-rag")
 SMB_PASSWORD = os.getenv("SMB_PASSWORD", "")
@@ -390,7 +392,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
 def enrichir_citations(answer: str, chunks: list[dict]) -> str:
     """Post-traitement : enrichit les citations [nom.docx] avec le chemin UNC
     du dossier parent sur le file server. Opère côté API, sans dépendre du LLM.
-    Exemple : [contrat.docx] → [contrat.docx — \\\\SERVEUR\\Partage\\Dossier\\]
+    Exemple : [contrat.docx] → [contrat.docx : \\\\SERVEUR\\Partage\\Dossier\\]
     """
     if not SMB_SHARE or not chunks:
         return answer
@@ -667,7 +669,7 @@ async def query(
     if not user_groups:
         logger.error(f"[AUTH] /query user '{request.user_id}' : résolution LDAP échouée, accès refusé")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
-    logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupes AD")
+    logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupe(s) et identité(s)")
 
     await warmup_judge()
     chunks = await search_qdrant(request.query, user_groups=user_groups)
@@ -781,7 +783,7 @@ async def openai_chat_completions(
         raise HTTPException(status_code=403, detail="Identité utilisateur manquante")
     user_groups = get_user_groups(owui_email2)
     if user_groups:
-        logger.info(f"[AUTH] /v1 user '{owui_email2}' : {len(user_groups)} groupes AD")
+        logger.info(f"[AUTH] /v1 user '{owui_email2}' : {len(user_groups)} groupe(s) et identité(s)")
     else:
         logger.error(f"[AUTH] /v1 user '{owui_email2}' : résolution LDAP échouée ou aucun groupe, accès refusé")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
@@ -800,6 +802,154 @@ async def openai_chat_completions(
             message=OpenAIMessage(role="assistant", content=answer)
         )]
     )
+
+
+# ─────────────────────────────────────────
+# Endpoint Teams : synthèse de réunion (Partie 3)
+# ─────────────────────────────────────────
+
+class TeamsSummaryRequest(BaseModel):
+    vtt: str                 # transcription au format VTT (Teams)
+    organisateur: str = ""   # email de l'organisateur, destinataire du brouillon
+    titre: str = ""          # titre de la réunion
+    date: str = ""           # date de la réunion, texte libre
+
+
+def log_teams(organisateur: str, titre: str, vtt: str, nb_participants: int,
+              alertes: list[str], erreur: str = ""):
+    """
+    Journalise chaque synthèse pour audit nLPD. Ni la transcription ni le
+    compte-rendu ne sont conservés : seulement leur empreinte et des compteurs.
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "type": "teams_summary",
+        "organisateur": organisateur,
+        "titre_hash": hashlib.sha256(titre.encode()).hexdigest()[:16] if titre else "",
+        "transcription_hash": hashlib.sha256(vtt.encode()).hexdigest()[:16],
+        "participants": nb_participants,
+        "alertes": len(alertes),
+    }
+    if erreur:
+        entry["erreur"] = erreur
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"Journalisation échouée : {e}")
+
+
+@app.post("/teams/summarize")
+async def teams_summarize(
+    request: TeamsSummaryRequest,
+    credentials: HTTPAuthorizationCredentials = Security(security)
+):
+    """
+    Produit un brouillon de compte-rendu à partir d'une transcription VTT.
+    Réservé à ADMIN_TOKEN : appelé par n8n, jamais par un utilisateur final.
+    Retourne l'objet et le corps de l'email ; l'envoi est fait par n8n.
+    """
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Token admin invalide")
+
+    return await produire_brouillon(request.vtt, request.organisateur, request.titre, request.date)
+
+
+async def produire_brouillon(vtt: str, organisateur: str = "", titre: str = "", date: str = "") -> dict:
+    """
+    VTT → brouillon de compte-rendu. Utilisé par /teams/summarize (VTT fourni)
+    et par /teams/sync (VTT récupéré via Graph). Lève HTTPException en cas d'erreur.
+    """
+    repliques = teams.parse_vtt(vtt)
+    if not repliques:
+        raise HTTPException(status_code=422, detail="Transcription vide ou illisible")
+    noms = teams.participants(repliques)
+    texte = teams.texte_transcription(repliques)
+
+    try:
+        tokens_estimes = teams.controle_longueur(texte)
+    except teams.TranscriptionTropLongue as e:
+        log_teams(organisateur, titre, vtt, len(noms), [], str(e))
+        raise HTTPException(status_code=413, detail=str(e))
+
+    logger.info(f"[TEAMS] Synthèse : {len(repliques)} répliques, {len(noms)} intervenants, "
+                f"~{tokens_estimes} tokens estimés")
+    try:
+        resultat = await teams.synthetiser(texte)
+    except Exception as e:
+        log_teams(organisateur, titre, vtt, len(noms), [], str(e)[:200])
+        logger.error(f"[TEAMS] Synthèse échouée : {e}")
+        raise HTTPException(status_code=502, detail=f"Synthèse échouée : {e}")
+
+    completees = teams.completer_echeances(resultat)
+    alertes = teams.controles(resultat, texte, noms)
+    if completees:
+        alertes.append(f"{completees} échéance(s) reprise(s) automatiquement du texte de l'action : à vérifier")
+    objet, corps = teams.rendre_email(resultat, noms, alertes, titre, date)
+    log_teams(organisateur, titre, vtt, len(noms), alertes)
+    logger.info(f"[TEAMS] Terminé : {len(resultat['decisions'])} décision(s), "
+                f"{len(resultat['actions'])} action(s), {len(alertes)} alerte(s), "
+                f"tokens prompt réels : {resultat.get('_tokens_prompt')}")
+
+    return {
+        "objet": objet,
+        "corps": corps,
+        "destinataire": organisateur,
+        "compte_rendu": {k: resultat[k] for k in ("decisions", "actions", "points_ouverts")},
+        "participants": noms,
+        "alertes": alertes,
+        "tokens_estimes": tokens_estimes,
+        "tokens_prompt": resultat.get("_tokens_prompt"),
+    }
+
+
+_teams_sync_en_cours = False
+
+
+@app.post("/teams/sync")
+async def teams_sync(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """
+    Récupère via Graph les nouvelles transcriptions des organisateurs membres
+    du groupe d'adhésion, et produit un brouillon pour chacune.
+    Réservé à ADMIN_TOKEN : appelé par n8n, qui envoie chaque brouillon
+    à son organisateur. Une transcription n'est marquée comme traitée
+    qu'une fois son brouillon produit.
+    """
+    global _teams_sync_en_cours
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Token admin invalide")
+    if _teams_sync_en_cours:
+        raise HTTPException(status_code=409, detail="Synchronisation Teams déjà en cours")
+
+    _teams_sync_en_cours = True
+    try:
+        try:
+            nouvelles, erreurs = await asyncio.to_thread(teams_graph.a_traiter)
+        except teams_graph.ConfigurationManquante as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+        brouillons = []
+        for t in nouvelles:
+            org = t["organisateur"]
+            dest = org.get("mail") or org.get("userPrincipalName", "")
+            try:
+                b = await produire_brouillon(t["vtt"], dest, "réunion Teams",
+                                             teams_graph.date_locale(t["cree_le"]))
+                brouillons.append(b)
+                teams_graph.marquer_traitee(t["id"])
+            except HTTPException as e:
+                erreurs.append(f"{dest} ({teams_graph.date_locale(t['cree_le'])}) : {e.detail}")
+
+        logger.info(f"[TEAMS] Sync : {len(brouillons)} brouillon(s), {len(erreurs)} erreur(s)")
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "brouillons": brouillons,
+            "brouillons_count": len(brouillons),
+            "erreurs": erreurs,
+            "success": not erreurs,
+        }
+    finally:
+        _teams_sync_en_cours = False
 
 
 # ─────────────────────────────────────────
