@@ -89,7 +89,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | Section | Contenu | Statut |
 |---|---|---|
 | [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | Microsoft Graph, App Registration par certificat, résolution des groupes Entra ID, mise à niveau compatible des scripts | Publié |
-| Résumé de réunions Teams | Récupération des transcriptions via Graph, compte-rendu structuré, dépôt dans Teams | À venir |
+| [§12 Synthèse des réunions Teams](section-12-teams.md) | Transcriptions via Graph, groupe d'adhésion, compte-rendu par le modèle local envoyé en brouillon à l'organisateur, évaluation mesurée | Publié |
 | Connecteur SharePoint Online | Indexation des documents, propagation des permissions SharePoint et Entra ID vers Qdrant | À venir |
 | Documents protégés par Purview | Indexation des documents chiffrés par une étiquette de confidentialité | À venir |
 | Gouvernance Microsoft 365 | Rotation des certificats, audit des accès, limites et responsabilités | À venir |

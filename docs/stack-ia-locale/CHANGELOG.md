@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.14.0] : Septembre 2026
+
+### Documentation
+
+- `section-12-teams.md` : nouvelle section. Synthèse des réunions Teams : réglages du tenant (dont le blocage « Transcript API access », désactivé par défaut), groupe d'adhésion à extension messagerie, application `RAG-Teams-Reader` et stratégie d'accès applicatif attribuée au groupe, code, workflow n8n, évaluation (comparatif de quatre prompts sur transcription fictive, réunion réelle), limites.
+- `index.md` : §12 ajoutée au sommaire de la Partie 3.
+
+### Scripts
+
+- `api/teams.py` : nouveau module. Lecture des transcriptions VTT, contrôle de longueur (fenêtre de contexte explicite, refus plutôt que troncature), synthèse par le modèle local, contrôles déterministes (chiffres, responsables, données de santé), complément des échéances à partir du texte des actions, brouillon d'email.
+- `api/teams_graph.py` : nouveau module. Membres du groupe d'adhésion, `getAllTranscripts`, téléchargement du VTT, fichier d'état des transcriptions traitées (identifiants seulement).
+- `api/anon_main.py` : endpoints `/teams/summarize` et `/teams/sync`, journalisation `teams_summary`. Libellé du log d'authentification corrigé (« groupe(s) et identité(s) » au lieu de « groupes AD »).
+- `api/Dockerfile` : copie de `teams.py` et `teams_graph.py`.
+- `docker-compose.yml`, `env.example`, `deploy.sh` : variables `TEAMS_*`.
+- `N8N/n8n-teams-sync.json` : nouveau workflow (synchronisation horaire, envoi du brouillon à l'organisateur, alerte administrateur). Mention n8n désactivée dans les emails.
+- `teams-test/` : transcription fictive et corrigé, script de réunion à lire à deux et corrigé, scripts `test_teams_summary.py` et `test_teams_graph.py`.
+
+---
+
 ## [2.13.0] : Septembre 2026
 
 Début de la Partie 3 (Microsoft 365). Les scripts partagés sont modifiés de façon compatible : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte exactement comme en 2.12.0. La version validée des Parties 1 et 2 reste disponible dans la Release v2.12.0.
