@@ -18,7 +18,7 @@ description: "Scripts Python du pipeline RAG local : indexation SMB avec résolu
 
 [Retour au sommaire](../../) | [Guide de déploiement](../../docs/stack-ia-locale/)
 
-**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée partiellement (§12).
+**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée en lab (§12).
 
 > **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés avant la Partie 3 sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les modifications de la Partie 3 sont compatibles : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte de la même façon.
 
