@@ -1,5 +1,5 @@
 ---
-title: "IA locale pour PME suisse — Guide décisionnel et procédures | DoIt4Everyone"
+title: "IA locale pour PME suisse : guide décisionnel et procédures | DoIt4Everyone"
 description: "RTX Spark, DGX Spark, RTX PRO 6000, H100 : architectures IA locales pour PME suisses. TCO réel sur 3 ans en CHF, performances d'inférence mesurées, ingénierie RAG, sécurité et conformité nLPD. Procédures opérationnelles publiées progressivement."
 ---
 
@@ -66,11 +66,11 @@ Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c
 
 ## Ce qui vient ensuite
 
-La stack actuelle couvre le cas d'usage file server Windows avec ACL NTFS. Deux extensions sont en préparation, après validation en lab avec un tenant Microsoft 365 actif et l'installation du GPU RTX 5060 Ti :
+La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), et l'indexation de SharePoint Online avec ses permissions (§13).
 
-**Connecteurs Microsoft 365 :** connecteur SharePoint Online avec propagation des permissions Entra ID vers Qdrant, pipeline de résumé de réunions Teams, et RAG visuel avec ColVec pour les documents PDF complexes.
+**À venir :** l'indexation des documents protégés par une étiquette de confidentialité Purview, en respectant à la fois les permissions d'accès et les droits de l'étiquette, puis la gouvernance de l'ensemble.
 
-**Fichiers chiffrés Purview :** indexation des documents protégés par des labels de sensibilité Microsoft Information Protection, avec déchiffrement à la volée via clé RMS consultée depuis Azure Key Vault.
+**Après l'installation du GPU RTX 5060 Ti :** les mesures de performance (§10) et le RAG visuel pour les documents PDF complexes.
 
 ---
 
