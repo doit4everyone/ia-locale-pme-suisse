@@ -4,6 +4,18 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.14.2] : Septembre 2026
+
+### Documentation
+
+- `section-05-connecteurs.md` : §5.2.4 réécrite. Le compte `svc-rag` n'est plus ajouté aux groupes métier : la lecture est accordée à un groupe dédié, `GRP-RAG-Indexation`, sur les dossiers à indexer, y compris les sous-dossiers et fichiers à héritage coupé. Encadré sur le cas réel du lab : retrait de `svc-rag` d'un groupe utilisé à la fois pour les droits Purview et les ACL NTFS, six fichiers devenus illisibles pour l'indexation, `autorises[]` vidés par refus par défaut, sans fuite. Remontage du partage après toute modification des groupes du compte. §5.2.1 : partage racine accordé en lecture au groupe dédié. §5.2.3 : avertissement sur l'héritage coupé.
+
+### Scripts
+
+- `Set-AccesIndexationRAG.ps1` : nouveau script. Création du groupe dédié, lecture seule sur les dossiers de premier niveau et sur les éléments à héritage coupé, contrôle fichier par fichier, mode vérification, liste des autres groupes du compte de service. Idempotent.
+
+---
+
 ## [2.14.1] : Septembre 2026
 
 ### Documentation

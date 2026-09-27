@@ -68,7 +68,7 @@ Créer également un partage racine pour l'indexation unifiée :
 # Partage racine pour l'indexeur (accès lecture à tous les départements)
 New-SmbShare -Name "FileService" -Path "D:\FileService" `
     -FullAccess "DOMAINE\Admins du domaine" `
-    -ReadAccess "DOMAINE\svc-rag" `
+    -ReadAccess "DOMAINE\GRP-RAG-Indexation" `
     -Description "Racine FileService - indexeur RAG"
 ```
 
@@ -132,11 +132,13 @@ Set-DossierACLPropre "D:\FileService\COMPTABILITE"    "GRP-Finances"
 Set-DossierACLPropre "D:\FileService\SERVICE INFO\ADMIN" "GRP-ServiceInfo"
 ```
 
+Casser l'héritage retire aussi, sur ces dossiers, la lecture du compte d'indexation accordée plus haut dans l'arborescence : `Set-AccesIndexationRAG.ps1` (§5.2.4) la rétablit.
+
 > **Sur les accès nominatifs :** une ACL posée directement sur un compte utilisateur (`DOMAINE\prenom.nom`) fonctionne et est correctement lue par `acl_resolver.py`. Elle apparaîtra dans `autorises[]` sous la forme `DOMAINE\prenom.nom`, et `auth.py` l'ajoutera automatiquement dans les groupes résolus de l'utilisateur concerné (voir §5.5). C'est un comportement intentionnel, utile pour les exceptions ponctuelles. Par hygiène, préférer les groupes pour les accès structurels et réserver les accès nominatifs aux exceptions documentées.
 
 ### §5.2.4 Compte de service svc-rag
 
-Créer un compte de service dédié avec accès lecture à tous les partages. Ce compte peut lire l'intégralité du file server : c'est la condition de l'indexation, et cela déplace le risque vers ce compte et son mot de passe. Le traiter comme un compte à privilèges : mot de passe long et unique, rotation planifiée, pas de session interactive, accès SSH désactivé, journalisation des accès activée sur le contrôleur de domaine.
+Créer un compte de service dédié avec accès lecture à tous les dossiers à indexer. Ce compte peut lire l'ensemble du corpus : c'est la condition de l'indexation, et cela déplace le risque vers ce compte et son mot de passe. Le traiter comme un compte à privilèges : mot de passe long et unique, rotation planifiée, pas de session interactive, accès SSH désactivé, journalisation des accès activée sur le contrôleur de domaine.
 
 ```powershell
 # Adapter le chemin de l'OU à votre organisation
@@ -149,14 +151,43 @@ New-ADUser -Name "svc-rag" `
     -Enabled $true `
     -Path "OU=COMPTES-SERVICE,DC=domaine,DC=ch" `
     -Description "Compte de service indexeur RAG - lecture seule"
-
-# Ajouter aux groupes nécessaires pour lire les ACL de tous les partages
-Add-ADGroupMember -Identity "GRP-Clients"    -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-RH"         -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-Direction"  -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-Finances"   -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-ServiceInfo" -Members "svc-rag"
 ```
+
+#### Donner la lecture par un groupe dédié, pas par les groupes métier
+
+La lecture est accordée à un **groupe dédié**, `GRP-RAG-Indexation`, dont `svc-rag` est le seul membre. **Ne pas ajouter `svc-rag` aux groupes métier** (`GRP-RH`, `GRP-Finances`, etc.) :
+
+- un groupe métier donne tous les droits du métier, bien au-delà de la lecture du partage : sites SharePoint, applications, droits d'étiquettes Purview ;
+- retirer le compte d'un groupe métier, pour une raison sans lien avec le RAG, lui retire aussi la lecture du dossier correspondant, sans que rien ne le signale ;
+- le périmètre de l'indexation devient implicite : il dépend des groupes dans lesquels le compte a été ajouté au fil du temps.
+
+Avec un groupe dédié, **le périmètre de l'indexation est une décision explicite** : les dossiers où ce groupe a la lecture, et rien d'autre. Les dossiers personnels, par exemple, en restent exclus.
+
+> **Cas réel en lab.** Dans la première version de ce guide, `svc-rag` lisait les dossiers RH, Direction et Comptabilité par les groupes utilisés aussi pour les droits des étiquettes Purview. Lors d'une revue des droits, il a été retiré de ces groupes, légitimement : un compte d'indexation n'a pas à pouvoir déchiffrer les documents. À la synchronisation suivante, `acl_resolver.py` n'a plus pu lire les permissions de six fichiers et les a signalés « acl_illisible ». Leurs `autorises[]` ont été vidés : les fichiers sont devenus invisibles pour tous dans le RAG, y compris pour les personnes autorisées. Aucune fuite, grâce au refus par défaut, mais une perte de service. Le montage SMB de la VM conservait l'ancien jeton du compte : `indexer.py` lisait encore les fichiers, et aurait perdu l'accès au redémarrage suivant.
+
+#### Automatisation : Set-AccesIndexationRAG.ps1
+
+Une permission posée sur un dossier n'atteint pas les sous-dossiers et fichiers dont l'héritage est coupé, ce que fait précisément §5.2.3 pour cloisonner les départements. Le script [`Set-AccesIndexationRAG.ps1`](../../scripts/stack-ia-locale/Set-AccesIndexationRAG.ps1), à exécuter en administrateur sur le serveur de fichiers :
+
+1. crée le groupe dédié s'il n'existe pas et y ajoute `svc-rag` ;
+2. accorde la lecture (`RX`, héritée) sur chaque dossier de premier niveau de la racine, sauf ceux exclus ;
+3. recherche les sous-dossiers et fichiers à héritage coupé, et accorde la lecture sur chacun ;
+4. contrôle, fichier par fichier, que le groupe a bien la lecture partout ;
+5. liste les autres groupes de `svc-rag`, qui ne sont plus nécessaires à l'indexation.
+
+```powershell
+# Vérification seule : affiche ce qui manque, ne modifie rien
+.\Set-AccesIndexationRAG.ps1 -Racine "D:\FileService" -Exclure "UTILISATEURS" -Verifier
+
+# Application
+.\Set-AccesIndexationRAG.ps1 -Racine "D:\FileService" -Exclure "UTILISATEURS"
+```
+
+Le script est idempotent : un droit déjà présent n'est pas ajouté une seconde fois. Le relancer après toute création de dossier à héritage coupé. Le rapport de synchronisation du RAG le rappelle : un fichier « acl_illisible » signale presque toujours un dossier où le groupe n'a pas la lecture.
+
+Après une modification des groupes de `svc-rag`, **remonter le partage sur la VM** (§5.3.3) : la session SMB conserve le jeton d'accès du compte tel qu'il était au montage.
+
+Une fois une synchronisation validée sans fichier « acl_illisible », retirer `svc-rag` des groupes métier dont il serait encore membre, puis relancer une synchronisation et comparer les compteurs : ils doivent être identiques.
 
 ---
 
