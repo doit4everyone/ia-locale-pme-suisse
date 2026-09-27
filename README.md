@@ -32,7 +32,8 @@ Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entrepr
 
 - §11 : connexion à Microsoft Graph par certificat, résolution des groupes Entra ID, mise à niveau compatible des scripts.
 - §12 : synthèse des réunions Teams. La transcription est récupérée via Graph, résumée par le modèle local et envoyée en brouillon à l'organisateur seul. Traitement limité aux organisateurs membres d'un groupe d'adhésion.
-- À venir : connecteur SharePoint Online, documents protégés par Purview, gouvernance.
+- §13 : connecteur SharePoint Online. Les documents sont indexés avec leurs permissions SharePoint, traduites en identifiants Entra : chaque utilisateur n'interroge que ce qu'il peut ouvrir dans SharePoint. Application en `Sites.Selected`, accordée site par site.
+- À venir : documents protégés par Purview, gouvernance.
 
 Les versions validées sont publiées sous forme de [Releases](https://github.com/doit4everyone/ia-locale-pme-suisse/releases). La Release v2.12.0 fige les scripts des Parties 1 et 2.
 
@@ -48,6 +49,8 @@ Scripts du pipeline RAG local, publiés avec les valeurs sensibles remplacées p
 | `auth.py` | Résolution des groupes AD via LDAP (récursive), extension Entra ID via Microsoft Graph, filtrage ACL |
 | `teams.py` | Synthèse des réunions Teams : lecture VTT, prompt, contrôles déterministes, brouillon |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph |
+| `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions |
+| `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur le partage, par un groupe dédié |
 
 Workflows n8n importables : synchronisation du corpus, rappel de rotation du mot de passe `svc-rag`, synthèse des réunions Teams.
 
@@ -60,9 +63,9 @@ ia-locale-pme-suisse/
 ├── index.md                    ← page d'accueil GitHub Pages
 ├── CHANGELOG.md                ← renvoi vers le journal détaillé
 ├── docs/
-│   └── stack-ia-locale/        ← guide de déploiement (§0 à §12)
+│   └── stack-ia-locale/        ← guide de déploiement (§0 à §13)
 │       ├── index.md
-│       ├── section-00-quickstart.md … section-12-teams.md
+│       ├── section-00-quickstart.md … section-13-sharepoint.md
 │       └── CHANGELOG.md        ← journal détaillé des modifications
 ├── guides/                     ← guides décisionnels
 └── scripts/
@@ -75,6 +78,9 @@ ia-locale-pme-suisse/
         ├── deploy.sh
         ├── anon_indexer.py
         ├── anon_acl_resolver.py
+        ├── sp_indexer.py
+        ├── Set-AccesIndexationRAG.ps1
+        ├── sharepoint/         ← inventaires, accord Sites.Selected, sonde
         ├── teams-test/         ← fichiers et scripts de test Teams
         └── api/
             ├── anon_main.py
