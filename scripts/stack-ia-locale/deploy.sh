@@ -228,6 +228,9 @@ if [ -f "indexer.py" ]; then
 else
     warn "indexer.py introuvable, a copier manuellement dans /root/rag-pipeline/"
 fi
+if [ -f "sp_indexer.py" ]; then
+    cp sp_indexer.py /root/rag-pipeline/sp_indexer.py
+fi
 
 ok "Fichiers copies"
 
@@ -330,6 +333,19 @@ TEAMS_GROUP_ID=
 TEAMS_LOOKBACK_HOURS=48
 TEAMS_MAX_PAR_SYNC=3
 TEAMS_STATE_FILE=/var/log/rag/teams_state.json
+
+# Indexation SharePoint Online (Partie 3, inactive tant que SP_SITES est vide)
+SP_CLIENT_ID=
+SP_CERT_THUMBPRINT=
+SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
+SP_SITES=
+SP_EXCLUDE_DRIVES=Preservation Hold Library
+SP_MAX_FILE_MB=50
+SYNC_TIMEOUT_SHAREPOINT=900
+
+# Fenêtres de contexte demandées à Ollama
+LLM_NUM_CTX=16384
+JUDGE_NUM_CTX=8192
 
 # n8n
 N8N_BASIC_AUTH_USER=admin

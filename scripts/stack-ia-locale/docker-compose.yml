@@ -94,6 +94,17 @@ services:
       - TEAMS_LOOKBACK_HOURS=${TEAMS_LOOKBACK_HOURS}
       - TEAMS_MAX_PAR_SYNC=${TEAMS_MAX_PAR_SYNC}
       - TEAMS_STATE_FILE=${TEAMS_STATE_FILE}
+      # Indexation SharePoint Online (Partie 3, §13) : application RAG-SharePoint-Indexer
+      - SP_CLIENT_ID=${SP_CLIENT_ID}
+      - SP_CERT_THUMBPRINT=${SP_CERT_THUMBPRINT}
+      - SP_KEY_PATH=${SP_KEY_PATH}
+      - SP_SITES=${SP_SITES}
+      - SP_EXCLUDE_DRIVES=${SP_EXCLUDE_DRIVES}
+      - SP_MAX_FILE_MB=${SP_MAX_FILE_MB}
+      - SYNC_TIMEOUT_SHAREPOINT=${SYNC_TIMEOUT_SHAREPOINT}
+      # Fenêtres de contexte demandées à Ollama (génération RAG et juge)
+      - LLM_NUM_CTX=${LLM_NUM_CTX}
+      - JUDGE_NUM_CTX=${JUDGE_NUM_CTX}
       - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
       - SYNC_PYTHON=${SYNC_PYTHON}
       - SYNC_TIMEOUT_INDEXER=${SYNC_TIMEOUT_INDEXER}

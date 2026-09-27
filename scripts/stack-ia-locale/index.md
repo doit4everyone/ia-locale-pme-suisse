@@ -63,6 +63,8 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
 | `teams-test/` | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
+| `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions | Dans le conteneur `rag-api`, via `/admin/sync` ou manuel |
+| `sharepoint/` | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris | Sur le serveur de fichiers, voir §5.2.4 du guide |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
@@ -245,6 +247,38 @@ QDRANT_URL=http://localhost:6333
 SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe>
 SMB_DOMAIN=DOMAINE
+```
+
+---
+
+## sp_indexer.py
+
+Indexation des bibliothèques SharePoint Online (Partie 3, guide §13). Réutilise l'extraction, le découpage et les embeddings d'`indexer.py`.
+
+- Permissions de chaque fichier lues via Graph, groupes SharePoint via l'API REST, traduits en `entra:usr:`, `entra:grp:` et `entra:tous-internes`
+- Liens « toute l'organisation » et anonymes ignorés, invités externes ignorés, identifiants introuvables signalés
+- Fichiers chiffrés par une étiquette Purview détectés (conteneur OLE) et non indexés
+- Bibliothèque de conservation exclue (`SP_EXCLUDE_DRIVES`)
+- Incrémental par `cTag` ; permissions recalculées à chaque passage
+- Orphelins supprimés seulement après un parcours complet du site
+- Mode `--dry-run` : analyse complète, rien n'est écrit
+
+**Variables d'environnement :**
+
+```bash
+SP_CLIENT_ID=<ID-APPLICATION-SHAREPOINT>
+SP_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT-SHAREPOINT>
+SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
+SP_SITES=<URL des sites, séparées par des virgules>
+SP_EXCLUDE_DRIVES=Preservation Hold Library
+SP_MAX_FILE_MB=50
+```
+
+**Utilisation manuelle :**
+
+```bash
+docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.py --dry-run
+docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.py
 ```
 
 ---
