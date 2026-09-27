@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.15.0] : Septembre 2026
+
+### Documentation
+
+- `section-13-sharepoint.md` : nouvelle section. Connecteur SharePoint Online : inventaire préalable des permissions, application `RAG-SharePoint-Indexer` en `Sites.Selected` accordée site par site, sonde avant et après l'accord, règles de traduction des permissions (groupes SharePoint, groupes Microsoft 365 et leurs propriétaires, groupes AD synchronisés, « tous les internes », partages, liens), documents chiffrés détectés et non indexés, matrice de cloisonnement validée (18/18), limites et constats de gouvernance.
+- `section-12-teams.md` : lien vers §13.
+- `index.md` : §13 ajoutée au sommaire de la Partie 3.
+
+### Scripts
+
+- `sp_indexer.py` : nouveau script. Indexation SharePoint, réutilisant l'extraction et le découpage d'`indexer.py` ; permissions recalculées à chaque passage, contenu retéléchargé seulement si modifié ; fichiers chiffrés ignorés ; bibliothèque de conservation exclue ; orphelins supprimés seulement après un parcours complet ; mode simulation.
+- `sharepoint/` : nouveau dossier. `Inventaire-Permissions-SharePoint.ps1`, `Inventaire-GroupesSharePoint.ps1` (authentification moderne), `Resoudre-Identifiants.ps1`, `Accorder-SitesSelected.ps1`, `sonde_sharepoint.py`.
+- `api/anon_auth.py` : identifiant `entra:tous-internes` pour les comptes membres du tenant.
+- `api/anon_main.py` : étape SharePoint dans `/admin/sync` (environnement restreint), index BM25 reconstruit même après une erreur partielle, citations SharePoint avec lien vers le document, fenêtres de contexte explicites pour la génération et le juge (`LLM_NUM_CTX`, `JUDGE_NUM_CTX`).
+- `docker-compose.yml`, `env.example`, `deploy.sh` : variables `SP_*`, `SYNC_TIMEOUT_SHAREPOINT`, `LLM_NUM_CTX`, `JUDGE_NUM_CTX` ; `deploy.sh` copie `sp_indexer.py`.
+- `N8N/n8n-sync-corpus.json` : délai d'attente de la synchronisation porté à 30 minutes.
+
+---
+
 ## [2.14.2] : Septembre 2026
 
 ### Documentation

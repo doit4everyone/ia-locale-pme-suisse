@@ -449,7 +449,7 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 ---
 
-§13 Connecteur SharePoint Online *(à venir)*
+[Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
 
 ---
 
