@@ -63,6 +63,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
 | `teams-test/` | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
+| `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris | Sur le serveur de fichiers, voir §5.2.4 du guide |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
 
