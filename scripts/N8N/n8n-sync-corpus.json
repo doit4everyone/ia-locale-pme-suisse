@@ -33,7 +33,7 @@
           ]
         },
         "options": {
-          "timeout": 720000
+          "timeout": 1800000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
