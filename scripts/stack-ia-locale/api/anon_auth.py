@@ -28,6 +28,7 @@ Extension Entra ID (Partie 3, désactivée par défaut) :
     entra:usr:<object-id>   le compte lui-même
     entra:grp:<object-id>   chaque groupe, imbrications comprises
                             (transitiveMemberOf)
+    entra:tous-internes     si le compte est membre du locataire (pas invité)
   Ces identifiants correspondent au format autorisés[] des chunks SharePoint.
   Les chunks SMB utilisent le format DOMAINE\\Groupe : ils ne sont pas
   affectés par l'extension.
@@ -170,7 +171,7 @@ def get_entra_groups(email: str) -> list[str]:
     upn = urllib.parse.quote(email, safe="@")
 
     with httpx.Client(timeout=GRAPH_TIMEOUT, headers=headers) as client:
-        r = client.get(f"{GRAPH_URL}/users/{upn}", params={"$select": "id"})
+        r = client.get(f"{GRAPH_URL}/users/{upn}", params={"$select": "id,userType"})
         if r.status_code == 404:
             logger.warning(f"[AUTH] Utilisateur '{email}' non trouvé dans Entra ID")
             return []
@@ -178,6 +179,10 @@ def get_entra_groups(email: str) -> list[str]:
         user_id = r.json()["id"]
 
         ids = [f"entra:usr:{user_id.lower()}"]
+        # Membre du locataire (pas invité) : correspond à « tous les utilisateurs
+        # internes » de SharePoint (spo-grid-all-users), traduit par sp_indexer.py
+        if r.json().get("userType") == "Member":
+            ids.append("entra:tous-internes")
         url = f"{GRAPH_URL}/users/{user_id}/transitiveMemberOf"
         params = {"$select": "id", "$top": "999"}
         while url:

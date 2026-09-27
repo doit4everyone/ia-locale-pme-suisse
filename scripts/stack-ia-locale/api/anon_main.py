@@ -43,6 +43,15 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
 LLM_MODEL    = os.getenv("LLM_MODEL", "qwen2.5:14b")
 JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b")
 JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
+# Fenêtres de contexte demandées explicitement à Ollama, modèle par modèle.
+# Sans valeur explicite, Ollama applique sa valeur par défaut (souvent 4096),
+# trop juste pour 15 chunks de contexte, et tronque sans erreur.
+# LLM_NUM_CTX identique à SUMMARY_NUM_CTX (teams.py) : le modèle principal
+# n'est pas rechargé quand on passe d'une question RAG à une synthèse Teams.
+# Ne pas utiliser OLLAMA_CONTEXT_LENGTH côté serveur : il s'applique à tous
+# les modèles, y compris le juge, et augmente leur mémoire sans raison.
+LLM_NUM_CTX   = int(os.getenv("LLM_NUM_CTX", "") or "16384")
+JUDGE_NUM_CTX = int(os.getenv("JUDGE_NUM_CTX", "") or "8192")
 QDRANT_HOST  = os.getenv("QDRANT_HOST", "http://qdrant:6333")
 COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
 # Collection dediee a la documentation technique (guides, procedures).
@@ -107,6 +116,7 @@ def _load_collection_chunks(collection_name: str) -> list[dict]:
                 "text":        p.payload.get("text", ""),
                 "source":      p.payload.get("source", "inconnu"),
                 "source_id":   p.payload.get("source_id", ""),
+                "web_url":     p.payload.get("web_url", ""),
                 "collection":  collection_name,
                 "chunk_index": p.payload.get("chunk_index", None),
                 "autorises":   p.payload.get("autorises", []),
@@ -260,6 +270,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                 "text":        text,
                 "source":      r.payload.get("source", "inconnu"),
                 "source_id":   r.payload.get("source_id", ""),
+                "web_url":     r.payload.get("web_url", ""),
                 "collection":  get_collection_for_source(r.payload.get("source", "")),
                 "chunk_index": r.payload.get("chunk_index", None),
                 "autorises":   r.payload.get("autorises", []),
@@ -365,6 +376,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                     "text":        r.payload.get("text", ""),
                     "source":      r.payload.get("source", "inconnu"),
                     "source_id":   r.payload.get("source_id", ""),
+                    "web_url":     r.payload.get("web_url", ""),
                     "collection":  best_collection,
                     "chunk_index": r.payload.get("chunk_index", 0),
                 }
@@ -390,26 +402,38 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
 
 
 def enrichir_citations(answer: str, chunks: list[dict]) -> str:
-    """Post-traitement : enrichit les citations [nom.docx] avec le chemin UNC
-    du dossier parent sur le file server. Opère côté API, sans dépendre du LLM.
-    Exemple : [contrat.docx] → [contrat.docx : \\\\SERVEUR\\Partage\\Dossier\\]
+    """Post-traitement : enrichit les citations [nom.docx] avec l'emplacement
+    du document. Opère côté API, sans dépendre du LLM.
+      - partage SMB : chemin UNC du dossier parent
+        [contrat.docx] → [contrat.docx : `\\\\SERVEUR\\Partage\\Dossier\\`]
+      - SharePoint (source « SharePoint/<site>/<bibliothèque>/<chemin> ») :
+        site et bibliothèque, avec le lien vers le document s'il est connu
+        [contrat.docx] → [contrat.docx : SharePoint, site RH, Documents](lien)
     """
-    if not SMB_SHARE or not chunks:
+    if not chunks:
         return answer
     source_map: dict[str, str] = {}
     for chunk in chunks:
-        fname = chunk["source"].split("/")[-1]
-        if fname not in source_map:
-            unc_base = SMB_SHARE.replace("/", "\\")
-            parent = "/".join(chunk["source"].split("/")[:-1])
-            unc_folder = unc_base + "\\" + parent.replace("/", "\\")
-            source_map[fname] = unc_folder
-    import re
-    def _replace(m):
-        fname = m.group(1)
+        source = chunk["source"]
+        fname = source.split("/")[-1]
         if fname in source_map:
-            return f"[{fname} : `{source_map[fname]}\\`]"
-        return m.group(0)
+            continue
+        if source.startswith("SharePoint/"):
+            parties = source.split("/")
+            dossier = "/".join(parties[3:-1])
+            lieu = f"SharePoint, site {parties[1]}, {parties[2]}" + (f"/{dossier}" if dossier else "")
+            url = chunk.get("web_url", "")
+            source_map[fname] = f"[{fname} : {lieu}]({url})" if url else f"[{fname} : {lieu}]"
+        elif SMB_SHARE:
+            unc_base = SMB_SHARE.replace("/", "\\")
+            parent = "/".join(source.split("/")[:-1])
+            unc_folder = unc_base + "\\" + parent.replace("/", "\\")
+            source_map[fname] = f"[{fname} : `{unc_folder}\\`]"
+    if not source_map:
+        return answer
+
+    def _replace(m):
+        return source_map.get(m.group(1), m.group(0))
     return re.sub(r'\[([^\[\]]+\.(?:docx|pdf|pptx|txt|md))\]', _replace, answer)
 
 
@@ -465,7 +489,7 @@ Question : {query}"""
                 "model": LLM_MODEL,
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.2},
+                "options": {"temperature": 0.2, "num_ctx": LLM_NUM_CTX},
                 "messages": [
                     {"role": "system", "content": get_system_prompt()},
                     {"role": "user", "content": prompt_user}
@@ -512,6 +536,9 @@ async def warmup_judge() -> None:
                     "model": JUDGE_MODEL,
                     "prompt": "",
                     "keep_alive": JUDGE_KEEP_ALIVE,
+                    # Même fenêtre que les appels du juge : sinon Ollama
+                    # rechargerait le modèle à chaque vérification
+                    "options": {"num_ctx": JUDGE_NUM_CTX},
                 },
             )
     except Exception:
@@ -579,7 +606,7 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                     "format": "json",
                     "think": False,
                     "keep_alive": JUDGE_KEEP_ALIVE,
-                    "options": {"temperature": 0},
+                    "options": {"temperature": 0, "num_ctx": JUDGE_NUM_CTX},
                     "messages": [{"role": "user", "content": juge_prompt}]
                 }
             )
@@ -964,6 +991,8 @@ async def admin_sync(
     Déclenche la synchronisation complète du corpus :
       1. indexer.py : indexe les fichiers nouveaux ou modifiés
       2. acl_resolver.py : met à jour les autorises[] dans Qdrant
+      3. sp_indexer.py : bibliothèques SharePoint (si SP_SITES est renseigné)
+    L'index BM25 est ensuite reconstruit.
     """
     if credentials.credentials != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Token admin invalide")
@@ -980,6 +1009,7 @@ async def admin_sync(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "indexer": {},
             "acl_resolver": {},
+            "sharepoint": {},
             "quarantine": [],
             "errors": []
         }
@@ -1092,6 +1122,75 @@ async def admin_sync(
             rapport["errors"].append(msg)
             logger.error(f"[SYNC] {msg}")
 
+        # ── Étape 3 : sp_indexer.py (SharePoint Online, Partie 3) ────────
+        sp_sites = os.getenv("SP_SITES", "")
+        if sp_sites and os.getenv("SP_CLIENT_ID", ""):
+            sp_script = f"{SYNC_SCRIPTS_DIR}/sp_indexer.py"
+            sp_rapport = "/var/log/rag/rapport_sharepoint.json"
+            try:
+                logger.info("[SYNC] Lancement de sp_indexer.py")
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [venv_python, sp_script, "--rapport", sp_rapport],
+                    capture_output=True,
+                    text=True,
+                    timeout=int(os.getenv("SYNC_TIMEOUT_SHAREPOINT", "") or "900"),
+                    env={
+                        "PATH": os.environ.get("PATH", ""),
+                        "HOME": os.environ.get("HOME", ""),
+                        "LANG": os.environ.get("LANG", "C.UTF-8"),
+                        "PYTHONIOENCODING": "utf-8",
+                        # auth.py (RAG-Identity-Resolver) est importé depuis /app
+                        "PYTHONPATH": "/app",
+                        "OLLAMA_URL": EMBED_BASE_URL,
+                        "EMBED_MODEL": EMBED_MODEL,
+                        "QDRANT_URL": QDRANT_HOST,
+                        "QDRANT_COLLECTION": COLLECTION,
+                        "ORG_OWNER": ORG_NAME,
+                        "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
+                        "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
+                        "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
+                        "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
+                        "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
+                        "REPORT_DIR": "/var/log/rag",
+                        # Application d'identité (§11) : UPN, groupes, propriétaires
+                        "ENTRA_TENANT_ID": os.environ.get("ENTRA_TENANT_ID", ""),
+                        "ENTRA_CLIENT_ID": os.environ.get("ENTRA_CLIENT_ID", ""),
+                        "ENTRA_CERT_PATH": os.environ.get("ENTRA_CERT_PATH", ""),
+                        "ENTRA_KEY_PATH": os.environ.get("ENTRA_KEY_PATH", ""),
+                        "ENTRA_CERT_THUMBPRINT": os.environ.get("ENTRA_CERT_THUMBPRINT", ""),
+                        # Application d'indexation SharePoint (§13)
+                        "SP_CLIENT_ID": os.environ.get("SP_CLIENT_ID", ""),
+                        "SP_CERT_THUMBPRINT": os.environ.get("SP_CERT_THUMBPRINT", ""),
+                        "SP_KEY_PATH": os.environ.get("SP_KEY_PATH", ""),
+                        "SP_SITES": sp_sites,
+                        "SP_EXCLUDE_DRIVES": os.environ.get("SP_EXCLUDE_DRIVES", ""),
+                        "SP_MAX_FILE_MB": os.environ.get("SP_MAX_FILE_MB", ""),
+                    }
+                )
+                rapport["sharepoint"]["returncode"] = result.returncode
+                try:
+                    with open(sp_rapport, "r", encoding="utf-8") as rf:
+                        sp_data = json.load(rf)
+                    rapport["sharepoint"]["totaux"] = sp_data.get("totaux", {})
+                    rapport["sharepoint"]["identifiants_introuvables"] = len(
+                        sp_data.get("identifiants_introuvables", {}))
+                except Exception as e:
+                    logger.warning(f"[SYNC] Rapport SharePoint illisible : {e}")
+                if result.returncode != 0:
+                    rapport["errors"].append(f"sp_indexer.py a retourné code {result.returncode}")
+                    logger.error(f"[SYNC] sp_indexer.py erreur : {(result.stderr or result.stdout)[-300:]}")
+                else:
+                    logger.info("[SYNC] sp_indexer.py terminé avec succès")
+            except subprocess.TimeoutExpired:
+                msg = "sp_indexer.py timeout"
+                rapport["errors"].append(msg)
+                logger.error(f"[SYNC] {msg}")
+            except Exception as e:
+                msg = f"sp_indexer.py exception : {e}"
+                rapport["errors"].append(msg)
+                logger.error(f"[SYNC] {msg}")
+
         # ── Résumé ────────────────────────────────────────────────────────
         rapport["success"] = len(rapport["errors"]) == 0
         rapport["quarantine_count"] = len(rapport["quarantine"])
@@ -1102,7 +1201,11 @@ async def admin_sync(
             f"errors={len(rapport['errors'])}"
         )
 
-        if rapport["success"]:
+        # Reconstruit même après une erreur partielle : une étape peut avoir
+        # modifié Qdrant, et l'index BM25 doit toujours refléter son contenu.
+        try:
             build_bm25_index()
+        except Exception as e:
+            logger.error(f"[SYNC] Reconstruction BM25 échouée : {e}")
 
         return rapport
