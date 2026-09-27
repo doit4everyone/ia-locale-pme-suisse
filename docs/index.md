@@ -1,46 +1,42 @@
+---
+title: "Procédures opérationnelles | IA locale pour PME suisse | DoIt4Everyone"
+description: "Procédures de déploiement d'une stack IA locale nLPD pour PME suisse, validées en lab : file server Windows, puis Microsoft 365."
+---
+
+<style>
+  header, footer { display: none !important; }
+  .wrapper { max-width: 900px !important; margin: 0 auto !important; float: none !important; position: relative !important; padding: 40px 20px !important; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important; font-size: 1.1em !important; }
+  section { width: 100% !important; float: none !important; margin: 0 !important; }
+  h1, h2, h3 { text-align: center; }
+  table { width: 100%; display: table; margin: 20px 0; }
+</style>
+
 # Procédures opérationnelles
 
-Procédures dérivées du [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf).
+[Retour à l'accueil](../) | [Guides décisionnels](../guides/)
 
-Chaque procédure correspond à une phase du plan d'apprentissage et est publiée après validation en pratique. L'ordre suit la progression du plan.
-
-**Environnement de référence :** LABO-G9 (Windows 11, VMware Workstation, Ollama natif) + VM-RAG-LAB (Ubuntu Server 24.04, Docker Compose).
+Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose), sans GPU.
 
 ---
 
 ## Guide de déploiement stack IA locale
 
-Guide complet de déploiement d'un pipeline RAG local nLPD-compliant sur VM Ubuntu Server 24.04, avec cloisonnement documentaire par ACL NTFS, authentification LDAP AD et journalisation nLPD.
+→ [Guide de déploiement stack IA locale](stack-ia-locale/)
 
-→ [Guide de déploiement stack IA locale](stack-ia-locale/index.md)
-
----
-
-## Procédures disponibles
-
-*Procédures unitaires par phase du plan d'apprentissage, publiées après validation en pratique.*
-
----
-
-## Structure prévue
-
-Les procédures seront publiées dans cet ordre, en suivant les phases du plan :
-
-| Phase | Procédure | Statut |
+| Partie | Contenu | Sections |
 |---|---|---|
-| 1 | Créer la VM-RAG-LAB et valider la connectivité Ollama | À venir |
-| 2 | Premier pipeline RAG avec LlamaIndex | À venir |
-| 3 | Parsing des documents et stratégies de chunking | À venir |
-| 4 | Qdrant : persistance, métadonnées et snapshot | À venir |
-| 5 | Retrieval hybride et reranker BGE | À venir |
-| 6 | Prompt strict, citations et groundedness check | À venir |
-| 7 | Permissions NTFS : filtrage par identité AD | À venir |
-| 8 | API FastAPI et service complet | À venir |
-| 9 | Sécurité du pipeline : injection, durcissement, journalisation | À venir |
-| 10 | Synchronisation et monitoring | À venir |
-| 11 | Onyx : plateforme vs pipeline custom | À venir |
-| 12 | Projet de synthèse sur cas réel | À venir |
+| Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
+| Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions. À venir : documents protégés par Purview, gouvernance | §11 et suivantes |
+| Mesures et benchmarks | Validation complète et mesures de performance, après l'installation du GPU | §10 (à venir) |
+
+Les scripts et workflows correspondants sont publiés dans [scripts](../scripts/).
 
 ---
 
-← [Retour à l'accueil](../)
+## Lien avec le plan d'apprentissage
+
+Le [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf) décrit la progression en 14 phases, dont 2 optionnelles nécessitant un tenant Microsoft 365. Le guide de déploiement en est la mise en œuvre validée en lab : les phases y sont couvertes dans l'ordre du déploiement, et non comme des procédures séparées.
+
+---
+
+ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

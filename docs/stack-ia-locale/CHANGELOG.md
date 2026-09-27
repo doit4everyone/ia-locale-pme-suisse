@@ -28,7 +28,7 @@ Toutes les modifications notables de ce repo sont documentées ici.
 - `section-03-docker-compose.md`, `section-11-prerequis-ms365.md` : mentions « à venir » périmées remplacées par des liens vers §11 à §13.
 - `index.md` (guide) : tableau de référence complété (scripts Teams, SharePoint, groupe d'indexation, workflow Teams).
 - `index.md` (accueil) : « Ce qui vient ensuite » mis à jour (§11 à §13 publiées, Purview et gouvernance à venir, GPU) ; titre sans tiret cadratin.
-- `docs/index.md` : Ubuntu Server 26.04 au lieu de 24.04, mention de la Partie 3.
+- `docs/index.md` : page réécrite. Elle présentait des procédures unitaires par phase du plan d'apprentissage (12 phases, toutes « à venir ») qui n'ont jamais été publiées sous cette forme : elle présente maintenant le guide de déploiement par parties, et son lien avec le plan d'apprentissage en 14 phases. Ubuntu Server 26.04 au lieu de 24.04.
 - `section-08-fiabilite.md` : tiret cadratin retiré d'un exemple de citation.
 - `scripts/index.md` : dossiers `sharepoint` et `teams-test` ajoutés.
 - Pages `index.md` ajoutées dans `scripts/N8N/`, `scripts/sharepoint/`, `scripts/teams-test/` et `guides/` : sur GitHub Pages, un lien vers un dossier sans page d'index renvoyait une erreur 404.

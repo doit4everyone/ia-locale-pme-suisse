@@ -62,9 +62,9 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant | Sur l'hôte, via `/admin/sync` ou manuel |
 | `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
-| `teams-test/` | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
+| [`../teams-test/`](../teams-test/) | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
 | `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions | Dans le conteneur `rag-api`, via `/admin/sync` ou manuel |
-| `sharepoint/` | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
+| [`../sharepoint/`](../sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris | Sur le serveur de fichiers, voir §5.2.4 du guide |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
@@ -317,7 +317,7 @@ TEAMS_STATE_FILE=/var/log/rag/teams_state.json
 # Optionnel : SUMMARY_MODEL (défaut : LLM_MODEL), SUMMARY_NUM_CTX (défaut : 16384)
 ```
 
-**Tests** (fichiers dans `teams-test/`) : ces fichiers servent uniquement à valider l'installation et à évaluer les comptes-rendus. Ils ne sont pas nécessaires au fonctionnement du pipeline. Les deux scripts s'exécutent dans le conteneur `rag-api` et doivent être copiés dans `/root/rag-pipeline`, le dossier monté dans le conteneur, le temps des tests.
+**Tests** (fichiers dans `scripts/teams-test/`) : ces fichiers servent uniquement à valider l'installation et à évaluer les comptes-rendus. Ils ne sont pas nécessaires au fonctionnement du pipeline. Les deux scripts s'exécutent dans le conteneur `rag-api` et doivent être copiés dans `/root/rag-pipeline`, le dossier monté dans le conteneur, le temps des tests.
 
 ```bash
 # Synthèse sur la transcription fictive, avec contrôles automatiques
