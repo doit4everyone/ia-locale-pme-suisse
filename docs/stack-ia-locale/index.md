@@ -77,7 +77,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | Validation backend avec Onyx CE, déploiement Open WebUI, LDAP AD, cloisonnement | Publié |
 | [§5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | Montage SMB, ACL NTFS, résolution LDAP, filtrage Qdrant par identité | Publié |
 | [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié |
-| [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, Teams et OCR (documentaire) | Publié |
+| [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, OCR (documentaire) ; Teams : voir §12 | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
@@ -101,8 +101,9 @@ Les numéros de section sont attribués à la publication.
 | Document | Contenu |
 |---|---|
 | [suivi-corrections.md](suivi-corrections.md) | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
-| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP, extension Entra ID optionnelle via Microsoft Graph). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
-| [Workflows n8n](../../scripts/N8N/) | `n8n-sync-corpus.json` (synchronisation horaire du corpus + email quarantaine) et `n8n-rappel-rotation-svc-rag.json` (rappel mensuel rotation mot de passe). Fichiers JSON importables directement dans n8n. |
+| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP, extension Entra ID optionnelle via Microsoft Graph), `teams.py` et `teams_graph.py` (synthèse Teams), `sp_indexer.py` (indexation SharePoint), `Set-AccesIndexationRAG.ps1` (lecture du partage par un groupe dédié). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
+| [Scripts SharePoint](../../scripts/sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde (§13) |
+| [Workflows n8n](../../scripts/N8N/) | `n8n-sync-corpus.json` (synchronisation horaire du corpus + email quarantaine) `n8n-rappel-rotation-svc-rag.json` (rappel mensuel rotation mot de passe) et `n8n-teams-sync.json` (synthèse horaire des réunions Teams, §12). Fichiers JSON importables directement dans n8n. |
 
 ---
 

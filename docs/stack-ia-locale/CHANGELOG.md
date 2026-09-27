@@ -21,6 +21,19 @@ Toutes les modifications notables de ce repo sont documentées ici.
 - `docker-compose.yml`, `env.example`, `deploy.sh` : variables `SP_*`, `SYNC_TIMEOUT_SHAREPOINT`, `LLM_NUM_CTX`, `JUDGE_NUM_CTX` ; `deploy.sh` copie `sp_indexer.py`.
 - `N8N/n8n-sync-corpus.json` : délai d'attente de la synchronisation porté à 30 minutes.
 
+### Relecture complète du dépôt avant publication
+
+- Liens corrigés : les dossiers `scripts/sharepoint/` et `scripts/teams-test/` sont à la racine de `scripts/` (§12, §13, index des scripts, README).
+- `section-07-n8n.md` : le résumé Teams renvoie à §12 (validé), statut et tableau mis à jour ; mention de l'étape SharePoint de `/admin/sync` et du délai de 30 minutes.
+- `section-03-docker-compose.md`, `section-11-prerequis-ms365.md` : mentions « à venir » périmées remplacées par des liens vers §11 à §13.
+- `index.md` (guide) : tableau de référence complété (scripts Teams, SharePoint, groupe d'indexation, workflow Teams).
+- `index.md` (accueil) : « Ce qui vient ensuite » mis à jour (§11 à §13 publiées, Purview et gouvernance à venir, GPU) ; titre sans tiret cadratin.
+- `docs/index.md` : Ubuntu Server 26.04 au lieu de 24.04, mention de la Partie 3.
+- `section-08-fiabilite.md` : tiret cadratin retiré d'un exemple de citation.
+- `scripts/index.md` : dossiers `sharepoint` et `teams-test` ajoutés.
+- Pages `index.md` ajoutées dans `scripts/N8N/`, `scripts/sharepoint/`, `scripts/teams-test/` et `guides/` : sur GitHub Pages, un lien vers un dossier sans page d'index renvoyait une erreur 404.
+- Fichiers supprimés : `docs/stack-ia-locale/docker-compose.yml` (ancienne copie, non référencée, différente de `scripts/stack-ia-locale/docker-compose.yml`), `guides/toto.txt` et `scripts/teams-test/toto.md` (fichiers vides de création de dossier).
+
 ---
 
 ## [2.14.2] : Septembre 2026

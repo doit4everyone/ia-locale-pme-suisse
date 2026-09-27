@@ -48,7 +48,7 @@ Les deux exemples suivants ont été obtenus lors de la même session de validat
 
 **Extrait de la réponse :**
 
-> Le contrat couvre l'infogérance de 35 postes Windows 11 Pro, l'infogérance d'un serveur Windows Server 2022 et d'un NAS Synology, le réseau (Firewall OPNsense, 3 switches, WiFi industriel). Forfait mensuel : CHF 4 200 HT. [SharePoint — 21_Contrat_Maintenance_Baumont_Industries.docx]
+> Le contrat couvre l'infogérance de 35 postes Windows 11 Pro, l'infogérance d'un serveur Windows Server 2022 et d'un NAS Synology, le réseau (Firewall OPNsense, 3 switches, WiFi industriel). Forfait mensuel : CHF 4 200 HT. [SharePoint : 21_Contrat_Maintenance_Baumont_Industries.docx]
 
 Toutes les données sont exactes et vérifiables dans le document source.
 

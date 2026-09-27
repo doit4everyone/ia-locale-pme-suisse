@@ -17,11 +17,11 @@ description: "Automatisation de la synchronisation du corpus, résolution ACL r�
 
 [Retour au sommaire](index.md) | [Section précédente : §6 Agent de codage](section-06-cline.md)
 
-**Statut :** §7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. §7.4 (résumé Teams) et §7.5 (OCR factures) sont documentaires : l'architecture est décrite mais non validée en lab, faute de tenant MS 365 avec Teams actif et de GPU pour le modèle multimodal.
+**Statut :** §7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. Le résumé des réunions Teams (§7.4) est validé en Partie 3, voir [§12](section-12-teams.md). §7.5 (OCR factures) est documentaire : l'architecture est décrite mais non validée en lab, faute de GPU pour le modèle multimodal.
 
 ---
 
-> **Ce que cette section documente :** comment automatiser la synchronisation du corpus, la résolution des ACL NTFS et les notifications d'alerte via n8n. Trois pipelines sont validés en lab. Deux autres sont documentés comme architecture de référence pour les déploiements avec GPU et tenant Microsoft 365.
+> **Ce que cette section documente :** comment automatiser la synchronisation du corpus, la résolution des ACL NTFS et les notifications d'alerte via n8n. Trois pipelines sont validés en lab ici, un quatrième (Teams) en Partie 3. L'OCR des factures est documenté comme architecture de référence pour les déploiements avec GPU.
 
 ---
 
@@ -33,10 +33,10 @@ n8n orchestre trois catégories de tâches dans la stack RAG :
 |---|---|---|---|
 | Maintenance | Synchronisation corpus | Schedule horaire | Validé |
 | Sécurité | Rappel rotation svc-rag | Schedule mensuel | Validé |
-| Productivité | Résumé réunions Teams | Schedule horaire | Documentaire |
+| Productivité | Résumé réunions Teams | Schedule horaire | Validé, voir §12 |
 | Productivité | OCR et intégration factures | Watch folder | Documentaire |
 
-Les pipelines de maintenance et de sécurité sont indépendants du GPU. Les pipelines de productivité nécessitent le GPU pour le modèle multimodal (OCR) et un tenant MS 365 avec Teams actif (résumé).
+Les pipelines de maintenance et de sécurité sont indépendants du GPU. Le résumé Teams fonctionne sur CPU mais nécessite un tenant Microsoft 365 (§12). L'OCR des factures nécessite le GPU pour le modèle multimodal.
 
 ### §7.1.1 Accès à l'interface n8n
 
@@ -92,6 +92,8 @@ Send Email → <destinataire>
 ### §7.2.2 Endpoint /admin/sync
 
 L'endpoint est implémenté dans `main.py` de la RAG API. Il lance `indexer.py` puis `acl_resolver.py` en sous-processus et retourne un rapport JSON structuré.
+
+> **Depuis la Partie 3 :** une troisième étape, `sp_indexer.py`, s'ajoute si `SP_SITES` est renseigné ([§13.6](section-13-sharepoint.md)), et l'index BM25 est reconstruit après chaque synchronisation, même partiellement en échec. Le délai d'attente du nœud HTTP du workflow est porté à 30 minutes (1800000 ms), et celui de `wget` à 1800 secondes (`-T 1800`) pour un appel manuel.
 
 ```python
 # Extrait de main.py - endpoint /admin/sync
@@ -294,46 +296,11 @@ Fichier importable : [`n8n-rappel-rotation-svc-rag.json`](../../scripts/N8N/n8n-
 
 ---
 
-## §7.4 Pipeline 3 : résumé de réunions Teams (documentaire)
+## §7.4 Pipeline 3 : résumé de réunions Teams
 
-> **Statut documentaire :** ce pipeline nécessite un tenant Microsoft 365 avec Teams actif et des droits admin Entra ID. Il sera validé en lab lors de la publication de la Partie 3 (connecteurs Microsoft 365), en même temps que le connecteur SharePoint Online.
+Ce pipeline est documenté et validé en lab dans la Partie 3 : [§12 Synthèse des réunions Teams](section-12-teams.md).
 
-Ce pipeline récupère les transcriptions des réunions Teams via Graph API, génère un compte-rendu structuré via le LLM local, et le dépose dans le canal Teams concerné.
-
-### §7.4.1 Prérequis
-
-- App Registration Entra ID avec les permissions :
-  - `OnlineMeetings.Read.All` : accès aux réunions et transcriptions
-  - `OnlineMeetingTranscript.Read.All` : fichiers VTT
-  - `ChannelMessage.Send` : dépôt du compte-rendu dans Teams (nom exact à vérifier selon le mode application ou délégué, les permissions Graph pour l'envoi dans un canal sont plus restrictives que la lecture)
-- Transcription automatique activée par un admin Teams : **Centre d'administration Teams → Réunions → Stratégies de réunion → Transcription → Activer**
-- Attendre la propagation de la stratégie (jusqu'à 24h)
-
-> **Contrainte nLPD :** les transcriptions Teams sont stockées dans le datacenter du tenant MS 365. Si le tenant n'est pas hébergé en Suisse, les transcriptions transitent hors juridiction avant d'arriver dans le pipeline local. La qualité du résumé dépend directement de la qualité de la transcription Teams automatique.
-
-### §7.4.2 Architecture du pipeline
-
-```
-Schedule Trigger (toutes les heures)
-    ↓
-HTTP Request → GET Graph API /me/onlineMeetings
-    Filter: réunions des 2 dernières heures
-    ↓
-Loop → pour chaque réunion
-    ↓
-HTTP Request → GET transcription VTT
-    GET /me/onlineMeetings/{meetingId}/transcripts/{transcriptId}/content
-    ↓
-HTTP Request → POST LLM local (Ollama ou vLLM)
-    Prompt de structuration : participants, décisions, actions, points ouverts
-    ↓
-HTTP Request → POST canal Teams
-    POST /teams/{teamId}/channels/{channelId}/messages
-```
-
-### §7.4.3 Modèle recommandé
-
-Qwen3 14B ou 30B-A3B pour la qualité de structuration. Sur CPU LABO-G9, la génération d'un compte-rendu de réunion de 30 minutes prend environ 5 à 10 minutes. Avec le GPU RTX 5060 Ti, la latence descend à 15 à 30 secondes.
+L'architecture retenue diffère de celle esquissée dans les premières versions de ce guide : le compte-rendu n'est pas déposé dans un canal Teams, mais envoyé **en brouillon à l'organisateur seul**, qui relit et décide de la diffusion. La synthèse est faite par la RAG API (`/teams/sync`), n8n se charge de la planification et de l'envoi.
 
 ---
 

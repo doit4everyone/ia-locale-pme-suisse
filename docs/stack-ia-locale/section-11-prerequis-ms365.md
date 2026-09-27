@@ -17,7 +17,7 @@ description: "Connexion de la stack RAG à Microsoft Graph : App Registration pa
 
 [Retour au sommaire](index.md) | [Section précédente : §9 Sécurité](section-09-securite.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toutes les étapes de cette section ont été exécutées et testées sur un tenant Microsoft 365 réel synchronisé par Entra Connect. L'indexation des documents SharePoint n'est pas couverte ici : elle fait l'objet de §12 (à venir).
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toutes les étapes de cette section ont été exécutées et testées sur un tenant Microsoft 365 réel synchronisé par Entra Connect. L'indexation des documents SharePoint n'est pas couverte ici : elle fait l'objet de [§13](section-13-sharepoint.md).
 
 ---
 
@@ -434,7 +434,7 @@ La réponse dans Open WebUI est identique à celle obtenue sans l'extension, cit
 
 ---
 
-§12 Connecteur SharePoint *(à venir)*
+[Section suivante : §12 Synthèse des réunions Teams](section-12-teams.md)
 
 ---
 

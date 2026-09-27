@@ -65,7 +65,7 @@ Avant toute ligne de code, inventorier ce que l'indexeur verra : c'est ce qui a 
 
 ### §13.2.1 Les scripts
 
-Trois scripts PowerShell en lecture seule, dans [`scripts/stack-ia-locale/sharepoint/`](../../scripts/stack-ia-locale/sharepoint/), exécutés avec un compte administrateur :
+Trois scripts PowerShell en lecture seule, dans [`scripts/sharepoint/`](../../scripts/sharepoint/), exécutés avec un compte administrateur :
 
 | Script | Module | Produit |
 |---|---|---|
@@ -215,7 +215,7 @@ Un document protégé par une étiquette avec chiffrement n'est pas un fichier O
 | `sp_indexer.py` | Indexation SharePoint, traduction des permissions, détection du chiffrement |
 | `api/anon_auth.py` | Identifiant `entra:tous-internes` |
 | `api/anon_main.py` | Étape SharePoint dans `/admin/sync`, citations SharePoint, fenêtres de contexte explicites |
-| `sharepoint/` | Inventaires, accord site par site, sonde |
+| `scripts/sharepoint/` | Inventaires, accord site par site, sonde |
 
 ### §13.6.2 Payload d'un chunk SharePoint
 

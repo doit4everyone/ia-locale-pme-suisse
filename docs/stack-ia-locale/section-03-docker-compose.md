@@ -17,7 +17,7 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 
 [Retour au sommaire](index.md) | [Section précédente : §2 vLLM](section-02-vllm.md)
 
-**Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (à venir) documentera les connecteurs Microsoft 365.
+**Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (§11 et suivantes) documente les connecteurs Microsoft 365.
 
 ---
 
