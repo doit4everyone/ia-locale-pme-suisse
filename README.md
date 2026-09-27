@@ -71,6 +71,8 @@ ia-locale-pme-suisse/
 └── scripts/
     ├── index.md
     ├── N8N/                    ← workflows n8n (.json)
+    ├── sharepoint/             ← inventaires, accord Sites.Selected, sonde
+    ├── teams-test/             ← fichiers et scripts de test Teams
     └── stack-ia-locale/        ← scripts Python anonymisés
         ├── index.md
         ├── env.example
@@ -80,8 +82,6 @@ ia-locale-pme-suisse/
         ├── anon_acl_resolver.py
         ├── sp_indexer.py
         ├── Set-AccesIndexationRAG.ps1
-        ├── sharepoint/         ← inventaires, accord Sites.Selected, sonde
-        ├── teams-test/         ← fichiers et scripts de test Teams
         └── api/
             ├── anon_main.py
             ├── anon_auth.py
