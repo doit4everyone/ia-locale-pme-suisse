@@ -4,7 +4,7 @@ Réunion fictive à deux participants, destinée à produire une vraie transcrip
 
 ## Avant la réunion
 
-1. **Remplacer « Karine »** par le prénom affiché du second compte licencié, partout dans le script et dans le corrigé. Teams attribue chaque réplique au nom du compte qui parle : le compte-rendu ne pourra relier une action à son responsable que si le prénom prononcé correspond au nom affiché. Faire de même pour « Thomas » avec le prénom affiché du compte organisateur.
+1. **Remplacer « Karine »** par le prénom affiché du second compte licencié, partout dans le script et dans le corrigé. Teams attribue chaque réplique au nom du compte qui parle : le compte rendu ne pourra relier une action à son responsable que si le prénom prononcé correspond au nom affiché. Faire de même pour « Thomas » avec le prénom affiché du compte organisateur.
 2. **Planifier la réunion depuis le calendrier Teams** (ou Outlook), avec le second compte en invité. Ne pas utiliser « Réunion instantanée » : l'API Graph des transcriptions ne prend pas en charge les réunions sans événement de calendrier associé.
 3. Chaque participant rejoint depuis son propre compte, sur un poste différent, avec un micro-casque de préférence.
 
@@ -114,7 +114,7 @@ La transcription peut mettre un moment à devenir disponible via Graph après la
 
 ### Points à observer en plus du score
 
-Contrairement au fichier fictif, cette transcription passe par la reconnaissance vocale de Teams. Avant d'évaluer le compte-rendu, relire la transcription elle-même et noter :
+Contrairement au fichier fictif, cette transcription passe par la reconnaissance vocale de Teams. Avant d'évaluer le compte rendu, relire la transcription elle-même et noter :
 
 - la façon dont les montants ont été transcrits (« 2 100 », « 2100 » ou en lettres) ;
 - les dates (« 13 octobre », « treize octobre ») ;

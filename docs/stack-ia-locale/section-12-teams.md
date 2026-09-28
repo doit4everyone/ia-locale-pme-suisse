@@ -1,6 +1,6 @@
 ---
 title: "§12 Synthèse des réunions Teams | Guide de déploiement stack IA locale"
-description: "Récupération des transcriptions Teams via Microsoft Graph, compte-rendu produit par un modèle local et envoyé en brouillon à l'organisateur : réglages du tenant, groupe d'adhésion, stratégie d'accès applicatif, évaluation mesurée."
+description: "Récupération des transcriptions Teams via Microsoft Graph, compte rendu produit par un modèle local et envoyé en brouillon à l'organisateur : réglages du tenant, groupe d'adhésion, stratégie d'accès applicatif, évaluation mesurée."
 ---
 <style>
   header, footer { display: none !important; }
@@ -21,7 +21,7 @@ description: "Récupération des transcriptions Teams via Microsoft Graph, compt
 
 ---
 
-> **Ce que cette section documente :** après chaque réunion Teams transcrite, le pipeline récupère la transcription via Microsoft Graph, la fait résumer par le modèle local (décisions, actions, points ouverts) et envoie le résultat **en brouillon, à l'organisateur seul**. L'organisateur relit, corrige et décide lui-même de la diffusion. Aucune transcription ni aucun compte-rendu ne quitte le périmètre de l'organisation pour être traité par un service d'IA externe.
+> **Ce que cette section documente :** après chaque réunion Teams transcrite, le pipeline récupère la transcription via Microsoft Graph, la fait résumer par le modèle local (décisions, actions, points ouverts) et envoie le résultat **en brouillon, à l'organisateur seul**. L'organisateur relit, corrige et décide lui-même de la diffusion. Aucune transcription ni aucun compte rendu ne quitte le périmètre de l'organisation pour être traité par un service d'IA externe.
 
 ---
 
@@ -70,7 +70,7 @@ Valeurs par défaut constatées en lab :
 | Réglage | Valeur par défaut | Commentaire |
 |---|---|---|
 | Transcription | On | Nécessaire au pipeline |
-| Meeting recording | On | **Inutile au pipeline** : l'enregistrement vidéo stocke audio et image dans OneDrive, un volume de données personnelles sans utilité pour le compte-rendu (principe de minimisation) |
+| Meeting recording | On | **Inutile au pipeline** : l'enregistrement vidéo stocke audio et image dans OneDrive, un volume de données personnelles sans utilité pour le compte rendu (principe de minimisation) |
 | Recordings and transcriptions automatically expire | On, 120 jours | Durée de conservation des transcriptions dans le tenant |
 | Require participant agreement for recording, transcription, and Copilot | Off | Teams affiche de toute façon une bannière à tous les participants au démarrage de la transcription |
 
@@ -86,7 +86,7 @@ Centre d'administration Teams → **Settings & policies** → **Global (Org-wide
 2. **Configure** → **Include speaker attribution** : On.
 3. **Save**, en bas de la page.
 
-**L'attribution des intervenants est indispensable.** Sans elle, la transcription est récupérable mais sans le nom des intervenants : le compte-rendu ne peut plus dire qui doit faire quoi. Teams affiche à ce moment un avertissement : l'attribution peut exposer des informations personnelles ou sensibles. C'est le compromis assumé de cette section, compensé par l'envoi au seul organisateur, le contrôle des données de santé (§12.5.3) et une journalisation sans contenu.
+**L'attribution des intervenants est indispensable.** Sans elle, la transcription est récupérable mais sans le nom des intervenants : le compte rendu ne peut plus dire qui doit faire quoi. Teams affiche à ce moment un avertissement : l'attribution peut exposer des informations personnelles ou sensibles. C'est le compromis assumé de cette section, compensé par l'envoi au seul organisateur, le contrôle des données de santé (§12.5.3) et une journalisation sans contenu.
 
 Équivalent PowerShell :
 
@@ -233,13 +233,13 @@ Le nombre de synthèses par passage est limité (`TEAMS_MAX_PAR_SYNC`, 3 par dé
 
 ### §12.5.3 Synthèse
 
-**Contrôle de longueur.** Ollama tronque silencieusement le texte qui dépasse sa fenêtre de contexte, dont la valeur par défaut dépend de la mémoire vidéo disponible (4 096 tokens en dessous de 24 Go). Une réunion de plus de quelques minutes serait coupée sans aucune erreur, et le compte-rendu ignorerait la fin de la réunion. `teams.py` demande donc explicitement une fenêtre de 16 384 tokens (`SUMMARY_NUM_CTX`) et **refuse** une transcription trop longue (HTTP 413) plutôt que de la tronquer. Le nombre de tokens réellement consommés est journalisé pour vérification.
+**Contrôle de longueur.** Ollama tronque silencieusement le texte qui dépasse sa fenêtre de contexte, dont la valeur par défaut dépend de la mémoire vidéo disponible (4 096 tokens en dessous de 24 Go). Une réunion de plus de quelques minutes serait coupée sans aucune erreur, et le compte rendu ignorerait la fin de la réunion. `teams.py` demande donc explicitement une fenêtre de 16 384 tokens (`SUMMARY_NUM_CTX`) et **refuse** une transcription trop longue (HTTP 413) plutôt que de la tronquer. Le nombre de tokens réellement consommés est journalisé pour vérification.
 
 **Prompt.** Température 0, sortie JSON imposée, transcription placée entre balises et neutralisée contre l'injection de prompt (même principe qu'en §9.6.1). Les règles demandent de n'utiliser que la transcription, de ne retenir que la valeur finale d'une date ou d'un montant modifié, d'écarter les idées évoquées au conditionnel, et de n'inclure aucune information de santé ou de vie privée.
 
 **Contrôles déterministes**, affichés en tête du brouillon sous « Points à vérifier en priorité » :
 
-- chiffres présents dans le compte-rendu mais absents de la transcription (les nombres écrits en lettres, comme « trois ans », sont pris en compte) ;
+- chiffres présents dans le compte rendu mais absents de la transcription (les nombres écrits en lettres, comme « trois ans », sont pris en compte) ;
 - responsable d'action qui n'est pas intervenu dans la réunion ;
 - termes évoquant une donnée de santé ;
 - échéances reprises automatiquement (voir ci-dessous).
@@ -250,7 +250,7 @@ La liste des participants est extraite du VTT, pas produite par le modèle.
 
 ### §12.5.4 Journalisation
 
-Chaque synthèse ajoute une ligne de type `teams_summary` au journal nLPD (§9.4) : horodatage, organisateur, empreinte de la transcription, nombre de participants et d'alertes. **Ni la transcription ni le compte-rendu ne sont conservés** par le pipeline.
+Chaque synthèse ajoute une ligne de type `teams_summary` au journal nLPD (§9.4) : horodatage, organisateur, empreinte de la transcription, nombre de participants et d'alertes. **Ni la transcription ni le compte rendu ne sont conservés** par le pipeline.
 
 ### §12.5.5 Déploiement
 
@@ -309,13 +309,13 @@ Toutes les heures → POST /teams/sync
 
 > **L'expéditeur doit être le compte SMTP authentifié.** Avec Exchange Online, un expéditeur différent du compte de l'identifiant SMTP est refusé : `554 5.2.252 SendAsDenied`. Pour un expéditeur interne, Outlook affiche le nom du compte dans l'annuaire, pas le nom indiqué dans le message.
 
-> **Utiliser une boîte dédiée aux comptes-rendus.** En lab, la boîte d'envoi était partagée avec les notifications d'un autre outil : le compte-rendu est arrivé sous le nom de cet outil, et une règle Outlook l'a classé avec ses alertes. En production, une boîte dédiée (par exemple `comptes-rendus-ia@votre-domaine.ch`) évite la confusion et permet une rotation de mot de passe indépendante.
+> **Utiliser une boîte dédiée aux comptes rendus.** En lab, la boîte d'envoi était partagée avec les notifications d'un autre outil : le compte rendu est arrivé sous le nom de cet outil, et une règle Outlook l'a classé avec ses alertes. En production, une boîte dédiée (par exemple `comptes-rendus-ia@votre-domaine.ch`) évite la confusion et permet une rotation de mot de passe indépendante.
 
 **Mention n8n.** Par défaut, n8n ajoute la phrase « This email was sent automatically with n8n » en fin de message. Le fichier fourni la désactive (`appendAttribution: false` dans les options des nœuds email). Validé en lab : la mention n'apparaît plus, même si l'option n'est pas proposée dans la liste « Add option » de ce nœud importé.
 
 **Token.** Comme pour les autres workflows, le token figure en clair dans le nœud HTTP, et donc dans tout export du workflow. L'identifiant n8n de type **Header Auth** (en-tête `Authorization`, valeur `Bearer` suivie du token) le stocke chiffré et le retire des exports. Recommandé en production pour tous les workflows de la stack.
 
-> **Le serveur d'envoi fait partie du périmètre.** Le brouillon contient des données personnelles. S'il passe par le serveur SMTP du tenant Microsoft 365, il reste dans le même périmètre que la transcription d'origine. Un serveur d'envoi tiers ferait sortir le compte-rendu de ce périmètre.
+> **Le serveur d'envoi fait partie du périmètre.** Le brouillon contient des données personnelles. S'il passe par le serveur SMTP du tenant Microsoft 365, il reste dans le même périmètre que la transcription d'origine. Un serveur d'envoi tiers ferait sortir le compte rendu de ce périmètre.
 
 ---
 
@@ -323,7 +323,7 @@ Toutes les heures → POST /teams/sync
 
 Les fichiers de test sont fournis dans [`scripts/teams-test/`](../../scripts/teams-test/) : transcription fictive, corrigé, script de réunion à lire à deux et scripts de test.
 
-> **Fichiers de test uniquement.** Rien dans `teams-test/` n'est nécessaire au fonctionnement du pipeline, qui repose sur `teams.py`, `teams_graph.py`, `main.py` et le workflow n8n. Les deux scripts (`test_teams_summary.py`, `test_teams_graph.py`) servent à valider l'installation et à évaluer la qualité des comptes-rendus. Ils s'exécutent dans le conteneur `rag-api` : les copier dans `/root/rag-pipeline`, le dossier monté dans le conteneur, uniquement le temps des tests.
+> **Fichiers de test uniquement.** Rien dans `teams-test/` n'est nécessaire au fonctionnement du pipeline, qui repose sur `teams.py`, `teams_graph.py`, `main.py` et le workflow n8n. Les deux scripts (`test_teams_summary.py`, `test_teams_graph.py`) servent à valider l'installation et à évaluer la qualité des comptes rendus. Ils s'exécutent dans le conteneur `rag-api` : les copier dans `/root/rag-pipeline`, le dossier monté dans le conteneur, uniquement le temps des tests.
 
 ### §12.7.1 Accès Graph
 
@@ -372,7 +372,7 @@ Transcription fictive de 4 minutes 30, quatre intervenants, avec un corrigé not
 
 Réunion planifiée entre l'organisateur et une participante externe (compte invité), d'après un script fourni avec son corrigé sur 13 points. La participante a été informée de la transcription et du traitement par IA au début de la réunion, et son accord figure dans la transcription.
 
-**Reconnaissance vocale.** Bonne dans l'ensemble, avec des erreurs typiques qui sont reprises telles quelles dans le compte-rendu :
+**Reconnaissance vocale.** Bonne dans l'ensemble, avec des erreurs typiques qui sont reprises telles quelles dans le compte rendu :
 
 | Prononcé | Transcrit |
 |---|---|
@@ -418,7 +418,7 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 **Omissions.** C'est la limite principale observée : le modèle a omis une question reportée à une réunion ultérieure. Une omission est plus difficile à repérer à la relecture qu'une erreur, et aucun contrôle automatique ne la détecte. L'organisateur doit relire le brouillon en ayant la réunion en tête.
 
-**Reconnaissance vocale.** Les noms propres et certaines tournures sont mal transcrits, et le compte-rendu reprend ces erreurs. Ce ne sont pas des erreurs du modèle de synthèse, mais elles doivent être corrigées à la relecture.
+**Reconnaissance vocale.** Les noms propres et certaines tournures sont mal transcrits, et le compte rendu reprend ces erreurs. Ce ne sont pas des erreurs du modèle de synthèse, mais elles doivent être corrigées à la relecture.
 
 **Participants externes.** Un invité anonyme choisit librement le nom affiché dans la transcription. Ses propos deviennent des données personnelles traitées par l'organisation : il doit être informé, ce que fait la bannière de Teams, et l'information orale en début de réunion est une bonne pratique.
 

@@ -4,6 +4,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.15.3] : Septembre 2026
+
+### Documentation
+
+- `section-11-prerequis-ms365.md` : §11.4.1 présentait deux App Registrations, avec SharePoint en §12. Il y en a trois : `RAG-Identity-Resolver` (§11), `RAG-Teams-Reader` (§12) et `RAG-SharePoint-Indexer` (§13), avec leurs permissions exactes. Renvois périmés corrigés (SharePoint en §13, Purview à venir, libellé de log corrigé en §12, traduction de « tous les utilisateurs internes » en §13.4.4).
+- Graphie harmonisée : « compte rendu », sans trait d'union, dans le texte courant (§7, §12, index du guide, index des scripts, fichiers de test). Les blocs de code, l'objet des emails produits par le pipeline et les adresses d'exemple ne sont pas modifiés.
+
+---
+
 ## [2.15.2] : Septembre 2026
 
 ### Documentation et scripts

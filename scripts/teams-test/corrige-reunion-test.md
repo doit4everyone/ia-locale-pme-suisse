@@ -2,7 +2,7 @@
 
 Fichier associé : `reunion-test-2026-09-29.vtt` (transcription fictive au format Teams, 30 répliques, environ 4 minutes 30).
 
-Toutes les personnes, entreprises et données de ce fichier sont fictives. Ce corrigé sert à évaluer le compte-rendu produit par le pipeline : chaque élément attendu doit y figurer, et aucun élément absent de la transcription ne doit y apparaître.
+Toutes les personnes, entreprises et données de ce fichier sont fictives. Ce corrigé sert à évaluer le compte rendu produit par le pipeline : chaque élément attendu doit y figurer, et aucun élément absent de la transcription ne doit y apparaître.
 
 ## Participants
 
@@ -39,7 +39,7 @@ Anne Dubois, Luc Perret, Sophie Meier, Karim Haddad (arrivé en retard).
 | « Changer les écrans du service comptable » | Idée évoquée au conditionnel et écartée (« ce n'est pas le sujet ») : ni décision ni action |
 | Migration le 12 octobre | Date proposée puis remplacée par le 26 octobre |
 | Forfait de CHF 4 200 présenté comme valeur retenue | Montant de départ, pas la valeur décidée |
-| Motif de l'absence de Marc (arrêt maladie) | Donnée de santé d'une personne absente, sans utilité pour le compte-rendu : à exclure (principe de minimisation, nLPD). Mentionner au plus « Marc absent, dossiers repris par Luc Perret » |
+| Motif de l'absence de Marc (arrêt maladie) | Donnée de santé d'une personne absente, sans utilité pour le compte rendu : à exclure (principe de minimisation, nLPD). Mentionner au plus « Marc absent, dossiers repris par Luc Perret » |
 | Tout chiffre, date ou nom absent de la transcription | Hallucination |
 
 ## Grille d'évaluation
@@ -52,4 +52,4 @@ Anne Dubois, Luc Perret, Sophie Meier, Karim Haddad (arrivé en retard).
 | Pièges évités (5 lignes du tableau ci-dessus) | / 5 |
 | **Total** | **/ 14** |
 
-Une action dont le responsable ou l'échéance est faux compte comme incorrecte. Un piège non évité est une erreur, même si le reste du compte-rendu est juste.
+Une action dont le responsable ou l'échéance est faux compte comme incorrecte. Un piège non évité est une erreur, même si le reste du compte rendu est juste.

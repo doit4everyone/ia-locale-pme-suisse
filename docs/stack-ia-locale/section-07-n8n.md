@@ -300,7 +300,7 @@ Fichier importable : [`n8n-rappel-rotation-svc-rag.json`](../../scripts/N8N/n8n-
 
 Ce pipeline est documenté et validé en lab dans la Partie 3 : [§12 Synthèse des réunions Teams](section-12-teams.md).
 
-L'architecture retenue diffère de celle esquissée dans les premières versions de ce guide : le compte-rendu n'est pas déposé dans un canal Teams, mais envoyé **en brouillon à l'organisateur seul**, qui relit et décide de la diffusion. La synthèse est faite par la RAG API (`/teams/sync`), n8n se charge de la planification et de l'envoi.
+L'architecture retenue diffère de celle esquissée dans les premières versions de ce guide : le compte rendu n'est pas déposé dans un canal Teams, mais envoyé **en brouillon à l'organisateur seul**, qui relit et décide de la diffusion. La synthèse est faite par la RAG API (`/teams/sync`), n8n se charge de la planification et de l'envoi.
 
 ---
 

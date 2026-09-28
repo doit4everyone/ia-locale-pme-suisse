@@ -33,7 +33,7 @@ La stack des Parties 1 et 2 cloisonne les documents du file server à partir des
 
 | Élément | Stack SMB (Parties 1 et 2) | Ajout Partie 3 |
 |---|---|---|
-| Source des permissions | ACL NTFS du file server | Permissions SharePoint (§12) |
+| Source des permissions | ACL NTFS du file server | Permissions SharePoint (§13) |
 | Format dans `autorises[]` | `DOMAINE\Groupe` | `entra:grp:<id>`, `entra:usr:<id>` |
 | Résolution de l'utilisateur | LDAP sur le contrôleur de domaine | Microsoft Graph |
 | Interface utilisateur | Open WebUI, authentification LDAP AD | Inchangée |
@@ -123,16 +123,17 @@ Copier le bloc affiché par `cat`, de `-----BEGIN CERTIFICATE-----` à `-----END
 
 ## §11.4 App Registration de résolution d'identité
 
-### §11.4.1 Deux applications, deux rôles
+### §11.4.1 Une application par fonction
 
-La Partie 3 utilise deux App Registrations distinctes, chacune limitée aux droits de sa fonction :
+La Partie 3 utilise trois App Registrations distinctes, chacune limitée aux droits de sa fonction et authentifiée par son propre certificat :
 
-| Application | Rôle | Permissions Graph (application) | Section |
+| Application | Rôle | Permissions (application) | Section |
 |---|---|---|---|
-| `RAG-Identity-Resolver` | `auth.py` : résoudre les groupes Entra d'un utilisateur | `User.Read.All`, `GroupMember.Read.All` | §11 |
-| `RAG-SharePoint-Indexer` | Indexeur SharePoint : lire les documents et leurs permissions | `Sites.Selected`, accordée site par site | §12 |
+| `RAG-Identity-Resolver` | `auth.py` : résoudre les groupes Entra d'un utilisateur ; `sp_indexer.py` : traduire les UPN et lire les propriétaires des groupes | Microsoft Graph : `User.Read.All`, `GroupMember.Read.All` | §11 |
+| `RAG-Teams-Reader` | Lire les transcriptions des réunions Teams | Microsoft Graph : `OnlineMeetingTranscript.Read.All`, limitée par une stratégie d'accès applicatif Teams au groupe d'adhésion | §12 |
+| `RAG-SharePoint-Indexer` | Lire les documents SharePoint, leurs permissions et les groupes des sites | Microsoft Graph et SharePoint : `Sites.Selected`, lecture accordée site par site | §13 |
 
-Séparer les deux limite l'impact d'une compromission : le certificat de résolution d'identité ne donne accès à aucun document, et celui de l'indexeur ne donne pas accès à l'annuaire complet.
+Séparer les applications limite l'impact d'une compromission : le certificat de résolution d'identité ne donne accès à aucun document, celui de la lecture des transcriptions ne donne accès qu'aux réunions des organisateurs du groupe d'adhésion, et celui de l'indexeur ne donne accès ni à l'annuaire complet ni aux sites qui ne lui ont pas été accordés. Le déchiffrement des documents protégés par Purview, à venir, fera l'objet d'une application distincte.
 
 > **Ne jamais utiliser `Sites.Read.All`** pour l'indexation : cette permission donne accès à tous les sites du tenant, y compris ceux qui ne doivent pas être indexés. Si une ancienne inscription dispose de cette permission, elle doit être supprimée, ainsi que l'application d'entreprise associée.
 
@@ -409,11 +410,11 @@ La réponse dans Open WebUI est identique à celle obtenue sans l'extension, cit
 
 **Délai de prise en compte des changements de groupe.** Un utilisateur ajouté à un groupe AD n'obtient les droits correspondants côté Entra qu'après le cycle de synchronisation d'Entra Connect (30 minutes par défaut), auquel s'ajoute le cache des groupes d'`auth.py` (`GROUPS_CACHE_TTL`, 5 minutes par défaut). Le délai cumulé peut atteindre 35 minutes.
 
-**Libellé de log trompeur.** Avec l'extension activée, `main.py` affiche « 7 groupes AD » alors que ce nombre inclut les identifiants Entra. C'est un libellé, sans effet sur le filtrage. Il sera corrigé en §12, avec les autres modifications de `main.py`.
+**Libellé de log trompeur.** Avec l'extension activée, `main.py` affiche « 7 groupes AD » alors que ce nombre inclut les identifiants Entra. C'est un libellé, sans effet sur le filtrage. Il est corrigé depuis §12 (« groupe(s) et identité(s) »).
 
 **Portée de `User.Read.All`.** Cette permission permet de lire les profils de tous les utilisateurs du tenant, pas seulement ceux qui utilisent la stack RAG. C'est le prix de la résolution par UPN. La protection repose sur la clé privée, qui ne quitte pas la VM (`/etc/rag-certs`, droits `600`).
 
-**Autorisation « Tout le monde sauf les utilisateurs externes ».** SharePoint propose cette autorisation, qui n'est pas un groupe Entra ID et n'aura donc jamais d'identifiant `entra:grp:`. Sa traduction dans `autorises[]` sera traitée en §12.
+**Autorisation « Tout le monde sauf les utilisateurs externes ».** SharePoint propose cette autorisation, qui n'est pas un groupe Entra ID et n'aura donc jamais d'identifiant `entra:grp:`. Elle est traduite en `entra:tous-internes`, ajouté par `auth.py` aux comptes membres du tenant (§13.4.4).
 
 ---
 
@@ -438,4 +439,4 @@ La réponse dans Open WebUI est identique à celle obtenue sans l'extension, cit
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026, sur un tenant Microsoft 365 synchronisé par Entra Connect. L'indexation SharePoint (§12) et le déchiffrement des documents protégés par Purview (§13) ne sont pas couverts par cette section.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026, sur un tenant Microsoft 365 synchronisé par Entra Connect. L'indexation SharePoint (§13) et le déchiffrement des documents protégés par Purview (à venir) ne sont pas couverts par cette section.*

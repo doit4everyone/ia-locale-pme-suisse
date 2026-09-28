@@ -21,7 +21,7 @@ description: "Fichiers et scripts de test de la synthèse des réunions Teams."
 | [reunion-test-2026-09-29.vtt](reunion-test-2026-09-29.vtt) | Transcription fictive à quatre intervenants, au format Teams |
 | [corrige-reunion-test.md](corrige-reunion-test.md) | Corrigé et grille sur 14 points de la transcription fictive |
 | [script-reunion-live.md](script-reunion-live.md) | Script de réunion à lire à deux, avec son corrigé sur 13 points |
-| [test_teams_summary.py](test_teams_summary.py) | Envoie une transcription à `/teams/summarize` et contrôle le compte-rendu |
+| [test_teams_summary.py](test_teams_summary.py) | Envoie une transcription à `/teams/summarize` et contrôle le compte rendu |
 | [test_teams_graph.py](test_teams_graph.py) | Vérifie la chaîne Graph : jeton, groupe, transcriptions, contenu |
 
 Fichiers de test uniquement : ils ne sont pas nécessaires au fonctionnement du pipeline (voir §12.7).

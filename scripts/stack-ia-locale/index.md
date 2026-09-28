@@ -44,7 +44,7 @@ Journal nLPD (/var/log/rag/rag-queries.jsonl)
 
 n8n (toutes les heures) → POST /teams/sync (teams.py + teams_graph.py)
     ├→ Microsoft Graph            → transcriptions Teams du groupe d'adhésion
-    ├→ Ollama                     → compte-rendu
+    ├→ Ollama                     → compte rendu
     └→ email                      → brouillon à l'organisateur (§12)
 ```
 
@@ -79,7 +79,7 @@ RAG API FastAPI. Endpoints :
 - `POST /v1/chat/completions` : endpoint compatible OpenAI, utilisé par Open WebUI
 - `GET /health` et `GET /stats` : supervision
 - `POST /admin/sync` : lance `indexer.py` et `acl_resolver.py` en sous-processus
-- `POST /teams/summarize` : compte-rendu à partir d'une transcription VTT fournie (tests), réservé à `ADMIN_TOKEN`
+- `POST /teams/summarize` : compte rendu à partir d'une transcription VTT fournie (tests), réservé à `ADMIN_TOKEN`
 - `POST /teams/sync` : récupération des nouvelles transcriptions Teams et production des brouillons, réservé à `ADMIN_TOKEN`, appelé par n8n
 
 Fonctionnalités :
@@ -285,7 +285,7 @@ docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.
 
 ## teams.py et teams_graph.py
 
-Synthèse des réunions Teams (Partie 3, guide §12). Après chaque réunion planifiée et transcrite, dont l'organisateur est membre du groupe d'adhésion, un compte-rendu est produit par le modèle local et envoyé **en brouillon à l'organisateur seul**.
+Synthèse des réunions Teams (Partie 3, guide §12). Après chaque réunion planifiée et transcrite, dont l'organisateur est membre du groupe d'adhésion, un compte rendu est produit par le modèle local et envoyé **en brouillon à l'organisateur seul**.
 
 `teams_graph.py` :
 
@@ -317,7 +317,7 @@ TEAMS_STATE_FILE=/var/log/rag/teams_state.json
 # Optionnel : SUMMARY_MODEL (défaut : LLM_MODEL), SUMMARY_NUM_CTX (défaut : 16384)
 ```
 
-**Tests** (fichiers dans `scripts/teams-test/`) : ces fichiers servent uniquement à valider l'installation et à évaluer les comptes-rendus. Ils ne sont pas nécessaires au fonctionnement du pipeline. Les deux scripts s'exécutent dans le conteneur `rag-api` et doivent être copiés dans `/root/rag-pipeline`, le dossier monté dans le conteneur, le temps des tests.
+**Tests** (fichiers dans `scripts/teams-test/`) : ces fichiers servent uniquement à valider l'installation et à évaluer les comptes rendus. Ils ne sont pas nécessaires au fonctionnement du pipeline. Les deux scripts s'exécutent dans le conteneur `rag-api` et doivent être copiés dans `/root/rag-pipeline`, le dossier monté dans le conteneur, le temps des tests.
 
 ```bash
 # Synthèse sur la transcription fictive, avec contrôles automatiques
