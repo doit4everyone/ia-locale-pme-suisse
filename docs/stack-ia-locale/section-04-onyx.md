@@ -140,7 +140,7 @@ Dans **Settings → Admin → Authentication → LDAP** :
 
 | Paramètre | Valeur | Note |
 |---|---|---|
-| Hôte | `<NOM-DC>.domaine.ch` | Nom DNS, pas l'IP |
+| Hôte | `<NOM-DC>.votre-domaine.ch` | Nom DNS, pas l'IP |
 | Port | `636` | LDAPS obligatoire |
 | TLS | Activé | |
 | Validate Certificate | Désactivé | **Lab uniquement.** En production, activer avec le vrai certificat CA du DC (§9.2) |
@@ -148,14 +148,14 @@ Dans **Settings → Admin → Authentication → LDAP** :
 | Mot de passe DN | mot de passe svc-rag | |
 | Attribut email | `userPrincipalName` | `mail` souvent non renseigné dans l'AD |
 | Attribut username | `sAMAccountName` | |
-| Base de recherche | `DC=domaine,DC=ch` | Pas `OU=UTILISATEURS` : certains comptes sont dans `CN=Users` |
+| Base de recherche | `DC=votre-domaine,DC=ch` | Pas `OU=UTILISATEURS` : certains comptes sont dans `CN=Users` |
 | Filtres de recherche | `(objectClass=user)` | |
 
 > **Port 636 obligatoire :** les DC Windows Server récents refusent les connexions LDAP sur le port 389 sans LDAP Signing. LDAPS sur 636 contourne cette contrainte.
 
-> **Base de recherche `DC=domaine,DC=ch` :** les comptes créés par défaut dans Windows sont dans le conteneur `CN=Users`, pas dans une OU personnalisée. Une base `OU=UTILISATEURS` ne les trouvera pas.
+> **Base de recherche `DC=votre-domaine,DC=ch` :** les comptes créés par défaut dans Windows sont dans le conteneur `CN=Users`, pas dans une OU personnalisée. Une base `OU=UTILISATEURS` ne les trouvera pas.
 
-> **`userPrincipalName` comme attribut email :** l'attribut `mail` n'est pas toujours renseigné dans l'AD même si l'utilisateur a une adresse email. `userPrincipalName` (format `utilisateur@domaine.ch`) est toujours présent et utilisé comme identifiant unique par `auth.py`.
+> **`userPrincipalName` comme attribut email :** l'attribut `mail` n'est pas toujours renseigné dans l'AD même si l'utilisateur a une adresse email. `userPrincipalName` (format `utilisateur@votre-domaine.ch`) est toujours présent et utilisé comme identifiant unique par `auth.py`.
 
 ### §4.2.4 Gestion des accès utilisateurs
 

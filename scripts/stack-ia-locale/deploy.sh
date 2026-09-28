@@ -90,7 +90,7 @@ read -r VM_IP
 echo ""
 echo -e "${BLUE}-- Active Directory --${NC}"
 
-ask "Nom DNS du controleur de domaine (ex: DC01.domaine.ch, pas une IP) :"
+ask "Nom DNS du controleur de domaine (ex: DC01.votre-domaine.ch, pas une IP) :"
 read -r DC_HOST
 if [[ "$DC_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     warn "Une IP a ete saisie pour le DC. Le guide recommande un nom DNS pour que la validation TLS LDAP fonctionne."
@@ -99,10 +99,10 @@ fi
 ask "Nom NetBIOS du domaine (ex: DOMAINE) :"
 read -r DOMAIN_NETBIOS
 
-ask "Suffixe DNS du domaine (ex: domaine.ch) :"
+ask "Suffixe DNS du domaine (ex: votre-domaine.ch) :"
 read -r DOMAIN_DNS
 
-ask "DN complet de l'OU du compte svc-rag (ex: OU=COMPTES-SERVICE,DC=domaine,DC=ch) :"
+ask "DN complet de l'OU du compte svc-rag (ex: OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch) :"
 read -r SVC_RAG_OU
 
 ask "Mot de passe du compte svc-rag (sans apostrophe) :"

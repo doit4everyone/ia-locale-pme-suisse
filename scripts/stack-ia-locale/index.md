@@ -123,8 +123,8 @@ REPORT_DIR=/var/log/rag
 LDAP_HOST=<DC-FQDN>
 LDAP_PORT=636
 LDAP_USE_TLS=true
-LDAP_BASE_DN=DC=domaine,DC=ch
-LDAP_BIND_DN=CN=svc-rag,OU=Services,DC=domaine,DC=ch
+LDAP_BASE_DN=DC=votre-domaine,DC=ch
+LDAP_BIND_DN=CN=svc-rag,OU=Services,DC=votre-domaine,DC=ch
 LDAP_BIND_PWD=<mot-de-passe>
 LDAP_DOMAIN=DOMAINE
 LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem

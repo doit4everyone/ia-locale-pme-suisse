@@ -168,7 +168,7 @@ Sur <NOM-FILESERVER> (PowerShell) :
 ```powershell
 # Lister les autorités intermédiaires du domaine
 Get-ChildItem Cert:\LocalMachine\CA |
-    Where-Object { $_.Subject -like "*<domaine>*" } |
+    Where-Object { $_.Subject -like "*votre-domaine*" } |
     Select-Object Subject, Thumbprint |
     Format-List
 ```
@@ -188,7 +188,7 @@ $subca.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::C
 
 # Exporter la Root CA
 $rootca = Get-ChildItem Cert:\LocalMachine\Root |
-    Where-Object { $_.Subject -like "*<domaine>*" }
+    Where-Object { $_.Subject -like "*votre-domaine*" }
 $rootca.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert) |
     Set-Content -Path "C:\Temp\ad-rootca.cer" -Encoding Byte
 
@@ -233,7 +233,7 @@ Dans `/root/rag-stack/.env` :
 
 ```bash
 # Utiliser le nom DNS, pas l'IP
-LDAP_HOST=<NOM-DC>.domaine.ch
+LDAP_HOST=<NOM-DC>.votre-domaine.ch
 LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 ```
 
@@ -337,13 +337,13 @@ Les commandes ci-dessous couvrent les cas d'audit nLPD courants : accès par uti
 
 ```bash
 # Tout ce qu'un utilisateur a consulté (format lisible)
-grep "utilisateur@domaine.ch" /var/log/rag/rag-queries.jsonl | while read line; do
+grep "utilisateur@votre-domaine.ch" /var/log/rag/rag-queries.jsonl | while read line; do
     echo "$line" | python3 -m json.tool
     echo "---"
 done
 
 # Tout ce qu'un utilisateur a consulté (format condensé pour rapport)
-grep "utilisateur@domaine.ch" /var/log/rag/rag-queries.jsonl | \
+grep "utilisateur@votre-domaine.ch" /var/log/rag/rag-queries.jsonl | \
     python3 -c "
 import sys, json
 for line in sys.stdin:
@@ -435,7 +435,7 @@ Quel contrat mentionne un forfait mensuel de CHF 9 999 ?
 → Cette information ne figure pas dans les documents disponibles.
 ```
 
-**Résultat avec `blaise@bsculier.ch` (Admins du domaine, dans `autorises[]`, sans DENY) :**
+**Résultat avec `admin@votre-domaine.ch` (Admins du domaine, dans `autorises[]`, sans DENY) :**
 
 ```
 Quel contrat mentionne un forfait mensuel de CHF 9 999 ?
@@ -454,14 +454,14 @@ docker logs rag-api 2>&1 | grep -E "Contexte étendu|interdit|filtré" | tail -1
 
 **Protocole :** création d'un groupe `GRP-Clients-Niveau2` dans l'AD, imbriqué dans `GRP-Clients`. `test-client` est retiré de `GRP-Clients` et placé dans `GRP-Clients-Niveau2` uniquement. Une requête est posée depuis Open WebUI sur un document CLIENTS.
 
-**Résultat avant modification AD :** `auth.py` résolvait 2 groupes pour `test-client` : `BSCULIER\GRP-Clients` et `BSCULIER\test-client`.
+**Résultat avant modification AD :** `auth.py` résolvait 2 groupes pour `test-client` : `DOMAINE\GRP-Clients` et `DOMAINE\test-client`.
 
-**Résultat après modification AD :** `auth.py` résout 3 groupes : `BSCULIER\GRP-Clients-Niveau2` (membre direct), `BSCULIER\GRP-Clients` (remonté par récursion `memberOf`) et `BSCULIER\test-client`.
+**Résultat après modification AD :** `auth.py` résout 3 groupes : `DOMAINE\GRP-Clients-Niveau2` (membre direct), `DOMAINE\GRP-Clients` (remonté par récursion `memberOf`) et `DOMAINE\test-client`.
 
 ```bash
 # Vérifier la résolution des groupes dans les logs
 docker logs rag-api 2>&1 | grep "groupes AD" | tail -5
-# Attendu : [AUTH] /v1 user 'test-client@bsculier.ch' : 3 groupes AD
+# Attendu : [AUTH] /v1 user 'test-client@votre-domaine.ch' : 3 groupes AD
 ```
 
 **Conclusion :** le cloisonnement est resté opérationnel après la modification de l'imbrication. `test-client` a obtenu une réponse correcte avec citation de `21_Contrat_Maintenance_Baumont_Industries.docx`, et `test-deny-explicite.docx` est resté bloqué malgré `GRP-Clients` dans `autorises[]`.
@@ -549,7 +549,7 @@ Get-ADOptionalFeature -Filter {Name -like "Privileged*"} |
 # Activer PAM (irréversible sur la forêt)
 Enable-ADOptionalFeature "Privileged Access Management Feature" `
     -Scope ForestOrConfigurationSet `
-    -Target "domaine.ch" -Confirm:$false
+    -Target "votre-domaine.ch" -Confirm:$false
 
 # Ajout JIT avec TTL de 2 heures (prévoir large pour les gros corpus)
 Add-ADGroupMember -Identity "GRP-Clients" -Members "svc-rag" `

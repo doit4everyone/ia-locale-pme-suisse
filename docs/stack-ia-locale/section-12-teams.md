@@ -118,12 +118,12 @@ Le groupe est un **groupe de sécurité à extension messagerie**, le seul type 
 
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope AllUsers   # si absent
-Connect-ExchangeOnline -UserPrincipalName <admin>@<domaine>
+Connect-ExchangeOnline -UserPrincipalName <admin>@votre-domaine.ch
 
 New-DistributionGroup -Name "GRP-Teams-CompteRendu-IA" `
   -Type Security `
-  -PrimarySmtpAddress "grp-teams-cr-ia@<domaine>" `
-  -Members "<organisateur>@<domaine>"
+  -PrimarySmtpAddress "grp-teams-cr-ia@votre-domaine.ch" `
+  -Members "<organisateur>@votre-domaine.ch"
 
 # Le groupe ne sert qu'aux autorisations : le masquer du carnet d'adresses
 Set-DistributionGroup -Identity "GRP-Teams-CompteRendu-IA" `
@@ -139,8 +139,8 @@ Disconnect-ExchangeOnline -Confirm:$false
 Adhésion et retrait d'un organisateur :
 
 ```powershell
-Add-DistributionGroupMember    -Identity "GRP-Teams-CompteRendu-IA" -Member "prenom.nom@<domaine>"
-Remove-DistributionGroupMember -Identity "GRP-Teams-CompteRendu-IA" -Member "prenom.nom@<domaine>"
+Add-DistributionGroupMember    -Identity "GRP-Teams-CompteRendu-IA" -Member "prenom.nom@votre-domaine.ch"
+Remove-DistributionGroupMember -Identity "GRP-Teams-CompteRendu-IA" -Member "prenom.nom@votre-domaine.ch"
 ```
 
 ---
@@ -194,7 +194,7 @@ Grant-CsApplicationAccessPolicy -PolicyName "RAG-Teams-Reader-Policy" `
 # Vérifications
 Get-CsApplicationAccessPolicy -Identity "RAG-Teams-Reader-Policy" | Format-List
 Get-CsGroupPolicyAssignment -PolicyType ApplicationAccessPolicy
-Get-CsUserPolicyAssignment -Identity "<organisateur>@<domaine>" -PolicyType ApplicationAccessPolicy
+Get-CsUserPolicyAssignment -Identity "<organisateur>@votre-domaine.ch" -PolicyType ApplicationAccessPolicy
 
 Disconnect-MicrosoftTeams
 ```
@@ -309,7 +309,7 @@ Toutes les heures → POST /teams/sync
 
 > **L'expéditeur doit être le compte SMTP authentifié.** Avec Exchange Online, un expéditeur différent du compte de l'identifiant SMTP est refusé : `554 5.2.252 SendAsDenied`. Pour un expéditeur interne, Outlook affiche le nom du compte dans l'annuaire, pas le nom indiqué dans le message.
 
-> **Utiliser une boîte dédiée aux comptes-rendus.** En lab, la boîte d'envoi était partagée avec les notifications d'un autre outil : le compte-rendu est arrivé sous le nom de cet outil, et une règle Outlook l'a classé avec ses alertes. En production, une boîte dédiée (par exemple `comptes-rendus-ia@<domaine>`) évite la confusion et permet une rotation de mot de passe indépendante.
+> **Utiliser une boîte dédiée aux comptes-rendus.** En lab, la boîte d'envoi était partagée avec les notifications d'un autre outil : le compte-rendu est arrivé sous le nom de cet outil, et une règle Outlook l'a classé avec ses alertes. En production, une boîte dédiée (par exemple `comptes-rendus-ia@votre-domaine.ch`) évite la confusion et permet une rotation de mot de passe indépendante.
 
 **Mention n8n.** Par défaut, n8n ajoute la phrase « This email was sent automatically with n8n » en fin de message. Le fichier fourni la désactive (`appendAttribution: false` dans les options des nœuds email). Validé en lab : la mention n'apparaît plus, même si l'option n'est pas proposée dans la liste « Add option » de ce nœud importé.
 
@@ -341,7 +341,7 @@ docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_
 2. Membres du groupe d'adhésion
    1 membre(s)
 3. Transcriptions des 48 dernières heures
-   <organisateur>@<domaine> : 1 transcription(s)
+   <organisateur>@votre-domaine.ch : 1 transcription(s)
 4. Contenu de la transcription la plus récente
    3989 caractères, 28 répliques, intervenants : [2 intervenants]
 ```

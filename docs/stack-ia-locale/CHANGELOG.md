@@ -4,6 +4,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.15.2] : Septembre 2026
+
+### Documentation et scripts
+
+- Anonymisation complétée : le nom de domaine du lab apparaissait encore dans §9 (tests DENY et groupes imbriqués) et §11 (prérequis et sorties de validation). Remplacé par les repères génériques.
+- Repères de domaine harmonisés dans tout le dépôt : `votre-domaine.ch` pour le nom DNS et les UPN, `DC=votre-domaine,DC=ch` pour les DN, `DOMAINE` pour le nom NetBIOS. Les variantes `domaine.ch`, `<domaine>` et `DC=domaine,DC=ch` sont remplacées dans §4, §5, §7, §9, §11, §12, `deploy.sh` et l'index des scripts.
+
+---
+
 ## [2.15.1] : Septembre 2026
 
 ### Documentation

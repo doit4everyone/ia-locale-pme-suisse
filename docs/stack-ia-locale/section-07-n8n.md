@@ -362,7 +362,7 @@ Les pipelines §7.2 et §7.3 utilisent le même credential SMTP. Le nœud email 
 | Host | smtp.office365.com |
 | Port | 587 |
 | SSL/TLS | Désactivé (STARTTLS sur 587) |
-| User | `<compte-envoi>@domaine.ch` |
+| User | `<compte-envoi>@votre-domaine.ch` |
 | Password | Mot de passe d'application |
 
 > **Dépréciation SMTP AUTH :** Microsoft supprime progressivement SMTP AUTH et les mots de passe d'application sur Exchange Online. La date de suppression définitive n'est pas encore annoncée officiellement, mais la migration vers OAuth2 + Graph API est à planifier. Le nœud n8n "Microsoft Outlook" ou un HTTP Request vers `https://graph.microsoft.com/v1.0/me/sendMail` avec un token OAuth2 est la solution de remplacement. Cette migration sera documentée en Partie 3 avec les connecteurs Microsoft 365.

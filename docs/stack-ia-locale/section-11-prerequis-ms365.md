@@ -65,7 +65,7 @@ On pourrait penser que, si tous les groupes viennent de l'AD, la résolution LDA
 
 - Un tenant Microsoft 365 avec des droits d'administration Entra ID.
 - Entra Connect (ou Cloud Sync) actif, qui synchronise les utilisateurs et groupes de l'AD.
-- Le suffixe UPN utilisé par les comptes AD (ici `bsculier.ch`) déclaré comme domaine vérifié dans le tenant. Sans cela, l'UPN transmis par Open WebUI ne correspond à aucun compte dans Entra ID.
+- Le suffixe UPN utilisé par les comptes AD (par exemple `votre-domaine.ch`) déclaré comme domaine vérifié dans le tenant. Sans cela, l'UPN transmis par Open WebUI ne correspond à aucun compte dans Entra ID.
 
 Vérification dans le centre d'administration Entra : **Utilisateurs** → le compte de test → le nom d'utilisateur principal doit être identique à celui utilisé dans Open WebUI, et l'onglet **Propriétés** doit indiquer que la synchronisation locale est activée.
 
@@ -345,7 +345,7 @@ docker logs rag-api 2>&1 | grep "\[AUTH\]" | tail -5
 **Test 2 : appel Graph direct, sans impact sur les utilisateurs.** La fonction est appelée dans le conteneur alors que l'extension est encore désactivée. Ce test valide à lui seul le certificat, les permissions et le consentement :
 
 ```bash
-docker exec rag-api python3 -c "import auth; print(auth.get_entra_groups('test-client@bsculier.ch'))"
+docker exec rag-api python3 -c "import auth; print(auth.get_entra_groups('test-client@votre-domaine.ch'))"
 ```
 
 **Validé en lab, septembre 2026 :**
@@ -394,9 +394,9 @@ docker logs rag-api 2>&1 | grep "\[AUTH\]" | tail -5
 **Validé en lab, septembre 2026 :**
 
 ```
-[AUTH] Utilisateur trouvé : 'test-client' (test-client@bsculier.ch)
-[AUTH] Groupes résolus pour 'test-client@bsculier.ch' : ['BSCULIER\\GRP-Clients-Niveau2', 'BSCULIER\\GRP-Clients', 'BSCULIER\\test-client']
-[AUTH] Entra : 4 identifiant(s) pour 'test-client@bsculier.ch'
+[AUTH] Utilisateur trouvé : 'test-client' (test-client@votre-domaine.ch)
+[AUTH] Groupes résolus pour 'test-client@votre-domaine.ch' : ['DOMAINE\\GRP-Clients-Niveau2', 'DOMAINE\\GRP-Clients', 'DOMAINE\\test-client']
+[AUTH] Entra : 4 identifiant(s) pour 'test-client@votre-domaine.ch'
 ```
 
 La réponse dans Open WebUI est identique à celle obtenue sans l'extension, citation et chemin UNC compris : l'ajout des identifiants Entra ne modifie pas l'accès aux documents SMB.

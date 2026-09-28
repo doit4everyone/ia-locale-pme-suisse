@@ -78,7 +78,7 @@ Créer un groupe de sécurité AD par périmètre d'accès. Ne jamais utiliser `
 
 ```powershell
 # Adapter le chemin de l'OU à votre organisation
-$ouGroupes = "OU=GROUPES,DC=domaine,DC=ch"
+$ouGroupes = "OU=GROUPES,DC=votre-domaine,DC=ch"
 
 New-ADGroup -Name "GRP-Clients" -GroupScope Global -GroupCategory Security `
     -Path $ouGroupes -Description "Accès documents clients"
@@ -144,12 +144,12 @@ Créer un compte de service dédié avec accès lecture à tous les dossiers à 
 # Adapter le chemin de l'OU à votre organisation
 New-ADUser -Name "svc-rag" `
     -SamAccountName "svc-rag" `
-    -UserPrincipalName "svc-rag@domaine.ch" `
+    -UserPrincipalName "svc-rag@votre-domaine.ch" `
     -AccountPassword (ConvertTo-SecureString "<mot-de-passe-fort>" -AsPlainText -Force) `
     -PasswordNeverExpires $false `
     -CannotChangePassword $true `
     -Enabled $true `
-    -Path "OU=COMPTES-SERVICE,DC=domaine,DC=ch" `
+    -Path "OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" `
     -Description "Compte de service indexeur RAG - lecture seule"
 ```
 
@@ -208,7 +208,7 @@ Ajouter dans le fichier :
 ```ini
 [Resolve]
 DNS=<IP-DC>
-Domains=domaine.ch
+Domains=votre-domaine.ch
 ```
 
 ```bash
@@ -436,8 +436,8 @@ Ajouter dans `/root/rag-stack/.env` :
 LDAP_HOST=<IP-DC>
 LDAP_PORT=636
 LDAP_USE_TLS=true
-LDAP_BASE_DN=DC=domaine,DC=ch
-LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=domaine,DC=ch
+LDAP_BASE_DN=DC=votre-domaine,DC=ch
+LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
 LDAP_BIND_PWD=<mot-de-passe-fort>
 LDAP_DOMAIN=DOMAINE
 ```
@@ -504,20 +504,20 @@ Dans l'interface admin Open WebUI, naviguer vers **Settings → Admin → Authen
 | Port | 636 |
 | TLS | Activé |
 | Validate Certificate | Désactivé |
-| DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=domaine,DC=ch` |
+| DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
 | Mot de passe DN | mot de passe de svc-rag |
 | Attribut pour le courriel | `userPrincipalName` |
 | Attribut pour le nom d'utilisateur | `sAMAccountName` |
-| Base de recherche | `DC=domaine,DC=ch` |
+| Base de recherche | `DC=votre-domaine,DC=ch` |
 | Filtres de recherche | `(objectClass=user)` |
 
 > **Port 636 obligatoire :** le port 389 est refusé par les contrôleurs de domaine Windows Server récents qui exigent LDAP Signing. LDAPS sur le port 636 contourne cette contrainte.
 
 > **Validate Certificate désactivé :** les DC Windows utilisent des certificats auto-signés par défaut. Pour la production, exporter le certificat CA du DC et le pointer via le champ "Chemin du certificat". Voir §9.
 
-> **Base de recherche `DC=domaine,DC=ch` :** certains comptes sont dans le conteneur `CN=Users` (par défaut Windows) plutôt que dans une OU. La base `OU=UTILISATEURS` ne les trouvera pas. La base racine couvre tous les cas.
+> **Base de recherche `DC=votre-domaine,DC=ch` :** certains comptes sont dans le conteneur `CN=Users` (par défaut Windows) plutôt que dans une OU. La base `OU=UTILISATEURS` ne les trouvera pas. La base racine couvre tous les cas.
 
-> **`userPrincipalName` comme attribut email :** l'attribut `mail` n'est pas toujours renseigné dans l'AD. `userPrincipalName` (format `utilisateur@domaine.ch`) est toujours présent et utilisé comme identifiant unique par la RAG API.
+> **`userPrincipalName` comme attribut email :** l'attribut `mail` n'est pas toujours renseigné dans l'AD. `userPrincipalName` (format `utilisateur@votre-domaine.ch`) est toujours présent et utilisé comme identifiant unique par la RAG API.
 
 ### §5.6.3 Paramètres utilisateurs
 
@@ -606,10 +606,10 @@ Deux cas de test ont été validés en lab sur un corpus de documents d'entrepri
 **Logs RAG API :**
 
 ```
-Utilisateur trouvé : 'admin' (admin@domaine.ch)
+Utilisateur trouvé : 'admin' (admin@votre-domaine.ch)
 Groupes résolus : ['DOMAINE\GRP-ServiceInfo', 'DOMAINE\Admins du domaine',
                    'DOMAINE\admin', ...]  → 15 groupes
-/v1 user 'admin@domaine.ch' : 15 groupes AD
+/v1 user 'admin@votre-domaine.ch' : 15 groupes AD
 ```
 
 `Admins du domaine` figure dans `autorises[]` de tous les documents. L'utilisateur voit l'ensemble du corpus.
@@ -621,9 +621,9 @@ Groupes résolus : ['DOMAINE\GRP-ServiceInfo', 'DOMAINE\Admins du domaine',
 **Logs RAG API :**
 
 ```
-Utilisateur trouvé : 'user-clients' (user-clients@domaine.ch)
+Utilisateur trouvé : 'user-clients' (user-clients@votre-domaine.ch)
 Groupes résolus : ['DOMAINE\GRP-Clients', 'DOMAINE\user-clients']  → 2 groupes
-/v1 user 'user-clients@domaine.ch' : 2 groupes AD
+/v1 user 'user-clients@votre-domaine.ch' : 2 groupes AD
 ```
 
 **Question posée :** "Quelles sont les conditions du contrat de travail de [employé RH] ?"
