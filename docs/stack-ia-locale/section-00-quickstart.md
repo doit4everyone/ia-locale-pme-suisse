@@ -17,7 +17,7 @@ description: "Procédure de déploiement pas à pas de la stack RAG locale : AD,
 
 [Retour au sommaire](index.md)
 
-> Ce guide couvre un déploiement complet depuis zéro : création du compte de service dans l'AD, montage SMB, certificat CA, lancement de la stack Docker, première indexation, synchronisation des ACL, configuration d'Open WebUI et de n8n. Durée estimée : 2 à 3 heures pour un premier déploiement. Pour les sections détaillées, voir le guide complet à partir de [§1 Prérequis](section-01-prerequis.md).
+> Ce guide couvre un déploiement complet depuis zéro : création du compte de service dans l'AD, montage SMB, certificat CA, lancement de la stack Docker, première indexation, synchronisation des ACL, configuration d'Open WebUI et de n8n, puis, en option, la connexion à Microsoft 365 (étape 14). Durée estimée : 2 à 3 heures pour un premier déploiement, hors Microsoft 365. Pour les sections détaillées, voir le guide complet à partir de [§1 Prérequis](section-01-prerequis.md).
 
 ---
 
@@ -33,6 +33,8 @@ AD (Windows)          VM Ubuntu (Linux)              Open WebUI / n8n
                       7. indexer.py
                       8. acl_resolver.py        →    9. connexion RAG API
                                                      10. workflow n8n
+
+Microsoft 365 (facultatif) : 14. Entra ID, Teams, SharePoint
 ```
 
 ---
@@ -53,19 +55,24 @@ New-ADUser -Name "svc-rag" `
     -Path "OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" `
     -Description "Compte de service indexeur RAG - lecture seule"
 
-# Ajouter aux groupes qui ont accès aux partages à indexer
-# Adapter à la structure de groupes de l'organisation
-Add-ADGroupMember -Identity "GRP-Clients"     -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-RH"          -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-Direction"   -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-Finances"    -Members "svc-rag"
-Add-ADGroupMember -Identity "GRP-ServiceInfo" -Members "svc-rag"
 ```
 
-Vérifier que le compte est actif et que les groupes sont bien assignés :
+**Donner la lecture par un groupe dédié, pas par les groupes métier.** Sur le serveur de fichiers, en administrateur, le script [`Set-AccesIndexationRAG.ps1`](../../scripts/stack-ia-locale/Set-AccesIndexationRAG.ps1) crée le groupe `GRP-RAG-Indexation`, y ajoute `svc-rag`, et accorde la lecture seule sur chaque dossier à indexer, y compris les sous-dossiers à héritage coupé :
 
 ```powershell
-Get-ADUser svc-rag -Properties MemberOf | Select -ExpandProperty MemberOf
+# Vérification seule : affiche ce qui manque, ne modifie rien
+.\Set-AccesIndexationRAG.ps1 -Racine "D:\FileService" -Exclure "UTILISATEURS" -Verifier
+
+# Application, puis nouvelle vérification : 0 fichier sans lecture attendu
+.\Set-AccesIndexationRAG.ps1 -Racine "D:\FileService" -Exclure "UTILISATEURS"
+```
+
+Adapter la racine du partage et la liste des dossiers exclus (dossiers personnels notamment). **Ne pas ajouter `svc-rag` aux groupes métier** (`GRP-RH`, `GRP-Finances`, etc.) : il hériterait de tous leurs droits, et le retrait d'un de ces groupes lui couperait la lecture sans avertissement. Explications et cas réel : [§5.2.4](section-05-connecteurs.md).
+
+Vérifier les groupes du compte : seuls `GRP-RAG-Indexation` et les utilisateurs du domaine doivent apparaître.
+
+```powershell
+Get-ADPrincipalGroupMembership -Identity "svc-rag" | Select Name
 ```
 
 > **Politique de mot de passe :** `PasswordNeverExpires $false` force la rotation selon la politique du domaine. Planifier la mise à jour de `/etc/smbcredentials/svc-rag` et de `.env` à chaque rotation (voir §9.5.1). Une rotation non répercutée sur la VM fait tomber le montage SMB au prochain redémarrage sans message explicite.
@@ -199,15 +206,20 @@ Déposer les fichiers (depuis le dépôt GitHub) :
 ├── .env                    ← à créer depuis env.example
 ├── docker-compose.yml
 └── api/
-    ├── main.py
-    ├── auth.py
+    ├── main.py             ← anon_main.py du dépôt, renommé
+    ├── auth.py             ← anon_auth.py du dépôt, renommé
+    ├── teams.py
+    ├── teams_graph.py
     ├── Dockerfile
     └── requirements.txt
 
 /root/rag-pipeline/
-├── indexer.py
-└── acl_resolver.py
+├── indexer.py              ← anon_indexer.py du dépôt, renommé
+├── acl_resolver.py         ← anon_acl_resolver.py du dépôt, renommé
+└── sp_indexer.py
 ```
+
+`teams.py`, `teams_graph.py` et `sp_indexer.py` servent à la Partie 3. Ils restent inactifs tant que leurs variables ne sont pas renseignées dans `.env`.
 
 ---
 
@@ -472,6 +484,58 @@ docker logs rag-api 2>&1 | grep "sync\|indexer\|acl" | tail -10
 
 ---
 
+## Étape 14 (facultative) : Partie 3, Microsoft 365
+
+Cette étape connecte la stack à un tenant Microsoft 365 synchronisé avec l'AD par Entra Connect. Les trois modules sont indépendants, mais le premier est requis par les deux autres. Le `docker-compose.yml` du dépôt transmet déjà toutes les variables au conteneur : il suffit de les renseigner dans `.env`, puis de redémarrer `rag-api` :
+
+```bash
+cd ~/rag-stack && docker compose up -d rag-api
+```
+
+Chaque application Microsoft 365 s'authentifie par **certificat**, jamais par secret. Les certificats sont générés sur la VM, dans `/etc/rag-certs` (droits 700), déjà monté dans le conteneur :
+
+```bash
+cd /etc/rag-certs
+sudo openssl req -x509 -newkey rsa:2048 -nodes -keyout <nom>.key -out <nom>.crt -days 730 -subj "/CN=<Nom-Application>"
+sudo chmod 600 <nom>.key
+openssl x509 -in <nom>.crt -noout -fingerprint -sha1 | tr -d ':' | cut -d= -f2    # empreinte pour .env
+```
+
+### 14.1 Groupes Entra ID (§11), prérequis des modules suivants
+
+1. Certificat `rag-identity` ;
+2. App Registration `RAG-Identity-Resolver` : certificat chargé, autorisations **d'application** Microsoft Graph `User.Read.All` et `GroupMember.Read.All`, consentement administrateur ;
+3. `.env` : `ENTRA_ENABLED=true`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CERT_THUMBPRINT` (chemins par défaut conservés) ;
+4. Validation : après une question dans Open WebUI, `docker logs rag-api 2>&1 | grep "\[AUTH\] Entra"` affiche le nombre d'identifiants Entra de l'utilisateur.
+
+Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
+
+### 14.2 Synthèse des réunions Teams (§12)
+
+1. Centre d'administration Teams : transcription active dans la stratégie de réunion, et **Transcript API access** activé avec l'attribution des intervenants (désactivé par défaut : sans lui, toute requête est refusée) ;
+2. Groupe d'adhésion `GRP-Teams-CompteRendu-IA`, de type sécurité à extension messagerie, créé en PowerShell Exchange Online, avec les organisateurs concernés ;
+3. Certificat `rag-teams` et App Registration `RAG-Teams-Reader` : autorisation d'application `OnlineMeetingTranscript.Read.All`, consentement ;
+4. Stratégie d'accès applicatif Teams attribuée au groupe (`New-CsApplicationAccessPolicy`, puis `Grant-CsApplicationAccessPolicy -Group <ID-objet-du-groupe>`) ;
+5. `.env` : `TEAMS_CLIENT_ID`, `TEAMS_CERT_THUMBPRINT`, `TEAMS_GROUP_ID` ;
+6. n8n : importer `n8n-teams-sync.json`, expéditeur = compte SMTP authentifié ;
+7. Validation : `docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_graph.py` (script de [`scripts/teams-test/`](../../scripts/teams-test/), copié dans `/root/rag-pipeline`).
+
+Détail : [§12 Synthèse des réunions Teams](section-12-teams.md).
+
+### 14.3 Connecteur SharePoint Online (§13)
+
+1. Inventaire des permissions avec les scripts de [`scripts/sharepoint/`](../../scripts/sharepoint/) : bibliothèques de conservation, membres atypiques, partages ;
+2. Certificat `rag-sharepoint` et App Registration `RAG-SharePoint-Indexer` : autorisations d'application `Sites.Selected` pour **Microsoft Graph et SharePoint**, consentement ;
+3. Lecture accordée site par site : `Accorder-SitesSelected.ps1` ;
+4. `.env` : `SP_CLIENT_ID`, `SP_CERT_THUMBPRINT`, `SP_SITES` (exactement les sites accordés) ;
+5. Simulation, rien n'est écrit : `docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.py --dry-run`, puis contrôle des `autorises[]` dans le rapport `/var/log/rag/rapport_sharepoint_*.json` ;
+6. Première synchronisation par `/admin/sync` (workflow n8n), qui enchaîne désormais SMB et SharePoint ;
+7. Validation : cloisonnement testé avec des comptes de test **créés dans l'AD** (Open WebUI authentifie en LDAP).
+
+Détail : [§13 Connecteur SharePoint Online](section-13-sharepoint.md).
+
+---
+
 ## Checklist de validation finale
 
 | Test | Commande / action | Résultat attendu |
@@ -487,6 +551,8 @@ docker logs rag-api 2>&1 | grep "sync\|indexer\|acl" | tail -10
 | Journal nLPD | `tail -1 /var/log/rag/rag-queries.jsonl` | Entrée JSON avec `user_id` et `ancree` |
 | n8n sync horaire | Interface n8n → dernière exécution | Réussie, sans erreur |
 | Garde-fou ACL | `SMB_PASSWORD=faux python acl_resolver.py ...` | Code 1, `[GARDE-FOU]`, Qdrant intact |
+| Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
+| Partie 3 (si déployée) | Checklists de §11.8, §12.9 et §13.9 | Tous les points validés |
 
 ---
 

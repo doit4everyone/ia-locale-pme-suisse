@@ -4,6 +4,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.15.1] : Septembre 2026
+
+### Documentation
+
+- `section-00-quickstart.md` : étape 1 corrigée, elle ajoutait encore `svc-rag` aux groupes métier, en contradiction avec §5.2.4 : lecture par le groupe dédié `GRP-RAG-Indexation` et `Set-AccesIndexationRAG.ps1`. Liste des fichiers à déposer mise à jour (noms `anon_`, scripts de la Partie 3). Nouvelle étape 14, facultative : mise en place condensée de la Partie 3 (Entra ID, Teams, SharePoint), avec renvois vers §11 à §13. Checklist complétée.
+- `index.md` : description de §0 corrigée (« redéployer en 30 minutes » ne correspondait pas à la procédure, estimée à 2 à 3 heures).
+
+---
+
 ## [2.15.0] : Septembre 2026
 
 ### Documentation
