@@ -10,6 +10,10 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 - `N8N/n8n-sync-corpus.json` : le courriel de quarantaine indiquait « présents sur le partage mais non indexés » et conseillait de relancer l'indexation. C'était inexact pour les fichiers dont les permissions sont illisibles : ils sont indexés, mais invisibles pour tous, et relancer l'indexation ne résout rien. Le message distingue désormais les deux causes (`acl_illisible`, `non_indexé`), avec l'action propre à chacune et la commande qui donne le statut exact de chaque fichier. Le rapport d'erreur indique aussi le code de retour de `sp_indexer.py`. Mention « sent automatically with n8n » désactivée.
 
+### Documentation
+
+- `section-13-sharepoint.md` : §13.8.1 corrigée. L'échec de la question générale sur la politique RH était attribué au titre du document absent des chunks. Or le test avait eu lieu pendant la panne de lecture du partage (§13.8.3), qui rendait la copie SMB du document invisible ; après correction, la même question a obtenu une réponse complète. L'hypothèse du titre reste à mesurer au §10.
+
 ---
 
 ## [2.15.3] : Septembre 2026

@@ -352,7 +352,7 @@ Le guide de dépannage existe en deux exemplaires, sur un site réservé au serv
 
 ### §13.8.1 Limites
 
-**Questions générales.** « Que dit la politique RH ? » n'a pas trouvé le document, alors que « Combien de jours de vacances prévoit la politique RH ? » l'a trouvé. Les chunks commencent par leur titre de section (« Temps de travail et congés ») : le titre du document n'apparaît que dans le premier. Sur une question générale, d'autres documents contenant les mêmes mots passent devant. La limite est commune au SMB et à SharePoint. Piste à mesurer au §10 : répéter le titre du document en tête de chaque chunk, au prix d'une réindexation complète.
+**Questions générales.** Pendant les tests, « Que dit la politique RH ? » n'a pas trouvé le document, alors que « Combien de jours de vacances prévoit la politique RH ? » l'a trouvé. Le premier diagnostic mettait en cause le découpage : les chunks commencent par leur titre de section (« Temps de travail et congés »), et le titre du document n'apparaît que dans le premier. Mais ce test a eu lieu pendant la panne décrite en §13.8.3 : la copie SMB du même document était alors invisible pour tous. Une fois la lecture du partage rétablie, la même question générale a obtenu une réponse complète et correctement citée. L'effet du titre absent des chunks n'est donc pas démontré : il sera mesuré au §10, en répétant le titre du document en tête de chaque chunk et en comparant les réponses sur un même jeu de questions.
 
 **Formats.** Les fichiers Excel ne sont pas indexés, comme pour le SMB.
 
