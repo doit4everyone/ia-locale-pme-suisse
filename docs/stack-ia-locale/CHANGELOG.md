@@ -4,6 +4,14 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.16.1] : Octobre 2026
+
+### Documentation
+
+- `index.md` du guide : « Ce qui vient ensuite » mis à jour. La Partie 3 était présentée comme entièrement à venir, alors que §11 à §15 sont publiées. Restent la gouvernance, le durcissement v2.17.0, les mesures de §10, le RAG visuel et une section « Du lab à la production ».
+
+---
+
 ## [2.16.0] : Octobre 2026
 
 ### Documentation

@@ -111,9 +111,13 @@ Les numéros de section sont attribués à la publication.
 
 ## Ce qui vient ensuite
 
-La **Partie 3** connecte la stack RAG à Microsoft 365 : résumé des réunions Teams, indexation des documents SharePoint Online avec propagation des permissions Entra ID jusqu'aux chunks Qdrant, prise en charge des documents protégés par Purview et gouvernance de l'ensemble. Elle est publiée section par section, après validation en lab sur un tenant Microsoft 365 synchronisé par Entra Connect. Elle ne nécessite pas de GPU.
+La **Partie 3** est publiée de §11 à §15 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données. Il reste à venir :
 
-Le **RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal) sera documenté comme extension de la Partie 2, après l'installation du GPU RTX 5060 Ti et les mesures de §10.
+- **la gouvernance**, en recommandations générales illustrées par le lab ;
+- **un durcissement de la stack** (v2.17.0) : test de non-divulgation automatisé, prise en compte du masque des droits NTFS et des permissions du partage, contrôle d'ancrage et citations plus stricts, à la suite d'une revue externe du dépôt ;
+- **les mesures de §10**, après l'installation du GPU RTX 5060 Ti : modèles, modèle d'embedding, juge, reranker, performances ;
+- **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal), comme extension de la Partie 2, après §10 ;
+- **une section « Du lab à la production »**, qui listera ce qu'un déploiement en entreprise exige en plus du lab.
 
 ---
 
