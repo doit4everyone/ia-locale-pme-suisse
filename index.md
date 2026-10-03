@@ -66,9 +66,9 @@ Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c
 
 ## Ce qui vient ensuite
 
-La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), et l'indexation de SharePoint Online avec ses permissions (§13).
+La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), l'indexation de SharePoint Online avec ses permissions (§13), les documents protégés par Purview avec une double condition d'accès (§14), et la sécurité des données de la stack (§15).
 
-**À venir :** l'indexation des documents protégés par une étiquette de confidentialité Purview, en respectant à la fois les permissions d'accès et les droits de l'étiquette, puis la gouvernance de l'ensemble.
+**À venir :** la gouvernance de l'ensemble.
 
 **Après l'installation du GPU RTX 5060 Ti :** les mesures de performance (§10) et le RAG visuel pour les documents PDF complexes.
 

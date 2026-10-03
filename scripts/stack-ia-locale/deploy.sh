@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy.sh : Déploiement de la stack IA locale nLPD-compliant
+# deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
 # Version : beta
 #
@@ -51,7 +51,7 @@ docker compose version >/dev/null 2>&1 || error "Plugin docker compose absent. I
 
 echo ""
 echo "============================================================"
-echo "  Déploiement de la stack IA locale nLPD-compliant"
+echo "  Déploiement de la stack IA locale (conformité nLPD facilitée)"
 echo "  DoIt4Everyone | $(date '+%Y-%m-%d')"
 echo "============================================================"
 echo ""
@@ -141,6 +141,8 @@ ADMIN_TOKEN="${ADMIN_TOKEN_INPUT:-$(openssl rand -hex 32)}"
 [ -z "$ADMIN_TOKEN_INPUT" ] && ok "ADMIN_TOKEN généré automatiquement"
 
 WEBUI_SECRET_KEY="$(openssl rand -hex 32)"
+QDRANT_API_KEY="$(openssl rand -hex 32)"
+MIP_TOKEN="$(openssl rand -hex 32)"
 
 echo ""
 echo -e "${BLUE}-- Documentation technique --${NC}"
@@ -231,6 +233,11 @@ fi
 if [ -f "sp_indexer.py" ]; then
     cp sp_indexer.py /root/rag-pipeline/sp_indexer.py
 fi
+# Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
+if [ -d "mip-service" ]; then
+    mkdir -p /root/rag-stack/mip-service
+    cp -r mip-service/. /root/rag-stack/mip-service/
+fi
 
 ok "Fichiers copies"
 
@@ -261,6 +268,7 @@ JUDGE_KEEP_ALIVE=2h
 # Qdrant
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
+QDRANT_API_KEY=${QDRANT_API_KEY}
 DOCUMENTATION_COLLECTION=documentation
 DOCUMENTATION_PATHS=${DOCUMENTATION_PATHS}
 
@@ -346,6 +354,15 @@ SYNC_TIMEOUT_SHAREPOINT=900
 # Fenêtres de contexte demandées à Ollama
 LLM_NUM_CTX=16384
 JUDGE_NUM_CTX=8192
+
+# Documents protégés par Purview (§14), inactif tant que COMPOSE_PROFILES et MIP_URL sont vides
+COMPOSE_PROFILES=
+MIP_URL=
+MIP_TOKEN=${MIP_TOKEN}
+MIP_TENANT_DOMAINE=
+MIP_CLIENT_ID=
+MIP_ETIQUETTES_EXCLUES=
+MIP_CACHE_TTL=3600
 
 # n8n
 N8N_BASIC_AUTH_USER=admin
@@ -480,7 +497,7 @@ else
     warn "RAG API ne répond pas encore. Vérifier : docker logs rag-api"
 fi
 
-QDRANT=$(curl -s http://localhost:6333/collections 2>/dev/null || echo "")
+QDRANT=$(curl -s -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/collections 2>/dev/null || echo "")
 if echo "$QDRANT" | grep -q '"status":"ok"'; then
     ok "Qdrant accessible"
 else

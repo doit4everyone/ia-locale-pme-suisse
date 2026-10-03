@@ -250,7 +250,7 @@ Un fichier de 100+ chunks (ex. `11-correlations-yaml.md` à 189 chunks, `09-pipe
 
 ### Note sur la température de génération
 
-La température est fixée à 0.2 (validé en lab). En dessous de 0.1, les réponses sont courtes et répétitives. Au-dessus de 0.3, le taux de hallucination augmente sur les données factuelles. 0.2 est le bon compromis entre fidélité aux sources et fluidité pour un RAG nLPD-compliant. Ne pas dépasser 0.3 sur ce type de corpus.
+La température est fixée à 0.2 (validé en lab). En dessous de 0.1, les réponses sont courtes et répétitives. Au-dessus de 0.3, le taux de hallucination augmente sur les données factuelles. 0.2 est le bon compromis entre fidélité aux sources et fluidité pour un RAG documentaire soumis à la nLPD. Ne pas dépasser 0.3 sur ce type de corpus.
 
 **Correctif documentaire recommandé :** découper les très gros fichiers en sections thématiques séparées. `11-correlations-yaml.md` gagnerait à être découpé en 6 fichiers par série de règles (W, WD, S, L, M, A). C'est un travail sur le file server, pas dans le code.
 

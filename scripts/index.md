@@ -17,8 +17,9 @@ description: "Scripts Python et workflows n8n du guide de déploiement de la sta
 
 | Dossier | Contenu |
 |---|---|
-| [stack-ia-locale](stack-ia-locale/) | Scripts du pipeline RAG local (RAG API, indexation SMB et SharePoint, ACL, extension Entra ID, synthèse Teams), `docker-compose.yml`, `env.example`, `deploy.sh`, `Set-AccesIndexationRAG.ps1` |
+| [stack-ia-locale](stack-ia-locale/) | Scripts du pipeline RAG local (RAG API, indexation SMB et SharePoint, ACL, extension Entra ID, synthèse Teams, service de déchiffrement Purview `mip-service`), `docker-compose.yml`, `env.example`, `deploy.sh`, `Set-AccesIndexationRAG.ps1` |
 | [sharepoint](sharepoint/) | Inventaires des permissions SharePoint, accord `Sites.Selected` site par site, sonde (guide §13) |
+| [purview](purview/) | Sonde de déchiffrement et scripts de test du service `mip-service` (guide §14) |
 | [teams-test](teams-test/) | Transcription fictive, corrigés, script de réunion et scripts de test de la synthèse Teams (guide §12.7) |
 | [N8N](N8N/) | Workflows n8n importables : synchronisation du corpus, rappel de rotation du mot de passe `svc-rag`, synthèse des réunions Teams |
 

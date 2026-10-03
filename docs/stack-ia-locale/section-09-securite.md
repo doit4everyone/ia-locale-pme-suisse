@@ -404,11 +404,17 @@ sudo tee /etc/logrotate.d/rag-nlpd << 'EOF'
     delaycompress
     missingok
     notifempty
-    create 644 root root
+    create 640 root root
     dateext
     dateformat -%Y%m%d
 }
 EOF
+```
+
+Le journal indique qui a consulté quels documents : il ne doit être lisible que par root (`640`), pas par tous les comptes de la VM. Appliquer aussi ces droits aux fichiers existants :
+
+```bash
+sudo chmod 640 /var/log/rag/rag-queries.jsonl*
 ```
 
 logrotate est appelé automatiquement chaque nuit par `/etc/cron.daily/logrotate`. Aucune configuration supplémentaire n'est requise.

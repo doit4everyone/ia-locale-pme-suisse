@@ -111,6 +111,12 @@ except ImportError:
 OLLAMA_URL    = os.getenv("OLLAMA_URL",        "http://<IP-HOTE-OLLAMA>:11434")
 EMBED_MODEL   = os.getenv("EMBED_MODEL",       "nomic-embed-text")
 QDRANT_URL    = os.getenv("QDRANT_URL",        "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None   # clé d'API de Qdrant, vide = aucune
+
+# La connexion à Qdrant passe par le réseau Docker interne (ou localhost) :
+# l'avertissement du client sur une clé d'API envoyée en HTTP est sans objet ici.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
 COLLECTION    = os.getenv("QDRANT_COLLECTION", "documents")
 DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
 DOCUMENTATION_PATHS = [
@@ -896,7 +902,7 @@ def index_corpus(
     valider_configuration()
 
     print(f"Connexion Qdrant : {QDRANT_URL}")
-    qdrant_client = QdrantClient(url=QDRANT_URL)
+    qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     init_collection(qdrant_client, reset=reset)
 
     print(f"Vérification Ollama : {OLLAMA_URL}")

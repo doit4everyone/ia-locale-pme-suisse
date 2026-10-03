@@ -63,7 +63,9 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
 | [`../teams-test/`](../teams-test/) | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
-| `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions | Dans le conteneur `rag-api`, via `/admin/sync` ou manuel |
+| `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions, déchiffrement Purview par `mip-service` | Dans le conteneur `rag-api`, via `/admin/sync` ou manuel |
+| `mip-service/` | Service de déchiffrement Purview (.NET 8, SDK MIP, Ubuntu 24.04) : `/dechiffrer`, `/droits` | Conteneur `mip-service`, profil Compose `purview`, voir §14 |
+| [`../purview/`](../purview/) | Sonde de déchiffrement, tests de `mip-service` | Voir §14.7 du guide |
 | [`../sharepoint/`](../sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris | Sur le serveur de fichiers, voir §5.2.4 du guide |
 
@@ -257,7 +259,8 @@ Indexation des bibliothèques SharePoint Online (Partie 3, guide §13). Réutili
 
 - Permissions de chaque fichier lues via Graph, groupes SharePoint via l'API REST, traduits en `entra:usr:`, `entra:grp:` et `entra:tous-internes`
 - Liens « toute l'organisation » et anonymes ignorés, invités externes ignorés, identifiants introuvables signalés
-- Fichiers chiffrés par une étiquette Purview détectés (conteneur OLE) et non indexés
+- Fichiers chiffrés par une étiquette Purview (conteneur OLE) : non indexés par défaut ; déchiffrés par `mip-service` si `MIP_URL` est renseignée, chaque chunk portant alors `chiffre`, `mip_etiquette_id` et `mip_proprietaire` (§14)
+- Fichiers temporaires d'extraction dans `/dev/shm`, en mémoire
 - Bibliothèque de conservation exclue (`SP_EXCLUDE_DRIVES`)
 - Incrémental par `cTag` ; permissions recalculées à chaque passage
 - Orphelins supprimés seulement après un parcours complet du site

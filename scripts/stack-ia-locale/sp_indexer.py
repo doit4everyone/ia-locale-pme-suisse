@@ -71,6 +71,7 @@ import json
 import os
 import sys
 import tempfile
+import base64
 import time
 from datetime import datetime, timezone
 from urllib.parse import quote, urlparse
@@ -111,6 +112,24 @@ REPORT_DIR    = os.getenv("REPORT_DIR", "") or "/var/log/rag"
 TOUS_INTERNES = "entra:tous-internes"
 FORMATS_OFFICE = (".docx", ".pptx", ".xlsx")
 OLE = b"\xd0\xcf\x11\xe0"
+
+# Déchiffrement Purview (§14) : service interne mip-service. Sans MIP_URL et MIP_TOKEN,
+# les documents chiffrés restent ignorés, comme avant.
+MIP_URL = os.getenv("MIP_URL", "")
+MIP_TOKEN = os.getenv("MIP_TOKEN", "")
+
+# Fichiers temporaires d'extraction : en mémoire (/dev/shm) plutôt que sur disque,
+# indispensable pour les documents déchiffrés.
+DOSSIER_TEMP = "/dev/shm" if os.path.isdir("/dev/shm") else None
+
+
+def dechiffrer(contenu: bytes, nom: str) -> dict:
+    """Envoie un document chiffré à mip-service. Renvoie sa réponse JSON."""
+    r = httpx.post(f"{MIP_URL}/dechiffrer", content=contenu, timeout=120,
+                   headers={"Authorization": f"Bearer {MIP_TOKEN}", "X-Nom-Fichier": nom})
+    if r.status_code != 200:
+        raise RuntimeError(f"mip-service HTTP {r.status_code} : {r.text[:200]}")
+    return r.json()
 
 # Champs de payload propres à SharePoint, en plus de ceux d'indexer.py
 SP_PAYLOAD_INDEXES = {
@@ -566,13 +585,40 @@ def traiter_fichier(c, qdrant, annuaire, groupes, groupes_prop, site_url, drive,
         return entree
     contenu = r.content
 
+    mip = None
     if ext in FORMATS_OFFICE and contenu.startswith(OLE):
-        entree["statut"] = "chiffré, non indexé"
-        if existant and not args.dry_run:
-            qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
-        return entree
+        if not (MIP_URL and MIP_TOKEN):
+            entree["statut"] = "chiffré, non indexé"
+            if existant and not args.dry_run:
+                qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
+            return entree
+        try:
+            rep_mip = dechiffrer(contenu, e["name"])
+        except (RuntimeError, httpx.HTTPError) as err:
+            # Erreur passagère possible : les chunks existants sont conservés,
+            # les droits restant de toute façon vérifiés à chaque question.
+            entree.update(statut="erreur", erreur=f"déchiffrement : {err}")
+            return entree
+        entree["etiquette"] = rep_mip.get("etiquette_nom")
+        if rep_mip.get("decision") != "dechiffre":
+            entree["statut"] = f"chiffré, non indexé ({rep_mip.get('decision')})"
+            if existant and not args.dry_run:
+                qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
+            return entree
+        contenu = base64.b64decode(rep_mip["contenu_base64"])
+        mip = {
+            "mip_etiquette_id": rep_mip.get("etiquette_id") or "",
+            "mip_etiquette_nom": rep_mip.get("etiquette_nom") or "",
+            "mip_proprietaire": (rep_mip.get("proprietaire") or "").lower(),
+        }
+        if not mip["mip_etiquette_id"]:
+            # Sans étiquette, les droits ne peuvent pas être évalués à la question : refus par défaut
+            entree["statut"] = "chiffré, non indexé (étiquette inconnue)"
+            if existant and not args.dry_run:
+                qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
+            return entree
 
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False, dir=DOSSIER_TEMP) as tmp:
         tmp.write(contenu)
         chemin_tmp = tmp.name
     try:
@@ -624,10 +670,13 @@ def traiter_fichier(c, qdrant, annuaire, groupes, groupes_prop, site_url, drive,
             "sp_item_id": e["id"],
             "sp_ctag": e.get("cTag"),
             "web_url": e.get("webUrl", ""),
+            # Purview (§14) : les droits sur le contenu sont évalués à chaque question
+            "chiffre": mip is not None,
+            **(mip or {}),
         }))
     qdrant.upsert(collection_name=idx.COLLECTION, points=points)
     idx.supprimer_chunks_excedentaires(qdrant, source, idx.COLLECTION, len(points))
-    entree["statut"] = "indexé"
+    entree["statut"] = "indexé (déchiffré)" if mip else "indexé"
     return entree
 
 
@@ -667,7 +716,7 @@ def main() -> int:
         return 1
 
     try:
-        qdrant = QdrantClient(url=idx.QDRANT_URL)
+        qdrant = QdrantClient(url=idx.QDRANT_URL, api_key=idx.QDRANT_API_KEY)
         if not args.dry_run:
             idx.init_collection(qdrant)
             creer_index_sp(qdrant)

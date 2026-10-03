@@ -10,6 +10,9 @@ services:
       - "127.0.0.1:6333:6333"
     volumes:
       - ./qdrant_data:/qdrant/storage
+    environment:
+      # Clé d'API obligatoire pour tout accès à Qdrant (section 15)
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
 
   n8n:
@@ -36,6 +39,7 @@ services:
     # L'en-tête X-OpenWebUI-User-Email ne peut plus être forgé depuis le LAN.
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000 sur DGX Spark)
       # EMBED_BASE_URL : embeddings. Doit correspondre au service qui a servi
@@ -105,6 +109,10 @@ services:
       # Fenêtres de contexte demandées à Ollama (génération RAG et juge)
       - LLM_NUM_CTX=${LLM_NUM_CTX}
       - JUDGE_NUM_CTX=${JUDGE_NUM_CTX}
+      # Documents protégés par Purview (§14) : inactif tant que MIP_URL est vide
+      - MIP_URL=${MIP_URL}
+      - MIP_TOKEN=${MIP_TOKEN}
+      - MIP_CACHE_TTL=${MIP_CACHE_TTL}
       - SYNC_SCRIPTS_DIR=${SYNC_SCRIPTS_DIR}
       - SYNC_PYTHON=${SYNC_PYTHON}
       - SYNC_TIMEOUT_INDEXER=${SYNC_TIMEOUT_INDEXER}
@@ -129,6 +137,31 @@ services:
       - /etc/rag-certs:/etc/rag-certs:ro
     depends_on:
       - qdrant
+    restart: unless-stopped
+
+  # Service de déchiffrement Purview (§14). Ne démarre qu'avec le profil « purview » :
+  # COMPOSE_PROFILES=purview dans le .env, ou docker compose --profile purview up -d
+  mip-service:
+    build: ./mip-service
+    container_name: mip-service
+    profiles: ["purview"]
+    environment:
+      - ENTRA_TENANT_ID=${ENTRA_TENANT_ID}
+      - MIP_TENANT_DOMAINE=${MIP_TENANT_DOMAINE}
+      - MIP_CLIENT_ID=${MIP_CLIENT_ID}
+      - MIP_CERT_CRT=/certs/rag-purview.crt
+      - MIP_CERT_KEY=/certs/rag-purview.key
+      - MIP_TOKEN=${MIP_TOKEN}
+      - MIP_ETIQUETTES_EXCLUES=${MIP_ETIQUETTES_EXCLUES}
+    volumes:
+      # La clé doit appartenir à l'utilisateur 10001 du conteneur (chmod 600)
+      - /etc/rag-certs/rag-purview.crt:/certs/rag-purview.crt:ro
+      - /etc/rag-certs/rag-purview.key:/certs/rag-purview.key:ro
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   open-webui:

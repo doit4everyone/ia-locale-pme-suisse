@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.16.0] : Octobre 2026
+
+### Documentation
+
+- `section-14-purview.md` : nouvelle section. Indexation des documents SharePoint chiffrés par une étiquette Purview : mise en garde, comparaison avec Copilot, service de déchiffrement interne, double condition (permissions SharePoint et droits de l'étiquette évalués par Purview au nom de l'utilisateur, à la question), autorisations `Content.SuperUser`, `Content.DelegatedReader` et `UnifiedPolicy.Tenant.Read` avec leurs identifiants d'application, audit des applications détenant `Content.SuperUser`, pièges du SDK MIP sous Linux, matrice de validation 12 sur 12, limites et constats.
+- `section-15-securite-donnees.md` : nouvelle section. Clé d'API Qdrant, chiffrement des données au repos sur un disque dédié LUKS2 avec déverrouillage par TPM et phrase secrète de secours, migration des données (`rsync -S`), pièges rencontrés, composants abandonnés, sauvegardes chiffrées (exigence, non validée).
+- `section-13-sharepoint.md` : constats de gouvernance (§13.8.3) présentés avec leur origine dans le lab.
+- Index du guide, index des scripts, accueil, `README.md` : §14, §15 et dossier `scripts/purview/`.
+- `suivi-corrections.md` : points 23, 24 et 25 corrigés, points 30 à 36 ouverts.
+- Formulation « nLPD-compliant » retirée (index du guide, §8, page des procédures, `deploy.sh`) : la stack est **conçue pour faciliter la conformité à la nLPD**. Un déploiement technique ne garantit pas à lui seul la conformité, qui dépend aussi de la gouvernance et de l'organisation.
+- `section-09-securite.md` : journal des requêtes archivé en `640` au lieu de `644`, avec la commande pour les fichiers existants.
+- Revue externe du dépôt (v2.15.4) prise en compte : points retenus pour la v2.17.0 dans `suivi-corrections.md`.
+
+### Scripts
+
+- `mip-service/` : nouveau service de déchiffrement (.NET 8, SDK MIP `Microsoft.InformationProtection.File.Ubuntu2404`, image Ubuntu 24.04), points d'accès `/dechiffrer` et `/droits`, utilisateur 10001, système de fichiers en lecture seule.
+- `docker-compose.yml` : clé d'API Qdrant ; service `mip-service` dans le profil `purview` (inactif par défaut) ; variables `MIP_*` transmises à `rag-api`.
+- `env.example`, `deploy.sh` : `QDRANT_API_KEY` et `MIP_TOKEN` générés, variables Purview vides par défaut, copie de `mip-service/`, contrôle de Qdrant avec la clé.
+- `api/anon_main.py` : client Qdrant avec clé ; seconde condition Purview (`filtrer_purview`) sur la recherche et l'extension de contexte, cache des décisions, refus par défaut.
+- `anon_indexer.py`, `anon_acl_resolver.py` : client Qdrant avec clé.
+- `sp_indexer.py` : déchiffrement par `mip-service` si `MIP_URL` est renseignée, champs `chiffre`, `mip_etiquette_id`, `mip_etiquette_nom`, `mip_proprietaire` ; fichiers temporaires dans `/dev/shm` ; client Qdrant avec clé.
+- `scripts/purview/` : sonde de déchiffrement, `test_mip_service.py`, `test_droits.py`.
+
+---
+
 ## [2.15.4] : Septembre 2026
 
 ### Scripts

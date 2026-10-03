@@ -46,6 +46,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 22 | Courriel de quarantaine trompeur : fichiers aux permissions illisibles présentés comme « non indexés », avec une action inefficace. Les deux causes sont distinguées | v2.15.4 | 2026-09-29 |
 | doc.2 | `GROUPS_CACHE_TTL`, `SYNC_PYTHON`, `SYNC_TIMEOUT_*` absents du Compose | v2.12.0 | 2026-09-24 |
 | doc.4 | `deploy.sh` générait un `.env` incomplet | v2.12.0 | 2026-09-24 |
+| 23 | Qdrant sans clé d'API : tout conteneur du réseau Compose pouvait lire et écrire. Clé obligatoire, transmise aux quatre clients (§15.2) | v2.16.0 | 2026-10-01 |
+| 24 | Aucun chiffrement au repos : disque de données LUKS2 dédié, déverrouillage par TPM, phrase secrète en clé de secours ; Qdrant, Open WebUI, n8n et journaux migrés (§15.3). Les sauvegardes restent au point 34 | v2.16.0 | 2026-10-01 |
+| 25 | `sp_indexer.py` écrivait chaque document dans un fichier temporaire sur disque : extraction dans `/dev/shm` | v2.16.0 | 2026-10-02 |
 
 ---
 
@@ -55,18 +58,30 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 |---|---|---|---|
 | 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. |
 | 10 | BM25 garde un instantané des ACL figées au démarrage | Faible | Les chunks BM25 ne repassent pas par Qdrant : le filtre ACL Qdrant ne s'applique pas sur le chemin BM25. Si les permissions d'un document changent, BM25 conserve les anciennes jusqu'à la reconstruction de l'index. Depuis v2.15.0, l'index est reconstruit après chaque synchronisation (horaire) : la fenêtre passe de « jusqu'au redémarrage » à une heure au plus. Impact limité en pratique : le chunk doit encore passer le filtre ACL Qdrant dans le scroll d'extension. Correction prévue : relire le payload Qdrant par ID pour les candidats BM25. |
-| 14 | ACL par noms plutôt que par SIDs, masque ALLOWED non vérifié, permissions de partage ignorées | Moyenne | Identités intégrées à mesurer sur le partage avant de corriger. |
+| 14 | ACL par noms plutôt que par SIDs, masque ALLOWED non vérifié, permissions de partage ignorées | **Élevée** (masque et partage) | Identités intégrées à mesurer sur le partage avant de corriger. |
 | auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. |
 | auth.2 | Identités intégrées (`AUTORITE NT\Utilisateurs authentifiés`) dans `autorises[]` sans être dans les groupes LDAP | Moyenne | Fichiers concernés invisibles. Décision à prendre : ignorer ou injecter dans `get_user_groups`. |
 | doc.3 | n8n : port 5678 publié sur LAN, `N8N_BASIC_AUTH_*` sans effet depuis n8n 1.0 | Faible | Accès admin uniquement, acceptable en lab. |
-| 23 | Qdrant sans clé d'API | Moyenne | Le port n'est pas publié (point 1), mais tout conteneur du réseau Compose peut lire et écrire. Prérequis de la section Purview, avant tout contenu déchiffré. |
-| 24 | Aucun chiffrement au repos : chunks Qdrant, historique Open WebUI, sauvegardes | Moyenne, élevée avec Purview | Qdrant auto-hébergé n'a pas de chiffrement natif. Prévu : disque de données LUKS, sauvegardes chiffrées. Prérequis de la section Purview. |
-| 25 | `sp_indexer.py` écrit chaque document dans un fichier temporaire avant extraction | Faible, élevée avec Purview | Sans conséquence pour des documents déjà lisibles sur SharePoint. Pour des documents déchiffrés : extraction en mémoire et `tmpfs`, prévues avec la section Purview. |
 | 26 | Token d'administration en clair dans les nœuds HTTP des workflows n8n | Faible | Visible dans tout export de workflow. Passage prévu à l'identifiant n8n « Header Auth ». |
 | 27 | `indexer.py` : un fichier chiffré par Purview sur le partage serait compté comme « vide », sans signalement explicite | Faible | Aucun fichier chiffré sur le partage du lab à ce jour. Détection prévue, comme dans `sp_indexer.py`. |
 | 28 | Aucune détection de secrets dans le corpus indexé | Faible | Un fichier nommé comme une clé TLS a été trouvé dans un dossier indexé du lab. À traiter par la gouvernance (inventaire, exclusion), pas par l'indexeur seul. |
 | 29 | Courriel de quarantaine sans statut par fichier | Faible | Le message présente les deux causes possibles (point 22), mais `main.py` ne transmet que les noms. Prévu avec la prochaine reconstruction (§10). |
 | doc.5 | `deploy.sh` jamais réexécuté sur une VM vierge depuis v2.12.0 | Moyenne | À tester avec les scripts de simplification du déploiement. |
+| 30 | Recherche par mots-clés sensible aux accents et découpée sur les seules espaces (« règlement » ≠ « reglement ») | Moyenne | Constatée en §14.7.3. Normalisation des accents et de la ponctuation prévue dans `main.py` (§10). |
+| 31 | Open WebUI envoie ses tâches d'arrière-plan (titres, suggestions) à `rag-api` : deux recherches complètes par question, une entrée de plus au journal nLPD | Moyenne | Réglage d'Open WebUI documenté en §14.8.2. |
+| 32 | Cache des décisions Purview sans verrou : deux recherches simultanées interrogent Purview deux fois | Faible | Sans effet sur la sécurité. Verrou par clé prévu. |
+| 33 | Étiquette Purview non affichée dans la réponse, contrairement à Copilot | Faible | §14.8.1. |
+| 34 | Sauvegardes chiffrées non validées en lab | Moyenne | Exigence documentée en §15.5 ; obligatoire dès que §14 est mise en œuvre. |
+| 35 | Variables d'environnement d'Ollama ignorées sans message : `OLLAMA_CONTEXT_LENGTH` (espace insécable), `OLLAMA_NUM_THREADS` (inexistante) | Faible | Réglages à passer par requête ou par Modelfile (`num_ctx`, `num_thread`). Vérifier la ligne de commande des processus `llama-server`. |
+| 36 | Journal « Contexte étendu » : affiche la fenêtre demandée, pas les index réellement récupérés | Faible | A induit un diagnostic erroné en lab. Prévu avec la prochaine reconstruction. |
+| 37 | Pas de test de non-divulgation automatisé : les matrices de §9, §13 et §14 sont rejouées à la main | Élevée | Script qui interroge la RAG API au nom de chaque compte de test, depuis le réseau Docker, et vérifie les codes attendus. Prévu en tête de v2.17.0. |
+| 38 | Mot de passe SMB passé en argument de `smbcacls` (visible dans la liste des processus) | Moyenne | Utiliser un fichier d'identifiants. v2.17.0. |
+| 39 | Juge en échec considéré comme « ancré » (`ancree: True` en cas d'erreur) | Moyenne | État « non vérifié » distinct. v2.17.0. |
+| 40 | Citations comparées par sous-chaîne, et enrichies par le seul nom de fichier (collision entre deux fichiers de même nom) | Moyenne | Correspondance sur le chemin complet. v2.17.0. |
+| 41 | `/stats` sans authentification ; panne de Qdrant présentée comme « aucun résultat » | Faible | v2.17.0. |
+| 42 | Empreinte SHA-256 tronquée des questions : une question courte peut être retrouvée par dictionnaire | Faible | Empreinte avec clé secrète (HMAC). v2.17.0. |
+| 43 | Open WebUI expose aussi les modèles Ollama bruts : pas de fuite du corpus, mais ni journalisation ni contrôle d'ancrage | Faible | Masquer ces modèles aux utilisateurs. v2.17.0. |
+| 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API | Faible en lab | Open WebUI peut transmettre un jeton signé (`ENABLE_FORWARD_USER_INFO_HEADERS`, `FORWARD_USER_INFO_HEADER_JWT_SECRET`). Passage en production. |
 
 ---
 
@@ -133,4 +148,15 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 
 ---
 
-*Dernière mise à jour : 29 septembre 2026.*
+## Corrections documentaires v2.16.0 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §13.8.3 | Constats de gouvernance présentés avec leur origine dans le lab (essais antérieurs, pilote abandonné, documents de démonstration) | v2.16.0 |
+| §14, §15 | Nouvelles sections : documents protégés par Purview, sécurité des données | v2.16.0 |
+| Index, §8, procédures | « nLPD-compliant » remplacé par « conçu pour faciliter la conformité à la nLPD » | v2.16.0 |
+| §9.4.4 | Journal archivé en `640` | v2.16.0 |
+
+---
+
+*Dernière mise à jour : 2 octobre 2026.*

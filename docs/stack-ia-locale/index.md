@@ -1,6 +1,6 @@
 ---
 title: "Guide de déploiement : stack IA locale sur VM Ubuntu Server | DoIt4Everyone"
-description: "Déploiement complet d'un pipeline RAG local nLPD-compliant : Open WebUI, RAG API FastAPI, Qdrant, Ollama, cloisonnement ACL NTFS, authentification LDAP AD, journalisation nLPD."
+description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter la conformité à la nLPD : Open WebUI, RAG API FastAPI, Qdrant, Ollama, cloisonnement ACL NTFS, authentification LDAP AD, journalisation nLPD."
 ---
 <style>
   header, footer { display: none !important; }
@@ -91,7 +91,8 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | Microsoft Graph, App Registration par certificat, résolution des groupes Entra ID, mise à niveau compatible des scripts | Publié |
 | [§12 Synthèse des réunions Teams](section-12-teams.md) | Transcriptions via Graph, groupe d'adhésion, compte rendu par le modèle local envoyé en brouillon à l'organisateur, évaluation mesurée | Publié |
 | [§13 Connecteur SharePoint Online](section-13-sharepoint.md) | Indexation des bibliothèques SharePoint, traduction des permissions (groupes SharePoint, Entra, AD synchronisés, partages, liens) jusqu'aux chunks Qdrant, application Sites.Selected, matrice de cloisonnement | Publié |
-| Documents protégés par Purview | Indexation des documents chiffrés par une étiquette de confidentialité | À venir |
+| [§14 Documents protégés par Purview](section-14-purview.md) | Service de déchiffrement interne, double condition (permissions SharePoint et droits de l'étiquette évalués par Purview à la question), autorisations, mise en garde, matrice de validation | Publié |
+| [§15 Sécurité des données](section-15-securite-donnees.md) | Clé d'API Qdrant, chiffrement des données au repos (LUKS2, TPM), migration, composants abandonnés, sauvegardes | Publié |
 | Gouvernance Microsoft 365 | Rotation des certificats, audit des accès, limites et responsabilités | À venir |
 
 Les numéros de section sont attribués à la publication.
@@ -101,8 +102,9 @@ Les numéros de section sont attribués à la publication.
 | Document | Contenu |
 |---|---|
 | [suivi-corrections.md](suivi-corrections.md) | Suivi des corrections identifiées par audit de sécurité, avec priorités et état d'avancement |
-| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP, extension Entra ID optionnelle via Microsoft Graph), `teams.py` et `teams_graph.py` (synthèse Teams), `sp_indexer.py` (indexation SharePoint), `Set-AccesIndexationRAG.ps1` (lecture du partage par un groupe dédié). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
+| [Scripts Python du pipeline RAG](../../scripts/stack-ia-locale/index.md) | `indexer.py` (indexation SMB incrémentale, deux collections Qdrant), `acl_resolver.py` (ACL NTFS vers Qdrant), `main.py` (RAG API FastAPI : retrieval hybride BM25+vectoriel, juge LLM, journalisation nLPD), `auth.py` (résolution groupes AD via LDAP, extension Entra ID optionnelle via Microsoft Graph), `teams.py` et `teams_graph.py` (synthèse Teams), `sp_indexer.py` (indexation SharePoint, déchiffrement Purview), `Set-AccesIndexationRAG.ps1` (lecture du partage par un groupe dédié). Valeurs sensibles remplacées par des placeholders, prêts à adapter. |
 | [Scripts SharePoint](../../scripts/sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde (§13) |
+| [Scripts Purview](../../scripts/purview/) | Sonde de déchiffrement, tests du service `mip-service` (§14) |
 | [Workflows n8n](../../scripts/N8N/) | `n8n-sync-corpus.json` (synchronisation horaire du corpus + email quarantaine) `n8n-rappel-rotation-svc-rag.json` (rappel mensuel rotation mot de passe) et `n8n-teams-sync.json` (synthèse horaire des réunions Teams, §12). Fichiers JSON importables directement dans n8n. |
 
 ---

@@ -1,6 +1,6 @@
 ---
 title: "Procédures opérationnelles | IA locale pour PME suisse | DoIt4Everyone"
-description: "Procédures de déploiement d'une stack IA locale nLPD pour PME suisse, validées en lab : file server Windows, puis Microsoft 365."
+description: "Procédures de déploiement d'une stack IA locale conçue pour faciliter la conformité à la nLPD des PME suisses, validées en lab : file server Windows, puis Microsoft 365."
 ---
 
 <style>
@@ -26,7 +26,7 @@ Les procédures sont publiées après validation en lab, sur l'environnement de 
 | Partie | Contenu | Sections |
 |---|---|---|
 | Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
-| Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions. À venir : documents protégés par Purview, gouvernance | §11 et suivantes |
+| Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données. À venir : gouvernance | §11 à §15 |
 | Mesures et benchmarks | Validation complète et mesures de performance, après l'installation du GPU | §10 (à venir) |
 
 Les scripts et workflows correspondants sont publiés dans [scripts](../scripts/).

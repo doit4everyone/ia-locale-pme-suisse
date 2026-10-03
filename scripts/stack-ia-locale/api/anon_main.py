@@ -17,6 +17,7 @@ import hashlib
 import logging
 import subprocess
 import asyncio
+import time
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access
 import teams
@@ -71,13 +72,25 @@ CONTEXT_THRESHOLD  = float(os.getenv("CONTEXT_THRESHOLD", "0.75"))
 MAX_CONTEXT_CHUNKS = int(os.getenv("MAX_CONTEXT_CHUNKS", "15"))
 ORG_NAME          = os.getenv("ORG_NAME", "votre organisation")
 
+# Purview (§14) : droits sur les documents chiffrés, évalués à la question par mip-service
+MIP_URL       = os.getenv("MIP_URL", "")
+MIP_TOKEN     = os.getenv("MIP_TOKEN", "")
+MIP_CACHE_TTL = int(os.getenv("MIP_CACHE_TTL", "3600"))
+
 # ─────────────────────────────────────────
 # Application
 # ─────────────────────────────────────────
 
 app = FastAPI(title="RAG API - pipeline complet")
 security = HTTPBearer()
-qdrant = QdrantClient(url=QDRANT_HOST)
+# Clé d'API de Qdrant (QDRANT__SERVICE__API_KEY côté serveur). Vide : pas de clé.
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
+
+# La connexion à Qdrant passe par le réseau Docker interne (ou localhost) :
+# l'avertissement du client sur une clé d'API envoyée en HTTP est sans objet ici.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
+qdrant = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -90,6 +103,64 @@ logger = logging.getLogger(__name__)
 # préférer Qdrant BM42 (sparse vectors, index sur disque).
 _bm25_index: BM25Okapi | None = None
 _bm25_chunks: list[dict] = []
+
+
+def champs_purview(payload: dict) -> dict:
+    """Champs Purview d'un chunk, transmis jusqu'au filtre de la question."""
+    return {
+        "chiffre":          bool(payload.get("chiffre", False)),
+        "mip_etiquette_id": payload.get("mip_etiquette_id", ""),
+        "mip_proprietaire": payload.get("mip_proprietaire", ""),
+    }
+
+
+# Cache des décisions : (utilisateur, étiquette, propriétaire) → (autorisé, expiration)
+_cache_droits: dict[tuple, tuple[bool, float]] = {}
+
+
+async def droits_purview(utilisateur: str, etiquette_id: str, proprietaire: str) -> bool:
+    """Purview autorise-t-il cet utilisateur à lire le contenu de cette étiquette ?
+    Refus par défaut : service non configuré, identité ou étiquette absente, erreur."""
+    if not (MIP_URL and MIP_TOKEN and utilisateur and etiquette_id):
+        return False
+    cle = (utilisateur.lower(), etiquette_id, (proprietaire or "").lower())
+    maintenant = time.monotonic()
+    if cle in _cache_droits and _cache_droits[cle][1] > maintenant:
+        return _cache_droits[cle][0]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{MIP_URL}/droits",
+                json={"utilisateur": utilisateur, "etiquette_id": etiquette_id, "proprietaire": proprietaire},
+                headers={"Authorization": f"Bearer {MIP_TOKEN}"},
+            )
+        if r.status_code != 200:
+            logger.warning(f"[PURVIEW] mip-service HTTP {r.status_code} pour {utilisateur} : refus par défaut")
+            return False
+        autorise = bool(r.json().get("autorise", False))
+    except Exception as e:
+        logger.warning(f"[PURVIEW] mip-service injoignable ({e.__class__.__name__}) : refus par défaut")
+        return False
+    _cache_droits[cle] = (autorise, maintenant + MIP_CACHE_TTL)
+    logger.info(f"[PURVIEW] {utilisateur} sur l'étiquette {etiquette_id} : {'autorisé' if autorise else 'refusé'}")
+    return autorise
+
+
+async def filtrer_purview(chunks: list[dict], utilisateur: str | None) -> list[dict]:
+    """Seconde condition : retire les chunks chiffrés que Purview refuse à l'utilisateur.
+    La première condition (permissions SharePoint ou NTFS) est déjà appliquée par Qdrant."""
+    gardes, retires = [], 0
+    for c in chunks:
+        if not c.get("chiffre"):
+            gardes.append(c)
+        elif utilisateur and await droits_purview(utilisateur, c.get("mip_etiquette_id", ""),
+                                                  c.get("mip_proprietaire", "")):
+            gardes.append(c)
+        else:
+            retires += 1
+    if retires:
+        logger.info(f"[PURVIEW] {retires} chunk(s) chiffré(s) retiré(s) pour {utilisateur or 'identité inconnue'}")
+    return gardes
 
 
 def get_collection_for_source(source_name: str) -> str:
@@ -121,6 +192,7 @@ def _load_collection_chunks(collection_name: str) -> list[dict]:
                 "chunk_index": p.payload.get("chunk_index", None),
                 "autorises":   p.payload.get("autorises", []),
                 "interdits":   p.payload.get("interdits", []),
+                **champs_purview(p.payload),
             }
             for p in points
         ]
@@ -208,7 +280,8 @@ async def get_embedding(text: str) -> list[float]:
         return r.json()["embedding"]
 
 
-async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] = None) -> list[dict]:
+async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] = None,
+                        user_email: str | None = None) -> list[dict]:
     """
     Recherche hybride : vectorielle (Qdrant, deux collections) + mots-clés (BM25),
     fusionnée par Reciprocal Rank Fusion (RRF, k=60).
@@ -275,6 +348,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                 "chunk_index": r.payload.get("chunk_index", None),
                 "autorises":   r.payload.get("autorises", []),
                 "interdits":   r.payload.get("interdits", []),
+                **champs_purview(r.payload),
             })
 
         # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
@@ -318,6 +392,9 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             {**rrf_data[key], "score": score}
             for key, score in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
         ][:top_k]
+
+        # Seconde condition (Purview) : droits sur les documents chiffrés
+        chunks = await filtrer_purview(chunks, user_email)
 
         if bm25_results:
             logger.info(
@@ -379,6 +456,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                     "web_url":     r.payload.get("web_url", ""),
                     "collection":  best_collection,
                     "chunk_index": r.payload.get("chunk_index", 0),
+                    **champs_purview(r.payload),
                 }
                 for r in source_points_sorted
                 if not user_groups or check_access(
@@ -387,6 +465,7 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
                     r.payload.get("interdits", [])
                 )
             ]
+            source_chunks = await filtrer_purview(source_chunks, user_email)
             other_chunks = [c for c in chunks if c["source"] != best_source]
             chunks = source_chunks + other_chunks[:3]
             idx_str = f"{idx_min}-{idx_max}" if best_chunk_index is not None else "?"
@@ -699,7 +778,7 @@ async def query(
     logger.info(f"[AUTH] /query user '{request.user_id}' : {len(user_groups)} groupe(s) et identité(s)")
 
     await warmup_judge()
-    chunks = await search_qdrant(request.query, user_groups=user_groups)
+    chunks = await search_qdrant(request.query, user_groups=user_groups, user_email=request.user_id)
     context = build_context(chunks)
     answer = await generate_answer(request.query, context)
 
@@ -816,7 +895,7 @@ async def openai_chat_completions(
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
 
     await warmup_judge()
-    chunks = await search_qdrant(user_query, user_groups=user_groups)
+    chunks = await search_qdrant(user_query, user_groups=user_groups, user_email=owui_email2)
     context = build_context(chunks)
     answer = await generate_answer(user_query, context)
     gc_result = await groundedness_check(answer, chunks)
@@ -1036,6 +1115,7 @@ async def admin_sync(
                     "OLLAMA_URL": EMBED_BASE_URL,
                     "EMBED_MODEL": EMBED_MODEL,
                     "QDRANT_URL": QDRANT_HOST,
+                    "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                     "QDRANT_COLLECTION": COLLECTION,
                     "ORG_OWNER": ORG_NAME,
                     "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
@@ -1092,6 +1172,7 @@ async def admin_sync(
                     "SMB_PASSWORD": SMB_PASSWORD,
                     "SMB_DOMAIN": SMB_DOMAIN,
                     "QDRANT_URL": QDRANT_HOST,
+                    "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                     "QDRANT_COLLECTION": COLLECTION,
                     # Variables de routage des collections
                     "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
@@ -1145,6 +1226,7 @@ async def admin_sync(
                         "OLLAMA_URL": EMBED_BASE_URL,
                         "EMBED_MODEL": EMBED_MODEL,
                         "QDRANT_URL": QDRANT_HOST,
+                        "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                         "QDRANT_COLLECTION": COLLECTION,
                         "ORG_OWNER": ORG_NAME,
                         "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
@@ -1166,6 +1248,9 @@ async def admin_sync(
                         "SP_SITES": sp_sites,
                         "SP_EXCLUDE_DRIVES": os.environ.get("SP_EXCLUDE_DRIVES", ""),
                         "SP_MAX_FILE_MB": os.environ.get("SP_MAX_FILE_MB", ""),
+                        # Déchiffrement Purview (§14)
+                        "MIP_URL": MIP_URL,
+                        "MIP_TOKEN": MIP_TOKEN,
                     }
                 )
                 rapport["sharepoint"]["returncode"] = result.returncode

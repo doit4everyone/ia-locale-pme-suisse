@@ -55,6 +55,12 @@ SMB_USER     = os.getenv("SMB_USER",     "svc-rag")
 SMB_PASSWORD = os.getenv("SMB_PASSWORD", "")
 SMB_DOMAIN   = os.getenv("SMB_DOMAIN",   "VOTRE-DOMAINE")
 QDRANT_URL   = os.getenv("QDRANT_URL",   "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None   # clé d'API de Qdrant, vide = aucune
+
+# La connexion à Qdrant passe par le réseau Docker interne (ou localhost) :
+# l'avertissement du client sur une clé d'API envoyée en HTTP est sans objet ici.
+import warnings as _warnings
+_warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
 COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
 DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
 DOCUMENTATION_PATHS = [
@@ -274,7 +280,7 @@ def resoudre_acl(
     print()
 
     # Connexion Qdrant
-    qdrant = QdrantClient(url=QDRANT_URL)
+    qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     try:
         collections = [c.name for c in qdrant.get_collections().collections]
         for col in [COLLECTION, DOCUMENTATION_COLLECTION]:

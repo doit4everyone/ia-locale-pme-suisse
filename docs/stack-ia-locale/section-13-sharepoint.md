@@ -372,16 +372,16 @@ Sur la carte graphique de 16 Go prévue pour le §10, les fenêtres actuelles ne
 
 ### §13.8.3 Constats de gouvernance
 
-Construire l'indexation a mis au jour, dans le lab, plusieurs restes accumulés en toute bonne foi. Ils seront repris dans la section gouvernance :
+Le tenant et le serveur de fichiers du lab ont servi à de nombreux essais avant ce guide, comme ceux de beaucoup de PME qui ont testé des outils d'IA. Construire l'indexation y a mis au jour des situations typiques d'un tel environnement. La colonne « Origine » dit honnêtement d'où elles viennent : plusieurs ont été créées par nos propres essais, ce qui ne les rend pas moins représentatives. Elles sont reprises sous forme de recommandations dans la section gouvernance.
 
-| Constat | Risque | Traitement |
-|---|---|---|
-| Ancienne application d'indexation avec `Sites.Read.All` | Lecture de tout le tenant, certificat valide deux ans | Supprimée |
-| Compte d'indexation membre des groupes de droits Purview | Droit de déchiffrer les documents financiers et RH | Retiré (et §5.2.4 réécrite) |
-| Groupes Purview servant aussi d'ACL NTFS | Le retrait a coupé la lecture de six fichiers : invisibles pour tous dans le RAG, sans fuite | Groupe dédié à l'indexation, script `Set-AccesIndexationRAG.ps1` |
-| Groupe supprimé encore membre de deux sites | Accès retiré sans que personne ne le sache | Signalé par l'indexeur à chaque passage |
-| Copies en clair de documents chiffrés | Contenu sensible trouvable par le RAG | À supprimer ou déplacer |
-| Fichier nommé comme une clé TLS dans le corpus | Secret possible, trouvable par le RAG | À sortir du partage |
+| Situation | Origine dans le lab | Risque | Traitement |
+|---|---|---|---|
+| Ancienne application d'indexation avec `Sites.Read.All` | Pilote abandonné (une plateforme RAG testée puis remplacée) | Lecture de tout le tenant, certificat valide deux ans | Supprimée |
+| Compte d'indexation membre des groupes de droits Purview | Configuration initiale du lab | Droit de déchiffrer les documents financiers et RH | Retiré (et §5.2.4 réécrite) |
+| Groupes Purview servant aussi d'ACL NTFS | Configuration antérieure du serveur de fichiers | Le retrait a coupé la lecture de six fichiers : invisibles pour tous dans le RAG, sans fuite | Groupe dédié à l'indexation, script `Set-AccesIndexationRAG.ps1` |
+| Groupe supprimé encore membre de deux sites | Inconnue | Accès retiré sans que personne ne le sache | Signalé par l'indexeur à chaque passage |
+| Copies en clair de documents chiffrés | Documents de test et de démonstration | Contenu sensible trouvable par le RAG | À supprimer ou déplacer |
+| Fichier nommé comme une clé TLS dans le corpus | Inconnue | Secret possible, trouvable par le RAG | À sortir du partage |
 
 Le point commun : **un outil d'IA rend trouvable ce qui n'était que caché dans une arborescence.** L'inventaire des permissions et le rapport de synchronisation sont les deux outils qui permettent de le voir avant les utilisateurs.
 
