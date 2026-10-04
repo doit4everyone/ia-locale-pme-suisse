@@ -23,18 +23,11 @@
       "parameters": {
         "method": "POST",
         "url": "http://rag-api:8080/admin/sync",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer <ADMIN_TOKEN>"
-            }
-          ]
-        },
         "options": {
           "timeout": 1800000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -42,7 +35,13 @@
         -448,
         64
       ],
-      "name": "POST /admin/sync"
+      "name": "POST /admin/sync",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "<HEADER_AUTH_CREDENTIAL_ID>",
+          "name": "RAG API - ADMIN_TOKEN"
+        }
+      }
     },
     {
       "parameters": {
@@ -71,6 +70,15 @@
                 "operation": "gt"
               },
               "id": "ae9780f3-0948-4596-baa4-d525b17429f4"
+            },
+            {
+              "leftValue": "={{ $json.cloisonnement_alerte === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "348ca6a2-f963-4bfe-ad5e-bcff8eab374a"
             }
           ],
           "combinator": "or"
@@ -83,11 +91,11 @@
         -224,
         64
       ],
-      "name": "Erreur ou quarantaine ?"
+      "name": "Erreur, quarantaine ou cloisonnement ?"
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nconst ts = new Date(r.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' });\nconst jour = new Date().toISOString().split('T')[0];\n\nlet sujet, corps;\n\nif (!r.success) {\n  sujet = `⚠️ [RAG SYNC] Erreur de synchronisation : ${jour}`;\n  corps = `RAPPORT DE SYNCHRONISATION RAG : ERREUR\\n`;\n  corps += `Horodatage : ${ts}\\n\\n`;\n  corps += `Erreurs détectées :\\n`;\n  for (const e of r.errors) corps += `  • ${e}\\n`;\n  corps += `\\nCodes de retour : indexer.py = ${r.indexer?.returncode ?? 'non exécuté'}, `;\n  corps += `acl_resolver.py = ${r.acl_resolver?.returncode ?? 'non exécuté'}`;\n  if (r.sharepoint && r.sharepoint.returncode !== undefined) {\n    corps += `, sp_indexer.py = ${r.sharepoint.returncode}`;\n  }\n  corps += `\\n\\nDétail sur la VM :\\n`;\n  corps += `  docker logs rag-api 2>&1 | grep SYNC | tail -20\\n`;\n  corps += `  ls -la /var/log/rag/rapport_*.json\\n`;\n} else {\n  sujet = `📋 [RAG SYNC] Fichiers en quarantaine : ${jour}`;\n  corps = `RAPPORT DE SYNCHRONISATION RAG : QUARANTAINE\\n`;\n  corps += `Horodatage : ${ts}\\n`;\n  corps += `Synchronisation : succès\\n\\n`;\n  corps += `${r.quarantine_count} fichier(s) en quarantaine :\\n`;\n  for (const f of r.quarantine) corps += `  • ${f}\\n`;\n  corps += `\\nCes fichiers sont présents sur le partage, mais ne sont pas interrogeables dans le RAG.\\n`;\n  corps += `Deux causes possibles, avec des actions différentes :\\n\\n`;\n  corps += `1. Permissions illisibles (statut « acl_illisible ») : les fichiers sont indexés, mais le compte\\n`;\n  corps += `   d'indexation ne peut plus lire leurs permissions NTFS. Par sécurité, ils sont devenus\\n`;\n  corps += `   invisibles pour tous. Cause la plus fréquente : un droit de lecture perdu, par exemple après\\n`;\n  corps += `   une modification des groupes du compte ou un dossier créé avec l'héritage coupé.\\n`;\n  corps += `   → Sur le serveur de fichiers : .\\\\Set-AccesIndexationRAG.ps1 -Racine <racine> -Verifier\\n`;\n  corps += `   → Après correction : remonter le partage sur la VM, puis relancer la synchronisation.\\n\\n`;\n  corps += `2. Fichier non indexé (statut « non_indexé ») : aucun contenu n'a pu être extrait\\n`;\n  corps += `   (fichier vide, PDF scanné sans texte, format non pris en charge, document chiffré).\\n`;\n  corps += `   → Vérifier le contenu du fichier.\\n\\n`;\n  corps += `Statut exact de chaque fichier sur la VM :\\n`;\n  corps += `  python3 -c \"import json; [print(d['statut'], '|', d.get('fichier', d.get('source_name'))) for d in json.load(open('/var/log/rag/rapport_acl.json')).get('documents', []) if d.get('statut') in ('non_indexé', 'acl_illisible')]\"\\n`;\n}\n\nreturn [{ json: { sujet, corps } }];"
+        "jsCode": "const r = $input.first().json;\nconst ts = new Date(r.timestamp).toLocaleString('fr-CH', { timeZone: 'Europe/Zurich' });\nconst jour = new Date().toISOString().split('T')[0];\nconst cl = r.cloisonnement;\n\nlet sujet, corps = '';\n\n// ── Section cloisonnement (prioritaire : une fuite est l'alerte la plus grave)\nlet sectionCloisonnement = '';\nif (cl && r.cloisonnement_alerte) {\n  sectionCloisonnement += `CONTRÔLE DE CLOISONNEMENT : ${cl.ok} cas conformes sur ${cl.cas}\\n\\n`;\n  if (cl.fuites.length) {\n    sectionCloisonnement += `FUITES (document interdit accessible) :\\n`;\n    for (const f of cl.fuites) sectionCloisonnement += `  • ${f}\\n`;\n    sectionCloisonnement += `\\n→ Action immédiate : arrêter le service tant que la cause n'est pas comprise\\n`;\n    sectionCloisonnement += `  (cd /root/rag-stack && docker compose stop rag-api).\\n\\n`;\n  }\n  if (cl.refus_a_tort.length) {\n    sectionCloisonnement += `Refus à tort (document autorisé inaccessible) :\\n`;\n    for (const f of cl.refus_a_tort) sectionCloisonnement += `  • ${f}\\n`;\n    sectionCloisonnement += `\\n`;\n  }\n  if (cl.absents.length) {\n    sectionCloisonnement += `Cas invalides (document de test absent de l'index) :\\n`;\n    for (const f of cl.absents) sectionCloisonnement += `  • ${f}\\n`;\n    sectionCloisonnement += `\\n`;\n  }\n  if (cl.erreurs.length) {\n    sectionCloisonnement += `Erreurs du contrôle :\\n`;\n    for (const f of cl.erreurs) sectionCloisonnement += `  • ${f}\\n`;\n    sectionCloisonnement += `\\n`;\n  }\n  sectionCloisonnement += `Détail sur la VM :\\n`;\n  sectionCloisonnement += `  docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json\\n\\n`;\n}\n\nif (cl && cl.fuites && cl.fuites.length) {\n  sujet = `🚨 [RAG SYNC] FUITE DE CLOISONNEMENT : ${jour}`;\n} else if (!r.success) {\n  sujet = `⚠️ [RAG SYNC] Erreur de synchronisation : ${jour}`;\n} else if (r.cloisonnement_alerte) {\n  sujet = `⚠️ [RAG SYNC] Contrôle de cloisonnement à examiner : ${jour}`;\n} else {\n  sujet = `📋 [RAG SYNC] Fichiers en quarantaine : ${jour}`;\n}\n\ncorps += `RAPPORT DE SYNCHRONISATION RAG\\nHorodatage : ${ts}\\n\\n`;\ncorps += sectionCloisonnement;\n\nif (!r.success) {\n  corps += `ERREUR DE SYNCHRONISATION\\n`;\n  corps += `Erreurs détectées :\\n`;\n  for (const e of r.errors) corps += `  • ${e}\\n`;\n  corps += `\\nCodes de retour : indexer.py = ${r.indexer?.returncode ?? 'non exécuté'}, `;\n  corps += `acl_resolver.py = ${r.acl_resolver?.returncode ?? 'non exécuté'}`;\n  if (r.sharepoint && r.sharepoint.returncode !== undefined) {\n    corps += `, sp_indexer.py = ${r.sharepoint.returncode}`;\n  }\n  corps += `\\n\\nDétail sur la VM :\\n`;\n  corps += `  docker logs rag-api 2>&1 | grep SYNC | tail -20\\n`;\n  corps += `  ls -la /var/log/rag/rapport_*.json\\n\\n`;\n}\n\nif (r.quarantine_count > 0) {\n  corps += `QUARANTAINE : ${r.quarantine_count} fichier(s)\\n`;\n  for (const f of r.quarantine) corps += `  • ${f}\\n`;\n  corps += `\\nCes fichiers sont présents sur le partage, mais ne sont pas interrogeables dans le RAG.\\n`;\n  corps += `Deux causes possibles, avec des actions différentes :\\n\\n`;\n  corps += `1. Permissions illisibles (statut « acl_illisible ») : les fichiers sont indexés, mais le compte\\n`;\n  corps += `   d'indexation ne peut plus lire leurs permissions NTFS. Par sécurité, ils sont devenus\\n`;\n  corps += `   invisibles pour tous. Cause la plus fréquente : un droit de lecture perdu, par exemple après\\n`;\n  corps += `   une modification des groupes du compte ou un dossier créé avec l'héritage coupé.\\n`;\n  corps += `   → Sur le serveur de fichiers : .\\\\Set-AccesIndexationRAG.ps1 -Racine <racine> -Verifier\\n`;\n  corps += `   → Après correction : remonter le partage sur la VM, puis relancer la synchronisation.\\n\\n`;\n  corps += `2. Fichier non indexé (statut « non_indexé ») : aucun contenu n'a pu être extrait\\n`;\n  corps += `   (fichier vide, PDF scanné sans texte, format non pris en charge, document chiffré).\\n`;\n  corps += `   → Vérifier le contenu du fichier.\\n\\n`;\n  corps += `Statut exact de chaque fichier sur la VM :\\n`;\n  corps += `  python3 -c \"import json; [print(d['statut'], '|', d.get('fichier', d.get('source_name'))) for d in json.load(open('/var/log/rag/rapport_acl.json')).get('documents', []) if d.get('statut') in ('non_indexé', 'acl_illisible')]\"\\n`;\n}\n\nreturn [{ json: { sujet, corps } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -140,18 +148,7 @@
       "main": [
         [
           {
-            "node": "Erreur ou quarantaine ?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Erreur ou quarantaine ?": {
-      "main": [
-        [
-          {
-            "node": "Formater email",
+            "node": "Erreur, quarantaine ou cloisonnement ?",
             "type": "main",
             "index": 0
           }
@@ -168,9 +165,20 @@
           }
         ]
       ]
+    },
+    "Erreur, quarantaine ou cloisonnement ?": {
+      "main": [
+        [
+          {
+            "node": "Formater email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"

@@ -1,0 +1,18 @@
+{
+  "_commentaire": "Comptes de test et documents de test : à adapter. attendu : true (accès), false (refus), absent ou \"?\" (non vérifié). Copier en /rag-pipeline/cas_cloisonnement.json.",
+  "comptes": ["direction@votre-domaine.ch", "comptable@votre-domaine.ch", "client@votre-domaine.ch"],
+  "cas": [
+    {"id": "SMB-DENY", "question": "Quel contrat mentionne un forfait mensuel de CHF 9 999 ?",
+     "document": "test-deny-explicite.docx", "secret": "",
+     "attendu": {"direction@votre-domaine.ch": true, "comptable@votre-domaine.ch": false, "client@votre-domaine.ch": false}},
+    {"id": "SMB-DEPOT", "question": "Quel est le code de dépôt ?",
+     "document": "Test_RAG_Depot.docx", "secret": "8462",
+     "attendu": {"direction@votre-domaine.ch": true, "comptable@votre-domaine.ch": false, "client@votre-domaine.ch": false}},
+    {"id": "SP-FIN", "question": "Quel code de vérification figure dans le document de test Finances ?",
+     "document": "SharePoint/Finances/Documents/Test_RAG_Finances.docx", "secret": "4827",
+     "attendu": {"direction@votre-domaine.ch": true, "comptable@votre-domaine.ch": true, "client@votre-domaine.ch": false}},
+    {"id": "PURVIEW-FIN", "question": "Quel code de vérification commence par FIN-CHIF ?",
+     "document": "Test_RAG_Finances_Chiffre.docx", "secret": "5193",
+     "attendu": {"direction@votre-domaine.ch": true, "comptable@votre-domaine.ch": false, "client@votre-domaine.ch": false}}
+  ]
+}

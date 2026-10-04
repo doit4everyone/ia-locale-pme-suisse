@@ -49,6 +49,17 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 23 | Qdrant sans clé d'API : tout conteneur du réseau Compose pouvait lire et écrire. Clé obligatoire, transmise aux quatre clients (§15.2) | v2.16.0 | 2026-10-01 |
 | 24 | Aucun chiffrement au repos : disque de données LUKS2 dédié, déverrouillage par TPM, phrase secrète en clé de secours ; Qdrant, Open WebUI, n8n et journaux migrés (§15.3). Les sauvegardes restent au point 34 | v2.16.0 | 2026-10-01 |
 | 25 | `sp_indexer.py` écrivait chaque document dans un fichier temporaire sur disque : extraction dans `/dev/shm` | v2.16.0 | 2026-10-02 |
+| 14 (masque) | Toute entrée ALLOWED valait autorisation, quel que soit le masque : un fichier en écriture seule (boîte de dépôt) devenait interrogeable. Reproduit (FUITE), corrigé, prouvé sans régression (§16.5) | v2.17.0 | 2026-10-03 |
+| 26 | Jeton d'administration en clair dans les workflows n8n : identifiant Header Auth partagé, domaine limité à `rag-api` (§16.7) | v2.17.0 | 2026-10-04 |
+| 37 | Test de non-divulgation automatisé, en deux modes, et contrôle après chaque synchronisation avec alerte (§16.2 à §16.4) | v2.17.0 | 2026-10-03 |
+| 38 | Mot de passe SMB hors de la ligne de commande : fichier d'identifiants en mémoire | v2.17.0 | 2026-10-03 |
+| 39 | Juge en échec : réponse non vérifiée, plus jamais « ancrée » | v2.17.0 | 2026-10-03 |
+| 40 | Citations : correspondance exacte ; deux documents de même nom signalés tous deux | v2.17.0 | 2026-10-03 |
+| 41 | `/stats` réservé à l'administration, `/health` minimal, panne de Qdrant en erreur 503 | v2.17.0 | 2026-10-03 |
+| 42 | Empreinte HMAC des questions (`LOG_HMAC_KEY`) | v2.17.0 | 2026-10-03 |
+| 43 | Modèles Ollama bruts masqués dans Open WebUI, accès au moteur d'inférence à restreindre au pare-feu (§16.7) | v2.17.0 | 2026-10-03 |
+| 45 | Aucun signal quand un secret garde une valeur d'exemple (`changeme`) : avertissement au démarrage. Constaté en lab : jeton d'administration resté à sa valeur d'exemple | v2.17.0 | 2026-10-04 |
+| 46 | `.env` lisible par tous les comptes de la VM (`644`) en lab, `.env` et clés privées sur le disque système non chiffré : déplacés sur le disque chiffré (§15.3.6), préparation avant le déploiement (§1.5) | v2.17.0 | 2026-10-04 |
 
 ---
 
@@ -56,17 +67,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 
 | Point | Description | Priorité | Remarque |
 |---|---|---|---|
-| 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. |
+| 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. Depuis v2.17.0, `/v1` signale dans la réponse une vérification impossible ou un ancrage non établi. |
 | 10 | BM25 garde un instantané des ACL figées au démarrage | Faible | Les chunks BM25 ne repassent pas par Qdrant : le filtre ACL Qdrant ne s'applique pas sur le chemin BM25. Si les permissions d'un document changent, BM25 conserve les anciennes jusqu'à la reconstruction de l'index. Depuis v2.15.0, l'index est reconstruit après chaque synchronisation (horaire) : la fenêtre passe de « jusqu'au redémarrage » à une heure au plus. Impact limité en pratique : le chunk doit encore passer le filtre ACL Qdrant dans le scroll d'extension. Correction prévue : relire le payload Qdrant par ID pour les candidats BM25. |
-| 14 | ACL par noms plutôt que par SIDs, masque ALLOWED non vérifié, permissions de partage ignorées | **Élevée** (masque et partage) | Identités intégrées à mesurer sur le partage avant de corriger. |
-| auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. |
+| 14 | ACL par noms plutôt que par SIDs | Moyenne | Le masque des droits est corrigé et les permissions du partage sont contrôlées (v2.17.0, §16.5). Reste le passage aux SID, avec le groupe principal (auth.1) : **le masque d'abord, le groupe principal ensuite**, sinon un fichier en écriture seule pour « Utilisateurs du domaine » devient lisible par tout le domaine. |
+| auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. À faire **après** la correction du masque (faite en v2.17.0), voir §16.5. |
 | auth.2 | Identités intégrées (`AUTORITE NT\Utilisateurs authentifiés`) dans `autorises[]` sans être dans les groupes LDAP | Moyenne | Fichiers concernés invisibles. Décision à prendre : ignorer ou injecter dans `get_user_groups`. |
 | doc.3 | n8n : port 5678 publié sur LAN, `N8N_BASIC_AUTH_*` sans effet depuis n8n 1.0 | Faible | Accès admin uniquement, acceptable en lab. |
-| 26 | Token d'administration en clair dans les nœuds HTTP des workflows n8n | Faible | Visible dans tout export de workflow. Passage prévu à l'identifiant n8n « Header Auth ». |
 | 27 | `indexer.py` : un fichier chiffré par Purview sur le partage serait compté comme « vide », sans signalement explicite | Faible | Aucun fichier chiffré sur le partage du lab à ce jour. Détection prévue, comme dans `sp_indexer.py`. |
 | 28 | Aucune détection de secrets dans le corpus indexé | Faible | Un fichier nommé comme une clé TLS a été trouvé dans un dossier indexé du lab. À traiter par la gouvernance (inventaire, exclusion), pas par l'indexeur seul. |
 | 29 | Courriel de quarantaine sans statut par fichier | Faible | Le message présente les deux causes possibles (point 22), mais `main.py` ne transmet que les noms. Prévu avec la prochaine reconstruction (§10). |
-| doc.5 | `deploy.sh` jamais réexécuté sur une VM vierge depuis v2.12.0 | Moyenne | À tester avec les scripts de simplification du déploiement. |
+| doc.5 | `deploy.sh` jamais réexécuté sur une VM vierge depuis v2.12.0 | Moyenne | À tester sur une VM neuve en UEFI avec TPM et deux disques, avec le disque chiffré et les liens préparés avant le déploiement (§1.5, contrôle ajouté à `deploy.sh` en v2.17.0), et les scripts de simplification du déploiement. |
 | 30 | Recherche par mots-clés sensible aux accents et découpée sur les seules espaces (« règlement » ≠ « reglement ») | Moyenne | Constatée en §14.7.3. Normalisation des accents et de la ponctuation prévue dans `main.py` (§10). |
 | 31 | Open WebUI envoie ses tâches d'arrière-plan (titres, suggestions) à `rag-api` : deux recherches complètes par question, une entrée de plus au journal nLPD | Moyenne | Réglage d'Open WebUI documenté en §14.8.2. |
 | 32 | Cache des décisions Purview sans verrou : deux recherches simultanées interrogent Purview deux fois | Faible | Sans effet sur la sécurité. Verrou par clé prévu. |
@@ -74,13 +84,6 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 34 | Sauvegardes chiffrées non validées en lab | Moyenne | Exigence documentée en §15.5 ; obligatoire dès que §14 est mise en œuvre. |
 | 35 | Variables d'environnement d'Ollama ignorées sans message : `OLLAMA_CONTEXT_LENGTH` (espace insécable), `OLLAMA_NUM_THREADS` (inexistante) | Faible | Réglages à passer par requête ou par Modelfile (`num_ctx`, `num_thread`). Vérifier la ligne de commande des processus `llama-server`. |
 | 36 | Journal « Contexte étendu » : affiche la fenêtre demandée, pas les index réellement récupérés | Faible | A induit un diagnostic erroné en lab. Prévu avec la prochaine reconstruction. |
-| 37 | Pas de test de non-divulgation automatisé : les matrices de §9, §13 et §14 sont rejouées à la main | Élevée | Script qui interroge la RAG API au nom de chaque compte de test, depuis le réseau Docker, et vérifie les codes attendus. Prévu en tête de v2.17.0. |
-| 38 | Mot de passe SMB passé en argument de `smbcacls` (visible dans la liste des processus) | Moyenne | Utiliser un fichier d'identifiants. v2.17.0. |
-| 39 | Juge en échec considéré comme « ancré » (`ancree: True` en cas d'erreur) | Moyenne | État « non vérifié » distinct. v2.17.0. |
-| 40 | Citations comparées par sous-chaîne, et enrichies par le seul nom de fichier (collision entre deux fichiers de même nom) | Moyenne | Correspondance sur le chemin complet. v2.17.0. |
-| 41 | `/stats` sans authentification ; panne de Qdrant présentée comme « aucun résultat » | Faible | v2.17.0. |
-| 42 | Empreinte SHA-256 tronquée des questions : une question courte peut être retrouvée par dictionnaire | Faible | Empreinte avec clé secrète (HMAC). v2.17.0. |
-| 43 | Open WebUI expose aussi les modèles Ollama bruts : pas de fuite du corpus, mais ni journalisation ni contrôle d'ancrage | Faible | Masquer ces modèles aux utilisateurs. v2.17.0. |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API | Faible en lab | Open WebUI peut transmettre un jeton signé (`ENABLE_FORWARD_USER_INFO_HEADERS`, `FORWARD_USER_INFO_HEADER_JWT_SECRET`). Passage en production. |
 
 ---
@@ -157,6 +160,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | Index, §8, procédures | « nLPD-compliant » remplacé par « conçu pour faciliter la conformité à la nLPD » | v2.16.0 |
 | §9.4.4 | Journal archivé en `640` | v2.16.0 |
 
+
+## Corrections documentaires v2.17.0 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §1.5 | Nouveau : disque de données chiffré et liens préparés avant le déploiement | v2.17.0 |
+| §9.4 | Format du journal : empreinte HMAC, `verification: erreur` | v2.17.0 |
+| §15.3.6 | Nouveau : secrets et clés sur le disque chiffré, piège de `docker compose restart` | v2.17.0 |
+| §16 | Nouvelle section : contrôle du cloisonnement et durcissement | v2.17.0 |
+
 ---
 
-*Dernière mise à jour : 2 octobre 2026.*
+*Dernière mise à jour : 4 octobre 2026.*

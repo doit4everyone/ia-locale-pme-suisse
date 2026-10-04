@@ -4,6 +4,30 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.17.0] : Octobre 2026
+
+Durcissement de la stack, à la suite d'une revue externe du dépôt.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : nouvelle section. Test de non-divulgation automatisé, endpoint de vérification d'accès, contrôle après chaque synchronisation avec alerte (contre-épreuve faite), faille du masque des droits NTFS reproduite puis corrigée, ordre des corrections avec le groupe principal, permissions du partage, durcissement de la RAG API, d'Open WebUI, du moteur d'inférence et de n8n.
+- `section-01-prerequis.md` : §1.5, disque de données chiffré et liens préparés **avant** le déploiement ; parallèle VM, serveur physique et DGX Spark (non validé) ; le groupe `docker` équivaut à root.
+- `section-15-securite-donnees.md` : `.env` et clés privées dans ce qu'il faut protéger ; §15.3.6 déplacement des secrets et des clés sur le disque chiffré ; piège de `docker compose restart`, qui ne relit pas le `.env`.
+- `section-09-securite.md` : format du journal (empreinte HMAC, `verification: erreur`).
+- Index, accueil, `README.md`, index des scripts et des workflows : §16.
+- `suivi-corrections.md` : points 14 (masque), 26, 37 à 43, 45 et 46 corrigés ; 14 (SID) et auth.1 restent ouverts, avec leur ordre.
+
+### Scripts
+
+- `api/anon_main.py` : `/admin/verifier-acces` ; contrôle de cloisonnement en fin de `/admin/sync` (`CAS_CLOISONNEMENT`) ; juge en échec = non vérifié ; mention dans `/v1` si la réponse n'est pas vérifiée ou pas ancrée ; citations exactes, documents de même nom signalés ; erreur 503 en cas de panne de la recherche ; `/stats` sous jeton d'administration, `/health` minimal ; empreinte HMAC (`LOG_HMAC_KEY`) ; avertissement au démarrage pour les valeurs d'exemple.
+- `anon_acl_resolver.py` : masque des droits lu (lecture du contenu exigée), entrées « héritables seulement » ignorées, refus tous conservés, identifiants SMB par fichier en mémoire, compteur des entrées ignorées.
+- `test_cloisonnement.py`, `cas_cloisonnement.exemple.json` : nouveaux.
+- `Set-AccesIndexationRAG.ps1` : affiche les permissions du partage et signale un partage restreint (code de sortie 3).
+- `docker-compose.yml`, `env.example`, `deploy.sh` : `LOG_HMAC_KEY`, `CAS_CLOISONNEMENT`, `ENABLE_OLLAMA_API=false` ; `deploy.sh` vérifie le disque chiffré de §1.5 et copie le test.
+- Workflows n8n : identifiant Header Auth au lieu du jeton en clair ; alerte de cloisonnement dans le workflow de synchronisation ; importés désactivés.
+
+---
+
 ## [2.16.1] : Octobre 2026
 
 ### Documentation

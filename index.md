@@ -66,7 +66,7 @@ Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c
 
 ## Ce qui vient ensuite
 
-La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), l'indexation de SharePoint Online avec ses permissions (§13), les documents protégés par Purview avec une double condition d'accès (§14), et la sécurité des données de la stack (§15).
+La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), l'indexation de SharePoint Online avec ses permissions (§13), les documents protégés par Purview avec une double condition d'accès (§14), la sécurité des données de la stack (§15), et le contrôle automatisé du cloisonnement, rejoué après chaque synchronisation (§16).
 
 **À venir :** la gouvernance de l'ensemble.
 

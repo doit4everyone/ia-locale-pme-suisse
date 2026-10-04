@@ -18,11 +18,15 @@ description: "Workflows n8n importables du guide de déploiement stack IA locale
 
 | Fichier | Rôle | Guide |
 |---|---|---|
-| [n8n-sync-corpus.json](n8n-sync-corpus.json) | Synchronisation horaire du corpus (SMB et SharePoint) par `/admin/sync`, email en cas de quarantaine ou d'erreur | §7.2, §13.6 |
+| [n8n-sync-corpus.json](n8n-sync-corpus.json) | Synchronisation horaire du corpus (SMB et SharePoint) par `/admin/sync`, email en cas de quarantaine, d'erreur ou d'alerte de cloisonnement | §7.2, §13.6, §16.4 |
 | [n8n-rappel-rotation-svc-rag.json](n8n-rappel-rotation-svc-rag.json) | Rappel mensuel de rotation du mot de passe de `svc-rag` | §7.3 |
 | [n8n-teams-sync.json](n8n-teams-sync.json) | Synthèse horaire des réunions Teams, brouillon envoyé à l'organisateur | §12.6 |
 
-Importer dans n8n par **Import from File**, puis renseigner le token, l'identifiant SMTP et les adresses. Les valeurs sensibles sont remplacées par des repères (`<ADMIN_TOKEN>`, `<EMAIL_EXPEDITEUR>`).
+Avant l'import, créer dans n8n l'identifiant **Header Auth** `RAG API - ADMIN_TOKEN` (*Name* `Authorization`, *Value* `Bearer <ADMIN_TOKEN>`, domaine autorisé `rag-api`) : les nœuds HTTP l'utilisent, et le jeton n'est écrit dans aucun workflow (§16.7).
+
+Importer ensuite par **Import from File**, puis sélectionner dans chaque nœud l'identifiant Header Auth et l'identifiant SMTP, et renseigner les adresses (`<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>`). Les workflows sont importés désactivés : les activer une fois vérifiés.
+
+Pour remplacer un workflow existant sans en créer un second : ouvrir l'existant, sélectionner tous les nœuds, les supprimer, puis coller le contenu du fichier sur le canevas.
 
 ---
 

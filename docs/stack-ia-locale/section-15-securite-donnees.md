@@ -15,9 +15,9 @@ description: "Protection des données de la stack RAG : clé d'API Qdrant, chiff
 
 # §15 Sécurité des données
 
-[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md)
+[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
 
-**Statut :** clé d'API Qdrant et chiffrement des données au repos validés en lab sur VM-RAG-LAB, octobre 2026, y compris un arrêt brutal de l'hôte. Sauvegardes chiffrées : exigence documentée, **non validée en lab**.
+**Statut :** clé d'API Qdrant, chiffrement des données au repos, et déplacement des secrets et des clés sur le disque chiffré validés en lab sur VM-RAG-LAB, octobre 2026, y compris un arrêt brutal de l'hôte et un redémarrage complet. Sauvegardes chiffrées : exigence documentée, **non validée en lab**.
 
 ---
 
@@ -33,6 +33,8 @@ description: "Protection des données de la stack RAG : clé d'API Qdrant, chiff
 | Open WebUI | `/root/rag-stack/openwebui_data` | Comptes, **historique des conversations** : les réponses citent les documents |
 | n8n | `/root/rag-stack/n8n_data` | Identifiants (SMTP), workflows avec jetons |
 | Journaux | `/var/log/rag` | Empreintes des questions, noms et chemins des documents consultés |
+| Secrets | `/root/rag-stack/.env` | Mots de passe LDAP et SMB, jetons, clé Qdrant, clé des empreintes |
+| Clés privées | `/etc/rag-certs` | Identités des applications Entra, dont celle qui peut déchiffrer tout le contenu protégé du tenant (§14) |
 
 L'historique d'Open WebUI est souvent oublié : une réponse qui cite un contrat est enregistrée en clair dans sa base. Sa durée de conservation est à définir dans la politique nLPD de l'organisation.
 
@@ -187,6 +189,8 @@ docker compose up -d
 
 Valider (compteurs de chunks identiques, historique Open WebUI présent, synchronisation n8n réussie, redémarrage complet sans intervention), **puis seulement** supprimer les dossiers `.ancien`.
 
+Pour une **nouvelle** installation, cette migration n'a pas lieu d'être : le disque chiffré et les liens sont préparés avant le déploiement (§1.5).
+
 > **Limite :** la suppression ne garantit pas l'effacement des anciens blocs du disque système, et `fstrim` peut rester sans effet selon la couche de stockage. C'est pourquoi le chiffrement au repos doit être mis en place **avant** l'indexation de contenus sensibles, en particulier avant §14.
 
 ### §15.3.5 Validation
@@ -200,7 +204,30 @@ docker compose -f /root/rag-stack/docker-compose.yml ps   # tous les conteneurs 
 
 Dans le lab, la configuration a aussi passé un **arrêt brutal de l'hôte** : au redémarrage, le TPM a déverrouillé le disque, la stack est repartie seule, et aucune erreur de système de fichiers n'a été signalée.
 
-### §15.3.6 Pièges rencontrés
+### §15.3.6 Secrets et clés privées
+
+Chiffrer les données sans chiffrer les secrets laisse sur le disque système de quoi y accéder : le `.env` et les clés privées des applications Entra. Le lab l'a constaté après coup : `.env` et `/etc/rag-certs` étaient restés sur le disque système, et le `.env` était lisible par tous les comptes de la VM (`644`).
+
+```bash
+chmod 600 /root/rag-stack/.env              # avant le déplacement : mv conserve les droits
+cd /root/rag-stack && docker compose down
+mkdir -p /srv/rag-donnees/secrets && chmod 700 /srv/rag-donnees/secrets
+mv /root/rag-stack/.env /srv/rag-donnees/secrets/.env
+ln -s /srv/rag-donnees/secrets/.env /root/rag-stack/.env
+mv /etc/rag-certs /srv/rag-donnees/secrets/rag-certs        # conserve propriétaires et droits
+ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ls -l /root/rag-stack/.env /etc/rag-certs
+ls -ln /srv/rag-donnees/secrets/ /srv/rag-donnees/secrets/rag-certs/
+docker compose up -d
+```
+
+Attendu : deux liens vers `/srv/rag-donnees/secrets/`, le `.env` en `-rw-------`, les clés en `-rw-------` (la clé de `mip-service` appartenant à `10001`). Le dossier `secrets` en `700` ne gêne pas `mip-service` : Docker monte le fichier de clé directement dans le conteneur, où seuls les droits du fichier comptent.
+
+Valider par une synchronisation (qui lit les clés SharePoint et Purview), une synthèse Teams, puis un redémarrage complet de la VM. La même limite qu'en §15.3.4 s'applique : les anciens blocs restent sur le disque système. C'est la raison de §1.5.
+
+> **Le `.env` est lu par Docker Compose, pas par les applications**, et seulement à la **création** des conteneurs. Après une modification du `.env`, `docker compose up -d <service>` recrée le conteneur avec les nouvelles valeurs ; `docker compose restart` et `docker restart` redémarrent l'ancien conteneur, **avec les anciennes valeurs**, sans aucun message. Pour vérifier sans afficher le secret : `docker exec rag-api printenv ADMIN_TOKEN | cut -c1-8`, à comparer au début de la valeur du `.env`.
+
+### §15.3.7 Pièges rencontrés
 
 | Piège | Symptôme | Correction |
 |---|---|---|
@@ -209,6 +236,7 @@ Dans le lab, la configuration a aussi passé un **arrêt brutal de l'hôte** : a
 | `rsync` sans `-S` | Qdrant multiplié par sept sur le nouveau disque | `rsync -aHAXS` |
 | Noms NVMe inversés | Risque de formater le mauvais disque | `lsblk` juste avant, UUID partout ailleurs |
 | Commandes collées avec une saisie de mot de passe | Les lignes suivantes lues comme la phrase | Lancer la commande seule |
+| `docker compose restart` après une modification du `.env` | Ancienne valeur toujours active, sans erreur | `docker compose up -d <service>` (§15.3.6) |
 
 ---
 
@@ -253,12 +281,13 @@ Les sauvegardes doivent être chiffrées avant de quitter le serveur, avec une c
 | Clés LUKS | `cryptsetup luksDump` | Deux emplacements (phrase, TPM), jeton `systemd-tpm2` |
 | Phrase de secours | Gestionnaire de mots de passe | Enregistrée, testée avec `rag-deverrouiller` |
 | Données migrées | `grep rag-donnees docker-compose.yml`, `findmnt /var/log/rag` | Trois volumes et les journaux sur le disque chiffré |
+| Secrets et clés | `ls -l /root/rag-stack/.env /etc/rag-certs` | Liens vers le disque chiffré, `.env` en `600`, clés en `600` |
 | Démarrage | Redémarrage sans intervention | Disque monté, conteneurs démarrés |
 | Anciennes données | `ls /root/rag-stack`, `docker volume ls` | Plus de copie en clair, aucun reste de composant abandonné |
 | Sauvegardes | Procédure de l'organisation | Chiffrées, restauration testée |
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md)
+[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

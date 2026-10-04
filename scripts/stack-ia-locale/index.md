@@ -67,7 +67,9 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `mip-service/` | Service de déchiffrement Purview (.NET 8, SDK MIP, Ubuntu 24.04) : `/dechiffrer`, `/droits` | Conteneur `mip-service`, profil Compose `purview`, voir §14 |
 | [`../purview/`](../purview/) | Sonde de déchiffrement, tests de `mip-service` | Voir §14.7 du guide |
 | [`../sharepoint/`](../sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
-| `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris | Sur le serveur de fichiers, voir §5.2.4 du guide |
+| `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris ; affiche et contrôle les permissions du partage | Sur le serveur de fichiers, voir §5.2.4 et §16.5 du guide |
+| `test_cloisonnement.py` | Test de non-divulgation : mode accès (filtres, quelques secondes) ou complet (questions) | Dans le conteneur `rag-api`, voir §16 |
+| `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
 

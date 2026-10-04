@@ -34,7 +34,8 @@ Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entrepr
 - §12 : synthèse des réunions Teams. La transcription est récupérée via Graph, résumée par le modèle local et envoyée en brouillon à l'organisateur seul. Traitement limité aux organisateurs membres d'un groupe d'adhésion.
 - §13 : connecteur SharePoint Online. Les documents sont indexés avec leurs permissions SharePoint, traduites en identifiants Entra : chaque utilisateur n'interroge que ce qu'il peut ouvrir dans SharePoint. Application en `Sites.Selected`, accordée site par site.
 - §14 : documents protégés par Purview. Déchiffrement par un service interne, et double condition à chaque question : permissions SharePoint et droits de l'étiquette, évalués par Purview lui-même.
-- §15 : sécurité des données. Clé d'API Qdrant, chiffrement des données au repos avec déverrouillage par TPM, sauvegardes.
+- §15 : sécurité des données. Clé d'API Qdrant, chiffrement des données au repos avec déverrouillage par TPM, secrets et clés sur le disque chiffré, sauvegardes.
+- §16 : contrôle du cloisonnement. Test de non-divulgation automatisé, rejoué après chaque synchronisation avec alerte par courriel, et durcissement de la stack à la suite d'une revue externe.
 - À venir : gouvernance.
 
 Les versions validées sont publiées sous forme de [Releases](https://github.com/doit4everyone/ia-locale-pme-suisse/releases). La Release v2.12.0 fige les scripts des Parties 1 et 2.
@@ -65,9 +66,9 @@ ia-locale-pme-suisse/
 ├── index.md                    ← page d'accueil GitHub Pages
 ├── CHANGELOG.md                ← renvoi vers le journal détaillé
 ├── docs/
-│   └── stack-ia-locale/        ← guide de déploiement (§0 à §15)
+│   └── stack-ia-locale/        ← guide de déploiement (§0 à §16)
 │       ├── index.md
-│       ├── section-00-quickstart.md … section-15-securite-donnees.md
+│       ├── section-00-quickstart.md … section-16-cloisonnement.md
 │       └── CHANGELOG.md        ← journal détaillé des modifications
 ├── guides/                     ← guides décisionnels
 └── scripts/

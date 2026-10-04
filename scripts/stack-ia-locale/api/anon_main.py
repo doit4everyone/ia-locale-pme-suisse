@@ -475,9 +475,14 @@ async def search_qdrant(query: str, top_k: int = TOP_K, user_groups: list[str] =
             )
 
         return chunks
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Qdrant non disponible ou collection vide : {e}")
-        return []
+        # Une panne (Qdrant, embedding) ne doit pas se présenter comme
+        # « aucun document trouvé » : l'utilisateur conclurait à tort que
+        # l'information n'existe pas.
+        logger.error(f"[RECHERCHE] Échec de la recherche documentaire : {e}")
+        raise HTTPException(status_code=503, detail="Recherche documentaire temporairement indisponible")
 
 
 def enrichir_citations(answer: str, chunks: list[dict]) -> str:
@@ -491,25 +496,40 @@ def enrichir_citations(answer: str, chunks: list[dict]) -> str:
     """
     if not chunks:
         return answer
-    source_map: dict[str, str] = {}
+    # Lieux par nom de fichier : deux documents de même nom dans des dossiers
+    # différents (RH/procedure.pdf et DIRECTION/procedure.pdf) sont tous deux
+    # signalés, au lieu d'attribuer la citation au premier trouvé.
+    lieux: dict[str, list[str]] = {}
     for chunk in chunks:
         source = chunk["source"]
         fname = source.split("/")[-1]
-        if fname in source_map:
-            continue
         if source.startswith("SharePoint/"):
             parties = source.split("/")
             dossier = "/".join(parties[3:-1])
             lieu = f"SharePoint, site {parties[1]}, {parties[2]}" + (f"/{dossier}" if dossier else "")
             url = chunk.get("web_url", "")
-            source_map[fname] = f"[{fname} : {lieu}]({url})" if url else f"[{fname} : {lieu}]"
+            texte = f"[{lieu}]({url})" if url else lieu
         elif SMB_SHARE:
             unc_base = SMB_SHARE.replace("/", "\\")
             parent = "/".join(source.split("/")[:-1])
             unc_folder = unc_base + "\\" + parent.replace("/", "\\")
-            source_map[fname] = f"[{fname} : `{unc_folder}\\`]"
-    if not source_map:
+            texte = f"`{unc_folder}\\`"
+        else:
+            continue
+        if texte not in lieux.setdefault(fname, []):
+            lieux[fname].append(texte)
+    if not lieux:
         return answer
+    source_map: dict[str, str] = {}
+    for fname, liste in lieux.items():
+        if len(liste) == 1 and liste[0].startswith("[") and "](" in liste[0]:
+            # Un seul emplacement SharePoint avec lien : forme d'origine
+            lieu, url = liste[0][1:].split("](", 1)
+            source_map[fname] = f"[{fname} : {lieu}]({url[:-1]})"
+        elif len(liste) == 1:
+            source_map[fname] = f"[{fname} : {liste[0]}]"
+        else:
+            source_map[fname] = f"[{fname} : plusieurs documents de ce nom : " + " ; ".join(liste) + "]"
 
     def _replace(m):
         return source_map.get(m.group(1), m.group(0))
@@ -585,18 +605,20 @@ def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
     """
     import re
     sources_reelles = {c["source"] for c in chunks}
-    prefixes_reels = {os.path.splitext(s)[0] for s in sources_reelles}
+    # Le modèle cite le nom de fichier affiché en en-tête de chaque chunk :
+    # comparaison exacte sur le chemin complet ou sur le nom de fichier,
+    # jamais par sous-chaîne (« contrat.docx » ne doit pas valider « avenant_contrat.docx »).
+    noms_reels = {s.split("/")[-1] for s in sources_reelles}
+    prefixes_reels = {os.path.splitext(n)[0] for n in noms_reels} | {os.path.splitext(s)[0] for s in sources_reelles}
     citees = set(re.findall(r'\[([^\]]{5,100})\]', answer))
 
     inventees = []
     for citee in citees:
         citee_clean = re.sub(r'^Document\s+\d+\s*:\s*', '', citee).strip()
-        if citee_clean in sources_reelles:
+        if citee_clean in sources_reelles or citee_clean in noms_reels:
             continue
         citee_sans_ext = os.path.splitext(citee_clean)[0]
         if citee_sans_ext in prefixes_reels:
-            continue
-        if any(citee_clean in s or s in citee_clean for s in sources_reelles):
             continue
         if '.' not in citee_clean and '_' not in citee_clean:
             continue
@@ -698,8 +720,34 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                 result["ancree"] = False
             return result
     except Exception as e:
+        # Fail-closed : une vérification impossible n'est pas une vérification réussie.
         logger.warning(f"Groundedness check échoué : {e}")
-        return {"ancree": True, "affirmations_non_sourcees": [], "juge_error": str(e)}
+        return {"ancree": False, "affirmations_non_sourcees": [], "juge_error": str(e)}
+
+
+# Valeurs d'exemple restées en place : avertissement bien visible au démarrage.
+# (Un refus de démarrer casserait une stack en service ; deploy.sh génère des
+# valeurs aléatoires, le risque concerne surtout les installations manuelles.)
+for _nom in ("API_TOKEN", "ADMIN_TOKEN", "QDRANT_API_KEY", "MIP_TOKEN", "LDAP_BIND_PWD", "SMB_PASSWORD"):
+    _val = os.getenv(_nom, "")
+    if _val.lower().startswith("changeme") or _val.startswith("<") or (_nom in ("API_TOKEN", "ADMIN_TOKEN") and not _val):
+        logger.error(f"[SÉCURITÉ] {_nom} est vide ou garde une valeur d'exemple (changeme, <...>) : "
+                     f"à remplacer dans le .env (openssl rand -hex 32), puis docker compose up -d rag-api")
+
+LOG_HMAC_KEY = os.getenv("LOG_HMAC_KEY", "")
+if not LOG_HMAC_KEY:
+    logger.warning("[JOURNAL] LOG_HMAC_KEY absente : empreintes SHA-256 sans clé, "
+                   "une question courte pourrait être retrouvée par dictionnaire")
+
+
+def empreinte(texte: str) -> str:
+    """Empreinte d'un texte pour le journal : HMAC-SHA256 avec une clé secrète,
+    pour qu'une question courte ne puisse pas être retrouvée en essayant
+    toutes les questions plausibles. Sans clé : SHA-256 (comportement antérieur)."""
+    import hmac
+    if LOG_HMAC_KEY:
+        return "hmac:" + hmac.new(LOG_HMAC_KEY.encode(), texte.encode(), hashlib.sha256).hexdigest()[:32]
+    return hashlib.sha256(texte.encode()).hexdigest()[:16]
 
 
 def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_error: str = ""):
@@ -707,13 +755,13 @@ def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_e
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
-        "question_hash": hashlib.sha256(query.encode()).hexdigest()[:16],
+        "question_hash": empreinte(query),
         "sources_accessed": list(dict.fromkeys(c["source"] for c in chunks)),
         "ancree": ancree,
     }
     if juge_error:
         entry["juge_error"] = juge_error
-        entry["verification"] = "non_effectuee"
+        entry["verification"] = "erreur"
     else:
         entry["verification"] = "effectuee"
     try:
@@ -728,11 +776,14 @@ def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_e
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "llm": LLM_BASE_URL, "model": LLM_MODEL}
+    # Sans détail interne (adresse du moteur, modèle) : réponse publique minimale.
+    return {"status": "ok"}
 
 
 @app.get("/stats")
-async def stats():
+async def stats(credentials: HTTPAuthorizationCredentials = Security(security)):
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Token invalide")
     try:
         collections = qdrant.get_collections()
         col_names = [c.name for c in collections.collections]
@@ -795,7 +846,8 @@ async def query(
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "Réponse non ancrée dans les sources",
+                "error": ("Vérification de l'ancrage impossible" if gc_result.get("juge_error")
+                          else "Réponse non ancrée dans les sources"),
                 "affirmations_non_sourcees": gc_result.get("affirmations_non_sourcees", []),
                 "reponse_bloquee": answer
             }
@@ -903,6 +955,14 @@ async def openai_chat_completions(
 
     # enrichir_citations après tous les contrôles (même logique que /query).
     answer = enrichir_citations(answer, chunks)
+    # /v1 rend la réponse (compatibilité Open WebUI), mais ne la présente plus
+    # comme contrôlée quand elle ne l'est pas.
+    if gc_result.get("juge_error"):
+        answer += ("\n\n*Vérification automatique indisponible pour cette réponse : "
+                   "contrôlez-la dans les documents cités.*")
+    elif not gc_result.get("ancree", True):
+        answer += ("\n\n*Attention : le contrôle automatique n'a pas pu rattacher toutes les "
+                   "affirmations de cette réponse aux documents. Vérifiez-les dans les sources citées.*")
     return OpenAIChatResponse(
         choices=[OpenAIChoice(
             message=OpenAIMessage(role="assistant", content=answer)
@@ -931,8 +991,8 @@ def log_teams(organisateur: str, titre: str, vtt: str, nb_participants: int,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "type": "teams_summary",
         "organisateur": organisateur,
-        "titre_hash": hashlib.sha256(titre.encode()).hexdigest()[:16] if titre else "",
-        "transcription_hash": hashlib.sha256(vtt.encode()).hexdigest()[:16],
+        "titre_hash": empreinte(titre) if titre else "",
+        "transcription_hash": empreinte(vtt),
         "participants": nb_participants,
         "alertes": len(alertes),
     }
@@ -1061,6 +1121,123 @@ async def teams_sync(credentials: HTTPAuthorizationCredentials = Security(securi
 # ─────────────────────────────────────────
 # Endpoint d'administration : synchronisation corpus
 # ─────────────────────────────────────────
+
+class VerifAccesRequest(BaseModel):
+    user_id: str
+    document: str           # chemin source exact, ou fragment unique du chemin
+
+
+def _scroll_tout(collection: str, scroll_filter=None) -> list:
+    """Parcourt une collection entière (avec ou sans filtre). Usage administratif."""
+    points, offset = [], None
+    while True:
+        lot, offset = qdrant.scroll(
+            collection_name=collection, scroll_filter=scroll_filter, limit=256, offset=offset,
+            with_payload=["source", "autorises", "interdits", "chiffre",
+                          "mip_etiquette_id", "mip_proprietaire"],
+            with_vectors=False,
+        )
+        points.extend(lot)
+        if offset is None:
+            return points
+
+
+async def calculer_acces(user_id: str, document: str) -> dict:
+    """
+    Combien de chunks du document sont accessibles à cet utilisateur, après
+    EXACTEMENT les filtres de la recherche (filtre Qdrant sur autorises[],
+    DENY par check_access, puis Purview). Ni classement, ni génération.
+    Lève PermissionError si les droits de l'utilisateur ne peuvent être résolus.
+    """
+    user_groups = get_user_groups(user_id)
+    if not user_groups:
+        raise PermissionError("Résolution des droits impossible")
+    filtre = Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=user_groups))])
+    total, apres_acl, accessibles, sources = 0, 0, 0, set()
+    for collection in (COLLECTION, DOCUMENTATION_COLLECTION):
+        try:
+            tous = _scroll_tout(collection)
+            filtres = _scroll_tout(collection, filtre)
+        except Exception:
+            continue  # collection absente
+        total += sum(1 for p in tous if document in p.payload.get("source", ""))
+        candidats = []
+        for p in filtres:
+            if document not in p.payload.get("source", ""):
+                continue
+            # Seconde partie de la première condition : DENY prioritaire
+            if not check_access(user_groups, p.payload.get("autorises", []), p.payload.get("interdits", [])):
+                continue
+            candidats.append({"source": p.payload.get("source", ""), **champs_purview(p.payload)})
+        apres_acl += len(candidats)
+        # Seconde condition : Purview
+        gardes = await filtrer_purview(candidats, user_id)
+        accessibles += len(gardes)
+        sources.update(c["source"] for c in gardes)
+    return {"user_id": user_id, "groupes": len(user_groups), "document": document,
+            "chunks_total": total, "chunks_apres_acl": apres_acl,
+            "chunks_accessibles": accessibles, "sources": sorted(sources)}
+
+
+@app.post("/admin/verifier-acces")
+async def verifier_acces(
+    request: VerifAccesRequest,
+    credentials: HTTPAuthorizationCredentials = Security(security)
+):
+    """Test de cloisonnement déterministe pour un utilisateur et un document.
+    Réservé à ADMIN_TOKEN."""
+    if credentials.credentials != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Token invalide")
+    if "@" not in request.user_id or not request.document:
+        raise HTTPException(status_code=400, detail="user_id (email) et document requis")
+    try:
+        res = await calculer_acces(request.user_id, request.document)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    logger.info(f"[VERIF] {request.user_id} / {request.document} : "
+                f"{res['chunks_accessibles']} chunk(s) accessible(s) sur {res['chunks_total']}")
+    return res
+
+
+CAS_CLOISONNEMENT = os.getenv("CAS_CLOISONNEMENT", "/rag-pipeline/cas_cloisonnement.json")
+
+
+async def controle_cloisonnement() -> dict | None:
+    """
+    Rejoue les cas de cloisonnement (mode « accès ») après une synchronisation.
+    Fichier absent : contrôle non configuré, None. Les verdicts sont ceux de
+    test_cloisonnement.py : FUITE, REFUS À TORT, ABSENT (cas invalide), ERREUR.
+    """
+    if not os.path.isfile(CAS_CLOISONNEMENT):
+        return None
+    try:
+        cfg = json.load(open(CAS_CLOISONNEMENT, encoding="utf-8"))
+    except Exception as e:
+        return {"cas": 0, "ok": 0, "fuites": [], "refus_a_tort": [], "absents": [],
+                "erreurs": [f"Fichier de cas illisible : {e}"]}
+    res = {"cas": 0, "ok": 0, "fuites": [], "refus_a_tort": [], "absents": [], "erreurs": []}
+    for cas in cfg.get("cas", []):
+        for compte in cfg.get("comptes", []):
+            attendu = cas.get("attendu", {}).get(compte, "?")
+            if attendu == "?":
+                continue
+            res["cas"] += 1
+            libelle = f"{cas['id']} / {compte}"
+            try:
+                a = await calculer_acces(compte, cas["document"])
+            except Exception as e:
+                res["erreurs"].append(f"{libelle} : {e}")
+                continue
+            if a["chunks_total"] == 0:
+                res["absents"].append(libelle)
+            elif attendu is False and a["chunks_accessibles"] > 0:
+                res["fuites"].append(libelle)
+            elif attendu is True and a["chunks_accessibles"] == 0:
+                res["refus_a_tort"].append(libelle)
+            else:
+                res["ok"] += 1
+    return res
+
 
 @app.post("/admin/sync")
 async def admin_sync(
@@ -1292,5 +1469,20 @@ async def admin_sync(
             build_bm25_index()
         except Exception as e:
             logger.error(f"[SYNC] Reconstruction BM25 échouée : {e}")
+
+        # Contrôle de cloisonnement sur l'index qui vient d'être mis à jour
+        try:
+            cl = await controle_cloisonnement()
+        except Exception as e:
+            cl = {"cas": 0, "ok": 0, "fuites": [], "refus_a_tort": [], "absents": [],
+                  "erreurs": [f"Contrôle impossible : {e}"]}
+        if cl is not None:
+            rapport["cloisonnement"] = cl
+            rapport["cloisonnement_alerte"] = bool(
+                cl["fuites"] or cl["refus_a_tort"] or cl["absents"] or cl["erreurs"])
+            niveau = logger.error if cl["fuites"] else logger.info
+            niveau(f"[CLOISONNEMENT] {cl['ok']}/{cl['cas']} conformes, "
+                   f"fuites={len(cl['fuites'])}, refus à tort={len(cl['refus_a_tort'])}, "
+                   f"absents={len(cl['absents'])}, erreurs={len(cl['erreurs'])}")
 
         return rapport

@@ -26,7 +26,7 @@ Les procédures sont publiées après validation en lab, sur l'environnement de 
 | Partie | Contenu | Sections |
 |---|---|---|
 | Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
-| Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données. À venir : gouvernance | §11 à §15 |
+| Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement. À venir : gouvernance | §11 à §16 |
 | Mesures et benchmarks | Validation complète et mesures de performance, après l'installation du GPU | §10 (à venir) |
 
 Les scripts et workflows correspondants sont publiés dans [scripts](../scripts/).

@@ -17,6 +17,8 @@
   4. Vérifie, fichier par fichier, que le groupe a bien la lecture partout.
   5. Liste les autres groupes du compte de service : une fois la lecture en
      place, ils ne sont plus nécessaires à l'indexation.
+  6. Affiche les permissions du partage SMB et signale un partage plus
+     restrictif que les NTFS : le RAG n'applique que les NTFS.
 
   Le périmètre de l'indexation devient ainsi explicite : ce sont les dossiers
   où le groupe a la lecture, et rien d'autre.
@@ -185,6 +187,48 @@ if ($moduleAD) {
     }
 }
 
+# ─────────────────────────────────────────
+# 6. Permissions du partage (lecture seule, dans les deux modes)
+# ─────────────────────────────────────────
+# Le RAG ne lit que les permissions NTFS. Sous Windows, l'accès réseau exige
+# AUSSI les permissions du partage. Si le partage est plus restrictif que les
+# NTFS, le RAG ouvre plus que le réseau : à signaler.
+Write-Host "`nPermissions du partage :"
+$racineNorm = $Racine.TrimEnd('\')
+# Les partages administratifs (C$, D$, ADMIN$), réservés aux administrateurs,
+# couvrent tout le volume : ils sont ignorés, ils ne servent pas aux utilisateurs.
+$partages = Get-SmbShare -ErrorAction SilentlyContinue | Where-Object {
+    -not $_.Special -and $_.Name -notlike '*$' -and
+    $_.Path -and ($racineNorm -ieq $_.Path.TrimEnd('\') -or $racineNorm -ilike ($_.Path.TrimEnd('\') + '\*'))
+}
+$partageRestreint = $false
+if (-not $partages) {
+    Write-Warning "Aucun partage SMB trouvé pour $Racine : vérifier manuellement (Get-SmbShare)."
+} else {
+    $ouverts = @('Everyone', 'Tout le monde', 'Authenticated Users', 'Utilisateurs authentifiés',
+                 'Domain Users', 'Utilisateurs du domaine')
+    foreach ($p in $partages) {
+        $acces = Get-SmbShareAccess -Name $p.Name
+        foreach ($a in $acces) {
+            Write-Host ("  {0,-12} {1,-45} {2,-6} {3}" -f $p.Name, $a.AccountName, $a.AccessControlType, $a.AccessRight)
+        }
+        $large = $acces | Where-Object {
+            $_.AccessControlType -eq 'Allow' -and $_.AccessRight -in @('Full', 'Change', 'Read') -and
+            ($ouverts -contains ($_.AccountName -split '\\')[-1])
+        }
+        $refus = $acces | Where-Object { $_.AccessControlType -eq 'Deny' }
+        if (-not $large -or $refus) {
+            $partageRestreint = $true
+            Write-Warning (("Partage {0} : restreint à certains comptes, ou avec des refus. Le RAG applique " +
+                           "les seules permissions NTFS : un utilisateur exclu par le partage mais autorisé " +
+                           "par les NTFS pourrait interroger ces documents. Aligner le partage sur une " +
+                           "ouverture large (restriction par les NTFS), ou restreindre les NTFS d'autant.") -f $p.Name)
+        } else {
+            Write-Host "  → ouverture large, restriction par les NTFS : configuration attendue par le RAG." -ForegroundColor Green
+        }
+    }
+}
+
 Write-Host ""
 if ($Verifier) {
     Write-Host "Vérification terminée : aucune modification." -ForegroundColor Cyan
@@ -193,3 +237,4 @@ if ($Verifier) {
     Write-Host "Sur la VM : remonter le partage (la session SMB garde l'ancien jeton du compte), puis /admin/sync."
 }
 if ($sansAcces.Count -gt 0) { exit 2 }
+if ($partageRestreint) { exit 3 }

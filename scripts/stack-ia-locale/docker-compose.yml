@@ -40,6 +40,8 @@ services:
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - LOG_HMAC_KEY=${LOG_HMAC_KEY}
+      - CAS_CLOISONNEMENT=${CAS_CLOISONNEMENT}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000 sur DGX Spark)
       # EMBED_BASE_URL : embeddings. Doit correspondre au service qui a servi
@@ -173,6 +175,9 @@ services:
       - "3001:8080"
     environment:
       - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+      # Les utilisateurs ne doivent voir que la RAG API (§16.7). Lue au premier
+      # démarrage seulement : ensuite, le réglage se fait dans l'interface.
+      - ENABLE_OLLAMA_API=false
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}

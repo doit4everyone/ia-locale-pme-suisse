@@ -142,6 +142,7 @@ ADMIN_TOKEN="${ADMIN_TOKEN_INPUT:-$(openssl rand -hex 32)}"
 
 WEBUI_SECRET_KEY="$(openssl rand -hex 32)"
 QDRANT_API_KEY="$(openssl rand -hex 32)"
+LOG_HMAC_KEY="$(openssl rand -hex 32)"
 MIP_TOKEN="$(openssl rand -hex 32)"
 
 echo ""
@@ -201,6 +202,18 @@ done
 # ─────────────────────────────────────────
 info "Étape 2 : creation des répertoires..."
 
+# Le disque de données chiffré doit être prêt AVANT le déploiement (§1.5) :
+# sinon, .env, clés et données sont écrits en clair sur le disque système.
+if ! mountpoint -q /srv/rag-donnees 2>/dev/null || [ ! -L /root/rag-stack/.env ]; then
+    warn "Disque de données chiffré non préparé (/srv/rag-donnees non monté, ou liens de §1.5 absents)."
+    warn "Les secrets et les données seraient écrits en clair sur le disque système."
+    printf "Continuer quand même ? (o/N) : "
+    read -r CONTINUER_SANS_CHIFFREMENT
+    [[ "$CONTINUER_SANS_CHIFFREMENT" =~ ^[oO]$ ]] || error "Déploiement interrompu : préparer d'abord le disque chiffré (§1.5)."
+else
+    ok "Disque de données chiffré monté, liens en place"
+fi
+
 mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
@@ -232,6 +245,12 @@ else
 fi
 if [ -f "sp_indexer.py" ]; then
     cp sp_indexer.py /root/rag-pipeline/sp_indexer.py
+fi
+# Test de cloisonnement (§16) : l'exemple de cas est à adapter, puis à copier
+# en cas_cloisonnement.json pour activer le contrôle après chaque synchronisation.
+if [ -f "test_cloisonnement.py" ]; then
+    cp test_cloisonnement.py /root/rag-pipeline/test_cloisonnement.py
+    [ -f cas_cloisonnement.exemple.json ] && cp cas_cloisonnement.exemple.json /root/rag-pipeline/
 fi
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
 if [ -d "mip-service" ]; then
@@ -269,6 +288,8 @@ JUDGE_KEEP_ALIVE=2h
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
 QDRANT_API_KEY=${QDRANT_API_KEY}
+LOG_HMAC_KEY=${LOG_HMAC_KEY}
+CAS_CLOISONNEMENT=/rag-pipeline/cas_cloisonnement.json
 DOCUMENTATION_COLLECTION=documentation
 DOCUMENTATION_PATHS=${DOCUMENTATION_PATHS}
 

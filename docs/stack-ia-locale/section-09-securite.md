@@ -291,7 +291,7 @@ Chaque requête RAG est journalisée dans `/var/log/rag/rag-queries.jsonl` :
 {
   "timestamp": "2026-09-11T16:49:07Z",
   "user_id": "admin@votre-domaine.ch",
-  "question_hash": "85136820969d55d3",
+  "question_hash": "hmac:bf965253125af66f6dd34b28020b6f7b",
   "sources_accessed": [
     "RH/POLITIQUE RH/10_Politique_RH_v3.1.docx",
     "DIRECTION/02_PV_CA_Mars_2026.docx"
@@ -301,13 +301,13 @@ Chaque requête RAG est journalisée dans `/var/log/rag/rag-queries.jsonl` :
 }
 ```
 
-> **Champs du log :** `verification` vaut `"effectuee"` sauf échec de l'appel au juge (timeout, erreur réseau), auquel cas il vaut `"non_effectuee"` et `juge_error` est aussi présent. Note : `"effectuee"` inclut les cas où un contrôle déterministe a tranché sans appeler le juge (refus standard, absence de chunks, réponse longue sans citation). La combinaison `"ancree": true` avec `"verification": "non_effectuee"` sans `juge_error` n'est jamais produite par le code.
+> **Champs du log :** `verification` vaut `"effectuee"` sauf échec de l'appel au juge (timeout, erreur réseau), auquel cas il vaut `"erreur"`, `ancree` vaut `false` et `juge_error` est aussi présent : une vérification impossible n'est pas une vérification réussie (§16.6). Jusqu'à la v2.16, ce cas produisait `"non_effectuee"` avec `ancree` à `true`. Note : `"effectuee"` inclut les cas où un contrôle déterministe a tranché sans appeler le juge (refus standard, absence de chunks, réponse longue sans citation).
 
 | Champ | Contenu | Conformité nLPD |
 |---|---|---|
 | `timestamp` | Horodatage UTC précis | Traçabilité temporelle |
 | `user_id` | Email AD de l'utilisateur | Identification de l'auteur |
-| `question_hash` | SHA-256 tronqué de la question | Question non exposée en clair |
+| `question_hash` | Empreinte HMAC-SHA256 de la question, avec la clé secrète `LOG_HMAC_KEY` (préfixe `hmac:`) ; SHA-256 tronqué si la clé est absente | Question non exposée en clair, et non retrouvable par dictionnaire sans la clé (§16.6) |
 | `sources_accessed` | Documents consultés, dédupliqués | Traçabilité des accès |
 | `ancree` | Résultat du contrôle d'ancrage | Qualité de la réponse |
 

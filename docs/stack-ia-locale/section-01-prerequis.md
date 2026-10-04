@@ -120,6 +120,43 @@ Versions validées sur cette configuration : **Docker 29.7.2**, **Docker Compose
 
 ---
 
+## §1.5 Disque de données chiffré, avant le déploiement
+
+**Statut :** principe et procédure de chiffrement validés en lab (§15.3) ; préparation **avant** le premier déploiement à valider sur une VM neuve.
+
+La stack stocke des extraits de tous les documents indexés, l'historique des conversations, des identifiants et les clés privées des applications Entra. Tout cela doit être sur un disque chiffré **dès sa création** : un chiffrement ajouté après coup laisse des copies en clair sur le disque système, que la suppression n'efface pas (§15.3.4). Le disque chiffré se prépare donc **ici**, avant `deploy.sh`, avant que le `.env` et les clés n'existent.
+
+| Plateforme | Solution | État |
+|---|---|---|
+| VM (Hyper-V, VMware, Proxmox) | Second disque virtuel, LUKS2, déverrouillage par TPM virtuel | Validé en lab |
+| Serveur physique à deux disques | Même procédure sur le second disque, TPM matériel | Non testé sur matériel |
+| DGX Spark (un seul disque interne) | Partition réservée à l'installation, ou conteneur LUKS dans un fichier | Non validé |
+
+Le déverrouillage automatique exige une machine en **UEFI avec un TPM 2.0**. Selon l'hyperviseur, l'ajout d'un TPM virtuel peut exiger de chiffrer la VM elle-même. Sur le DGX Spark, la possibilité de réserver une partition à l'installation de DGX OS est à vérifier dans la documentation de NVIDIA ; un conteneur LUKS dans un fichier fonctionne sur tout Linux, sans repartitionner, au prix de performances un peu moindres.
+
+**1. Créer, chiffrer et monter le disque** : procédure de §15.3.2 et §15.3.3 (LUKS2, inscription du TPM, `/etc/crypttab`, `/etc/fstab`, condition de démarrage de Docker, script de déverrouillage de secours).
+
+**2. Préparer l'arborescence et les liens**, avant `deploy.sh` :
+
+```bash
+mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/rag-certs}
+chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs
+mkdir -p /root/rag-stack
+for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
+ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env
+ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ln -s /srv/rag-donnees/log-rag           /var/log/rag
+ls -l /root/rag-stack /etc/rag-certs /var/log/rag
+```
+
+`deploy.sh` écrit ensuite le `.env`, les données et les journaux **à travers ces liens**, directement sur le disque chiffré. Les certificats des applications Entra, créés aux sections §11 à §14, iront de même dans `/etc/rag-certs`. Docker ne démarrant qu'avec le disque monté (§15.3.3), un lien sans sa cible ne peut pas se produire en fonctionnement normal.
+
+> **Le groupe `docker` équivaut à root** : un compte qui en est membre peut lire toutes les variables des conteneurs (`docker inspect`) et monter n'importe quel fichier de la VM. N'y ajouter aucun compte ordinaire. La commande `usermod -aG docker $USER` de §1.4, exécutée en root, ne concerne que root.
+
+Pour une installation **existante**, déjà en service : voir la migration de §15.3.4 et §15.3.6.
+
+---
+
 [Suite : §2 Installation et configuration de vLLM](section-02-vllm.md)
 
 ---

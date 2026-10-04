@@ -23,18 +23,11 @@
       "parameters": {
         "method": "POST",
         "url": "http://rag-api:8080/teams/sync",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer <ADMIN_TOKEN>"
-            }
-          ]
-        },
         "options": {
           "timeout": 1800000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -42,7 +35,13 @@
         -448,
         64
       ],
-      "name": "POST /teams/sync"
+      "name": "POST /teams/sync",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "<HEADER_AUTH_CREDENTIAL_ID>",
+          "name": "RAG API - ADMIN_TOKEN"
+        }
+      }
     },
     {
       "parameters": {

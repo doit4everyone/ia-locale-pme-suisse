@@ -24,7 +24,7 @@ Variables d'environnement :
   QDRANT_URL     : URL Qdrant
   COLLECTION     : nom de la collection Qdrant
 
-Validé sur VM-RAG-LAB, septembre 2026
+Validé sur VM-RAG-LAB, septembre et octobre 2026
 
 v4 (Partie 3, compatible v3) :
   - Le nettoyage des orphelins ne concerne que les chunks issus du partage SMB.
@@ -93,14 +93,9 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
 
     Le /I indique une règle héritée. On prend toutes les règles ALLOWED et DENIED.
     """
-    cmd = [
-        "smbcacls",
-        share,
-        chemin_relatif,
-        "-U", SMB_USER,
-        "-W", SMB_DOMAIN,
-        f"--password={SMB_PASSWORD}",
-    ]
+    # Identifiants passés par fichier (-A), jamais sur la ligne de commande :
+    # un argument --password serait visible dans la liste des processus.
+    cmd = ["smbcacls", share, chemin_relatif, "-A", fichier_identifiants()]
 
     try:
         result = subprocess.run(
@@ -116,19 +111,29 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
         autorisés = []
         interdits = []
         for line in result.stdout.splitlines():
-            # Règles ALLOWED
-            m = re.match(r'^ACL:(.+):ALLOWED/', line, re.IGNORECASE)
-            if m:
-                identite = m.group(1).strip()
-                if identite.lower() not in GROUPES_EXCLUS:
-                    autorisés.append(identite)
+            # Format : ACL:<identité>:<ALLOWED|DENIED>/<drapeaux>/<masque>
+            m = re.match(r'^ACL:(.+):(ALLOWED|DENIED)/([^/]*)/(.+)$', line.strip(), re.IGNORECASE)
+            if not m:
                 continue
-            # Règles DENIED : prioritaires sur ALLOWED en NTFS
-            m = re.match(r'^ACL:(.+):DENIED/', line, re.IGNORECASE)
-            if m:
-                identite = m.group(1).strip()
-                if identite.lower() not in GROUPES_EXCLUS:
-                    interdits.append(identite)
+            identite, type_ace, drapeaux, masque = (g.strip() for g in m.groups())
+            if identite.lower() in GROUPES_EXCLUS:
+                continue
+            # Entrée « héritable seulement » (IO) : ne s'applique pas au fichier lui-même
+            if "IO" in drapeaux.upper().split("|"):
+                continue
+            if type_ace.upper() == "ALLOWED":
+                # Seules les entrées qui accordent la lecture du contenu comptent.
+                # Une entrée d'écriture seule (boîte de dépôt) ne doit pas rendre
+                # le fichier interrogeable.
+                if masque_accorde_lecture(masque):
+                    autorisés.append(identite)
+                else:
+                    STATS_MASQUE["allowed_sans_lecture"] += 1
+            else:
+                # Règles DENIED : toutes conservées, quel que soit le masque.
+                # Choix prudent : un refus partiel (écriture seule) rend le fichier
+                # invisible à tort, mais jamais visible à tort.
+                interdits.append(identite)
 
         return autorisés, interdits
 
@@ -138,6 +143,54 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
     except Exception as e:
         print(f"  Erreur inattendue smbcacls : {e}")
         return [], []
+
+
+# Droits NTFS qui donnent la lecture du contenu d'un fichier
+FILE_READ_DATA = 0x00000001
+GENERIC_READ   = 0x80000000
+GENERIC_ALL    = 0x10000000
+STATS_MASQUE = {"allowed_sans_lecture": 0}
+
+
+def masque_accorde_lecture(masque: str) -> bool:
+    """
+    Le masque d'une entrée ALLOWED accorde-t-il la lecture du contenu ?
+    smbcacls affiche soit un nom (READ, CHANGE, FULL), soit des lettres (R, W,
+    X, D, P, O), soit une valeur hexadécimale pour les combinaisons spéciales
+    (par exemple 0x00100116 : écriture seule). Format inconnu : refus.
+    """
+    m = masque.strip().upper()
+    if m in ("READ", "CHANGE", "FULL"):
+        return True
+    if m.startswith("0X"):
+        try:
+            v = int(m, 16)
+        except ValueError:
+            return False
+        return bool(v & (FILE_READ_DATA | GENERIC_READ | GENERIC_ALL))
+    if m and set(m) <= set("RWXDPO"):
+        return "R" in m
+    print(f"  Masque NTFS non reconnu, entrée ignorée : {masque}")
+    return False
+
+
+_FICHIER_IDENTIFIANTS = None
+
+
+def fichier_identifiants() -> str:
+    """Fichier d'identifiants smbcacls (-A), créé une fois, en mémoire si possible,
+    lisible par le seul processus courant, supprimé à la fin du script."""
+    global _FICHIER_IDENTIFIANTS
+    if _FICHIER_IDENTIFIANTS is None:
+        import tempfile, atexit
+        dossier = "/dev/shm" if os.path.isdir("/dev/shm") else None
+        fd, chemin = tempfile.mkstemp(prefix="smb-auth-", dir=dossier)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"username={SMB_USER}\npassword={SMB_PASSWORD}\ndomain={SMB_DOMAIN}\n")
+        os.chmod(chemin, 0o600)
+        atexit.register(lambda: os.path.exists(chemin) and os.remove(chemin))
+        _FICHIER_IDENTIFIANTS = chemin
+    return _FICHIER_IDENTIFIANTS
 
 
 def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
@@ -495,10 +548,12 @@ def resoudre_acl(
                 "fichiers_sans_acl": len(fichiers_sans_acl),
                 "fichiers_non_indexés": len(fichiers_sans_chunks),
                 "sources_orphelines": len(orphelins),
+                "entrees_allowed_sans_lecture": STATS_MASQUE["allowed_sans_lecture"],
             },
             "documents": rapport,
             "orphelins": sorted(orphelins),
         }, f, ensure_ascii=False, indent=2)
+    print(f"Entrées ALLOWED ignorées (sans droit de lecture) : {STATS_MASQUE['allowed_sans_lecture']}")
     print(f"\nRapport sauvegardé : {rapport_path}")
 
 
