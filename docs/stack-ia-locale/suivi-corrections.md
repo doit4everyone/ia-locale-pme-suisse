@@ -58,8 +58,11 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 41 | `/stats` réservé à l'administration, `/health` minimal, panne de Qdrant en erreur 503 | v2.17.0 | 2026-10-03 |
 | 42 | Empreinte HMAC des questions (`LOG_HMAC_KEY`) | v2.17.0 | 2026-10-03 |
 | 43 | Modèles Ollama bruts masqués dans Open WebUI, accès au moteur d'inférence à restreindre au pare-feu (§16.7) | v2.17.0 | 2026-10-03 |
-| 45 | Aucun signal quand un secret garde une valeur d'exemple (`changeme`) : avertissement au démarrage. Constaté en lab : jeton d'administration resté à sa valeur d'exemple | v2.17.0 | 2026-10-04 |
+| 45 | Aucun signal quand un secret garde une valeur d'exemple (`changeme`) : avertissement au démarrage. Constaté en lab : jeton d'administration **et** jeton d'API restés à leur valeur d'exemple ; le second a été signalé par l'avertissement dès son premier démarrage | v2.17.0 | 2026-10-04 |
 | 46 | `.env` lisible par tous les comptes de la VM (`644`) en lab, `.env` et clés privées sur le disque système non chiffré : déplacés sur le disque chiffré (§15.3.6), préparation avant le déploiement (§1.5) | v2.17.0 | 2026-10-04 |
+| 47 | `/v1` ignorait la demande de réponse en flux : Open WebUI `v0.11.3` n'affichait plus rien. Réponse en flux, en un seul fragment, contrôles inchangés (§16.8) | v2.17.1 | 2026-10-04 |
+| 48 | Échec de la résolution Entra présenté comme une absence d'information : mention explicite dans la réponse (§16.9) | v2.17.1 | 2026-10-04 |
+| 49 | Images en `latest` et `main` : versions figées et empreintes documentées (§3.4) ; contrôles automatiques du dépôt par GitHub Actions | v2.17.1 | 2026-10-04 |
 
 ---
 
@@ -169,6 +172,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §9.4 | Format du journal : empreinte HMAC, `verification: erreur` | v2.17.0 |
 | §15.3.6 | Nouveau : secrets et clés sur le disque chiffré, piège de `docker compose restart` | v2.17.0 |
 | §16 | Nouvelle section : contrôle du cloisonnement et durcissement | v2.17.0 |
+| §17 | Nouvelle section : gouvernance | v2.17.1 |
+| §3.4 | Versions figées et empreintes validées | v2.17.1 |
+| §16.8, §16.9 | Mise à jour d'Open WebUI revalidée, perte d'accès signalée | v2.17.1 |
 
 ---
 

@@ -1,7 +1,8 @@
 services:
 
   qdrant:
-    image: qdrant/qdrant:latest
+    # Versions figées, validées en lab (§3.4). Mettre à jour = revalider (§16.8).
+    image: qdrant/qdrant:v1.19.0
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
@@ -16,7 +17,7 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:2.36.9
     container_name: n8n
     ports:
       - "5678:5678"
@@ -167,7 +168,7 @@ services:
     restart: unless-stopped
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.11.3
     container_name: open-webui
     depends_on:
       - rag-api

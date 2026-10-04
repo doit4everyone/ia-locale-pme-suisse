@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.17.1] : Octobre 2026
+
+### Documentation
+
+- `section-17-gouvernance.md` : nouvelle section, qui clôt la Partie 3. Limites de la conformité technique face aux obligations nLPD, matrice des responsabilités, rotation des secrets et certificats avec leurs échéances, politique de corpus, droit d'accès et à l'effacement (jusqu'aux sauvegardes), audit périodique, exigences relevant du passage en production.
+- Index du guide, accueil, `README.md` : §17, Partie 3 complète.
+- `section-03-docker-compose.md` : versions figées et empreintes validées des images (§3.4).
+- `section-16-cloisonnement.md` : §16.8, une mise à jour d'Open WebUI revalidée (réponse en flux exigée) ; §16.9, une perte d'accès doit se dire (échec de la résolution Entra), deux jetons et deux usages ; checklist complétée.
+- `suivi-corrections.md` : points 47 à 49 ; point 45 complété (deux jetons restés à leur valeur d'exemple dans le lab).
+
+### Scripts
+
+- `docker-compose.yml` : Qdrant `v1.19.0`, n8n `2.36.9`, Open WebUI `v0.11.3`, au lieu de `latest` et `main`.
+- `api/anon_main.py` : réponse en flux quand le client la demande (un seul fragment, après les contrôles) ; mention dans la réponse en cas d'échec de la résolution Entra.
+- `api/anon_auth.py` : suivi des comptes dont la résolution Entra a échoué (`entra_en_echec`).
+- `.github/workflows/controles.yml` : contrôles automatiques à chaque publication (syntaxe Python et shell, YAML et JSON, liens internes, typographie, motifs de secrets).
+
+---
+
 ## [2.17.0] : Octobre 2026
 
 Durcissement de la stack, à la suite d'une revue externe du dépôt.

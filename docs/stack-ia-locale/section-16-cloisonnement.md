@@ -139,7 +139,30 @@ docker compose up -d rag-api                      # recrée le conteneur (§15.3
 grep '^ADMIN_TOKEN=' .env | cut -d= -f2           # à reporter dans l'identifiant n8n
 ```
 
-## §16.8 Checklist
+## §16.8 Une mise à jour se revalide : le cas d'Open WebUI
+
+En figeant les versions (§3.4), le lab est passé d'une construction de développement d'Open WebUI (tag `main`) à la version publiée `v0.11.3`. Deux effets, invisibles sans revalidation :
+
+| Constat | Cause | Correction |
+|---|---|---|
+| Plus aucune réponse affichée, alors que la RAG API répondait (code 200) | La version publiée demande la réponse **en flux** et n'affiche rien si elle reçoit un objet JSON simple ; la RAG API ignorait la demande | La RAG API respecte désormais la demande de flux. La réponse est calculée en entier, contrôles compris, puis envoyée en un seul fragment : un vrai flux mot par mot enverrait le texte avant le contrôle d'ancrage |
+| Deux requêtes par question | Tâches d'arrière-plan d'Open WebUI (titres, suggestions) adressées au modèle de la conversation | Désactivables dans **Interface** (§14.8.2) ; elles doublent le calcul sans fausser les réponses |
+
+La leçon tient en une règle : **une mise à jour d'Open WebUI, de n8n ou de Qdrant ne s'installe pas sur une invitation à mettre à jour**. Elle se fait sur décision, puis se revalide : connexions d'Open WebUI, transmission de l'identité (`[AUTH] /v1` dans les journaux), test de cloisonnement, synchronisation.
+
+## §16.9 Une perte d'accès doit se dire
+
+Pendant ces tests, une coupure réseau de quelques instants a empêché la RAG API de joindre Microsoft Entra. Pour l'utilisateur concerné, la résolution des identités cloud a échoué : il n'a gardé que ses groupes AD (3 au lieu de 8), et a perdu l'accès à tous les documents SharePoint. Le comportement de sécurité était le bon (moins d'accès, jamais plus), mais la réponse ne l'était pas : « Cette information ne figure pas dans les documents disponibles », alors que le document existait et que l'utilisateur y avait droit.
+
+Désormais, quand la résolution Entra échoue, la réponse le dit : « Les documents SharePoint n'ont pas pu être consultés : la vérification de vos droits auprès de Microsoft 365 a échoué. Réessayez dans quelques minutes. » L'échec n'est pas mis en cache : la question suivante retente la résolution.
+
+Le contrôle après synchronisation (§16.4) détecte aussi ce cas : si la panne dure jusqu'à la synchronisation, les cas SharePoint autorisés sortent en « REFUS À TORT », et l'alerte part. Le contrôle ne signale donc pas seulement les fuites, mais aussi les pertes d'accès.
+
+> **Un message d'erreur peut tromper.** Le journal indiquait `Network is unreachable`, une erreur IPv6, alors que la cause était une coupure IPv4. Le conteneur n'ayant pas d'IPv6, le système essaie l'IPv4, puis l'IPv6 en dernier recours : quand tout échoue, c'est la dernière erreur qui s'affiche. Vérifier la connectivité réelle (`curl` depuis la VM et depuis le conteneur) avant de conclure.
+
+> **Deux jetons, deux usages.** `ADMIN_TOKEN` sert à n8n (synchronisation, synthèse Teams), `API_TOKEN` à Open WebUI (questions des utilisateurs). Le lab avait renouvelé le premier ; l'avertissement de démarrage (§16.6) a signalé dès son premier lancement que le second gardait sa valeur d'exemple. Sa rotation se fait dans le `.env`, puis dans la clé d'API de la connexion `rag-api` d'Open WebUI.
+
+## §16.10 Checklist
 
 | Point | Vérification | Attendu |
 |---|---|---|
@@ -154,9 +177,10 @@ grep '^ADMIN_TOKEN=' .env | cut -d= -f2           # à reporter dans l'identifia
 | Open WebUI | Liste des modèles avec un compte utilisateur | `rag-api` seul |
 | Moteur d'inférence | `curl` depuis un autre poste | Pas de réponse |
 | n8n | Export d'un workflow | Aucun jeton en clair |
+| Après une mise à jour d'un composant | Connexions, `[AUTH] /v1`, test, synchronisation | Tout conforme avant d'utiliser la nouvelle version |
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md)
+[Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md) | [Section suivante : §17 Gouvernance](section-17-gouvernance.md)
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

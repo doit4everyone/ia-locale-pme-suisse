@@ -203,6 +203,17 @@ def get_entra_groups(email: str) -> list[str]:
 # Résolution LDAP
 # ─────────────────────────────────────────
 
+# Comptes dont la dernière résolution Entra a échoué : leurs documents SharePoint
+# sont inaccessibles (refus par défaut). La RAG API le signale dans la réponse,
+# au lieu de laisser croire que l'information n'existe pas.
+_entra_echec: set[str] = set()
+
+
+def entra_en_echec(email: str) -> bool:
+    """Vrai si la dernière résolution Entra de ce compte a échoué."""
+    return email.lower() in _entra_echec
+
+
 def get_user_groups(email: str) -> list[str]:
     """
     Résout les groupes AD d'un utilisateur à partir de son email (userPrincipalName).
@@ -360,11 +371,13 @@ def get_user_groups(email: str) -> list[str]:
         try:
             entra_ids = get_entra_groups(email)
             groups.extend(entra_ids)
+            _entra_echec.discard(email.lower())
             logger.info(f"[AUTH] Entra : {len(entra_ids)} identifiant(s) pour '{email}'")
         except Exception as e:
             # Groupes AD conservés : accès SMB intact, aucun accès SharePoint.
             # Pas de mise en cache : la requête suivante réessaiera Graph.
             logger.error(f"[AUTH] Résolution Entra échouée pour '{email}' : {e}")
+            _entra_echec.add(email.lower())
             return groups
 
     _set_cache(email, groups)

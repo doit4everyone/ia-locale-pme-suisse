@@ -19,7 +19,7 @@ import subprocess
 import asyncio
 import time
 from datetime import datetime, timezone
-from auth import get_user_groups, check_access
+from auth import get_user_groups, check_access, entra_en_echec
 import teams
 import teams_graph
 from rank_bm25 import BM25Okapi
@@ -916,6 +916,37 @@ async def openai_chat_completions(
     credentials: HTTPAuthorizationCredentials = Security(security)
 ):
     """
+    Point d'entrée OpenAI. La réponse est calculée en entier (contrôles compris),
+    puis renvoyée d'un bloc, ou en flux SSE si le client le demande (stream=true) :
+    certaines versions d'Open WebUI n'affichent rien si elles demandent un flux
+    et reçoivent un objet JSON simple. Le flux contient la réponse complète en un
+    seul fragment : les contrôles d'ancrage restent appliqués avant tout envoi.
+    """
+    reponse = await _openai_chat_completions(raw_request, request, credentials)
+    if not request.stream or not isinstance(reponse, OpenAIChatResponse):
+        return reponse
+    from fastapi.responses import StreamingResponse
+    contenu = reponse.choices[0].message.content if reponse.choices else ""
+    ident, cree, modele = reponse.id, int(time.time()), reponse.model
+
+    def flux():
+        base = {"id": ident, "object": "chat.completion.chunk", "created": cree, "model": modele}
+        yield "data: " + json.dumps({**base, "choices": [{"index": 0,
+              "delta": {"role": "assistant", "content": contenu}, "finish_reason": None}]},
+              ensure_ascii=False) + "\n\n"
+        yield "data: " + json.dumps({**base, "choices": [{"index": 0, "delta": {},
+              "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(flux(), media_type="text/event-stream")
+
+
+async def _openai_chat_completions(
+    raw_request: Request,
+    request: OpenAIChatRequest,
+    credentials: HTTPAuthorizationCredentials,
+):
+    """
     Endpoint compatible OpenAI pour Open WebUI et autres clients.
     Extrait la dernière question utilisateur et la passe au pipeline RAG complet.
     """
@@ -963,6 +994,9 @@ async def openai_chat_completions(
     elif not gc_result.get("ancree", True):
         answer += ("\n\n*Attention : le contrôle automatique n'a pas pu rattacher toutes les "
                    "affirmations de cette réponse aux documents. Vérifiez-les dans les sources citées.*")
+    if entra_en_echec(owui_email2):
+        answer += ("\n\n*Les documents SharePoint n'ont pas pu être consultés : la vérification de "
+                   "vos droits auprès de Microsoft 365 a échoué. Réessayez dans quelques minutes.*")
     return OpenAIChatResponse(
         choices=[OpenAIChoice(
             message=OpenAIMessage(role="assistant", content=answer)

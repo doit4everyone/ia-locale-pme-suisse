@@ -203,11 +203,21 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 ## §3.4 docker-compose.yml
 
+**Versions figées.** Les images sont désignées par leur numéro de version, jamais par `latest` ou `main` : un simple `docker compose pull` installerait sinon une autre version que celle validée, et peut changer le comportement de réglages dont dépend la sécurité. Versions validées en lab (octobre 2026), avec l'empreinte exacte des images :
+
+| Service | Image | Empreinte validée |
+|---|---|---|
+| Qdrant | `qdrant/qdrant:v1.19.0` | `sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc` |
+| n8n | `n8nio/n8n:2.36.9` | `sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d` |
+| Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | `sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933` |
+
+En production, désigner les images par leur empreinte (`image@sha256:…`) garantit en plus que le contenu ne change pas sous un même numéro (§17.7). Toute mise à jour d'un composant se revalide : §16.8 en donne un exemple concret.
+
 ```yaml
 services:
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.19.0
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
@@ -219,7 +229,7 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:2.36.9
     container_name: n8n
     ports:
       - "5678:5678"
@@ -298,7 +308,7 @@ services:
     restart: unless-stopped
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.11.3
     container_name: open-webui
     depends_on:
       - rag-api

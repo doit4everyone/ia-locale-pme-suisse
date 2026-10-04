@@ -36,7 +36,7 @@ Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entrepr
 - §14 : documents protégés par Purview. Déchiffrement par un service interne, et double condition à chaque question : permissions SharePoint et droits de l'étiquette, évalués par Purview lui-même.
 - §15 : sécurité des données. Clé d'API Qdrant, chiffrement des données au repos avec déverrouillage par TPM, secrets et clés sur le disque chiffré, sauvegardes.
 - §16 : contrôle du cloisonnement. Test de non-divulgation automatisé, rejoué après chaque synchronisation avec alerte par courriel, et durcissement de la stack à la suite d'une revue externe.
-- À venir : gouvernance.
+- §17 : gouvernance. Responsabilités, rotation des secrets et certificats, politique de corpus, droit à l'effacement, audit, et ce que la nLPD exige au-delà de la technique.
 
 Les versions validées sont publiées sous forme de [Releases](https://github.com/doit4everyone/ia-locale-pme-suisse/releases). La Release v2.12.0 fige les scripts des Parties 1 et 2.
 
@@ -66,9 +66,9 @@ ia-locale-pme-suisse/
 ├── index.md                    ← page d'accueil GitHub Pages
 ├── CHANGELOG.md                ← renvoi vers le journal détaillé
 ├── docs/
-│   └── stack-ia-locale/        ← guide de déploiement (§0 à §16)
+│   └── stack-ia-locale/        ← guide de déploiement (§0 à §17)
 │       ├── index.md
-│       ├── section-00-quickstart.md … section-16-cloisonnement.md
+│       ├── section-00-quickstart.md … section-17-gouvernance.md
 │       └── CHANGELOG.md        ← journal détaillé des modifications
 ├── guides/                     ← guides décisionnels
 └── scripts/
