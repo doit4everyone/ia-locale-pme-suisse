@@ -1,0 +1,83 @@
+# Contrôles automatiques du dépôt, à chaque publication.
+# Ils vérifient que les fichiers sont valides, pas que la stack fonctionne :
+# le test de cloisonnement (§16) exige une stack déployée et reste fait en lab.
+name: Contrôles du dépôt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controles:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Syntaxe des scripts Python
+        run: |
+          find scripts -name "*.py" -print0 | xargs -0 -n1 python -m py_compile
+          echo "Scripts Python : syntaxe valide"
+
+      - name: Syntaxe des scripts shell
+        run: |
+          find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
+          echo "Scripts shell : syntaxe valide"
+
+      - name: Validité des fichiers YAML et JSON
+        run: |
+          pip install --quiet pyyaml
+          python - <<'PY'
+          import glob, json, sys, yaml
+          erreurs = []
+          for f in glob.glob("scripts/**/*.yml", recursive=True) + glob.glob("scripts/**/*.yaml", recursive=True):
+              try: yaml.safe_load(open(f, encoding="utf-8"))
+              except Exception as e: erreurs.append(f"{f} : {e}")
+          for f in glob.glob("scripts/**/*.json", recursive=True):
+              try: json.load(open(f, encoding="utf-8"))
+              except Exception as e: erreurs.append(f"{f} : {e}")
+          print("\n".join(erreurs) or "YAML et JSON : valides")
+          sys.exit(1 if erreurs else 0)
+          PY
+
+      - name: Liens internes de la documentation
+        run: |
+          python - <<'PY'
+          import glob, os, re, sys
+          casses = []
+          for f in glob.glob("**/*.md", recursive=True):
+              for m in re.finditer(r"\]\(([^)\s]+)\)", open(f, encoding="utf-8").read()):
+                  u = m.group(1).split("#")[0]
+                  if not u or u.startswith(("http", "mailto:")):
+                      continue
+                  p = os.path.normpath(os.path.join(os.path.dirname(f), u))
+                  if not (os.path.isfile(p) or os.path.isfile(p.replace(".html", ".md"))
+                          or os.path.isfile(os.path.join(p, "index.md"))):
+                      casses.append(f"{f} → {u}")
+          print("\n".join(casses) or "Liens internes : aucun lien cassé")
+          sys.exit(1 if casses else 0)
+          PY
+
+      - name: Typographie (pas de tiret cadratin)
+        run: |
+          TIRET=$(printf '\xe2\x80\x94')
+          if grep -rnI "$TIRET" --exclude-dir=.git --include="*.md" --include="*.py" --include="*.sh" --include="*.ps1" --include="*.yml" --include="*.json" . ; then
+            echo "Tiret cadratin trouvé : à remplacer"; exit 1
+          fi
+          echo "Typographie : conforme"
+
+      - name: Aucun secret dans le dépôt
+        run: |
+          # Motifs génériques de secrets. Les valeurs d'exemple (changeme, <...>) sont permises.
+          if grep -rnIE "BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|ghp_[A-Za-z0-9]{36}|AKIA[0-9A-Z]{16}" --exclude-dir=.git . ; then
+            echo "Secret probable trouvé"; exit 1
+          fi
+          echo "Secrets : aucun motif trouvé"
