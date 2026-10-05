@@ -240,9 +240,10 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 
 | Paramètre | Valeur | Justification |
 |---|---|---|
-| `TOP_K` | 20 | Améliore le recall sur les gros fichiers .md (100+ chunks). 12 était insuffisant. |
+| `CANDIDATS` | 30 | Candidats retenus par la recherche avant la construction du contexte (§8.9). Remplace `TOP_K`, qui tronquait la liste fusionnée à 20 et écartait des documents pertinents |
 | `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes (vectorielle + BM25). 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
-| `MAX_CONTEXT_CHUNKS` | 14 | Validé en lab sur CPU. Extension par `chunk_index ± radius`. Augmenter à 15-20 après GPU. |
+| `MAX_CONTEXT_CHUNKS` | 14 | Plafond d'extraits envoyés au modèle quand aucun document n'est nettement en tête |
+| `PRINCIPAL_MAX`, `CONTEXT_OTHER_DOCS`, `EXTRAITS_PAR_COMPLEMENT` | 9, 6, 2 | Répartition du contexte entre le document principal et les documents complémentaires (§8.9) |
 
 ### Limite sur les très gros fichiers
 
@@ -280,6 +281,7 @@ La formation est la première ligne de défense, gratuite et sans développement
 | "Même chose pour Y" | Identique |
 | "Compare X et Y" | Si l'un des documents n'existe pas, le modèle invente |
 | "Liste tous les contrats de..." | Si la liste n'est pas exhaustive dans les chunks, le modèle complète |
+| "Résume tout ce que tu sais sur..." sans préciser le domaine | La recherche peut privilégier un document qui emploie le mot sans traiter le sujet (§8.9) |
 
 ### Formulations recommandées
 
@@ -288,12 +290,63 @@ La formation est la première ligne de défense, gratuite et sans développement
 | "Fais pareil pour l'étude Rochat" | "Quelles sont les conditions du contrat de maintenance avec l'étude Rochat ?" |
 | "Même chose pour Sarrasin" | "Quel est le chiffrage de la migration Azure pour Sarrasin Fiduciaire ?" |
 | "Compare les deux contrats" | "Quelles sont les différences de SLA entre le contrat Baumont et le contrat Rochat ?" |
+| "Résume tout ce que tu sais sur les clients" | "Résume les contrats de maintenance des clients d'Axonix SA" |
 
 La règle générale : toujours poser une question directe sur un sujet précis. Ne jamais demander au modèle de reproduire une structure ou de compléter une liste.
 
 ---
 
-## §8.7 Résumé des couches de mitigation
+## §8.9 Diversité des sources et réponses partielles
+
+**Statut :** validé en lab sur CPU, octobre 2026, avec `qwen2.5:14b` et `nomic-embed-text`. À remesurer au §10.
+
+### Le problème : un contexte construit pour les questions précises
+
+Jusqu'à la v2.17.1, le contexte était construit autour d'**un seul document** : le meilleur extrait désignait le document principal, dont jusqu'à 14 extraits voisins étaient envoyés au modèle, complétés par **3 extraits quelconques**. C'est le bon réglage pour une question précise (une durée de contrat, un code), mauvais pour une question large (« fais-moi un résumé sur les clients ») :
+- la liste des candidats était tronquée à 20 après la fusion des deux recherches : plusieurs places étaient prises par des extraits du même document, et des documents pertinents n'étaient jamais examinés ;
+- les 3 extraits complémentaires pouvaient venir d'un même document, ou être des **copies** du document principal (le même fichier sur le partage SMB et sur SharePoint) ;
+- le prompt imposait un refus dès que la réponse n'était pas entièrement dans les documents, et interdisait de résumer.
+
+Résultat observé en lab : une question large sur les clients, qui obtenait une synthèse de trois contrats avant l'indexation de SharePoint, était refusée ensuite.
+
+### La correction
+
+| Élément | Avant | Après |
+|---|---|---|
+| Candidats après fusion | 20 | 30 |
+| Document principal | jusqu'à 14 extraits | jusqu'à 9 extraits |
+| Complément | 3 extraits quelconques | 6 documents distincts × 2 extraits, regroupés par document |
+| Copies | non détectées | écartées : texte identique, ou même nom de fichier qu'un document retenu |
+| Volume envoyé au modèle | environ 17 extraits | environ 21 extraits |
+
+La sélection ne travaille que sur des extraits **déjà autorisés** (filtres d'accès et Purview) : elle choisit parmi eux, elle n'en ajoute aucun.
+
+Le prompt a été assoupli sur un seul point, la réponse partielle :
+- refus exact seulement si **aucun** document ne contient d'information pertinente ;
+- si les documents répondent en partie : répondre avec ce qu'ils contiennent, citer chaque source, dire ce qui manque ;
+- une question large se traite document par document ;
+- les noms de fichiers se citent **en entier**, préfixe compris : le modèle raccourcissait `03_Contrat_Maintenance_Etude_Rochat.docx` en `Contrat_Maintenance_Etude_Rochat.docx`, ce que le contrôle des citations rejetait à juste titre.
+
+### Les tests qui protègent la correction
+
+Assouplir le refus ouvre un risque d'invention : il se mesure. Deux questions doivent **toujours** être refusées :
+
+| Question | Ce qu'elle vérifie | Résultat en lab |
+|---|---|---|
+| « Quelle est la capitale de l'Australie ? » | Le modèle n'utilise pas ses connaissances générales | Refusée |
+| « Quel est le montant mensuel du contrat de maintenance de la société Dupont Logistique SA ? » (client inexistant) | Des contrats proches existent : aucun montant ne doit être emprunté à un autre | Refusée |
+
+Et la question large « fais-moi un résumé sur tout ce que tu sais sur les clients axonix » obtient une synthèse ancrée sur deux contrats, avec leurs références, et une phrase sur ce que les documents ne permettent pas de dire. La procédure de test complète est fournie dans le dépôt (`tests-apres-modification.md`).
+
+### Limites constatées
+
+- **Sensibilité à la formulation** : « …sur les clients » reste refusé, « …sur les clients axonix » fonctionne. Avec ce mot, la recherche fait remonter les contrats plutôt qu'une politique de sécurité qui emploie souvent le mot « clients ». C'est une limite du modèle d'embedding (`nomic-embed-text`, surtout anglophone) et de l'absence de reclassement : à reprendre au §10 avec `bge-m3` et un reranker ;
+- **Durée** : environ une minute et demie par question sur CPU, contexte et juge compris ;
+- **Deux versions d'un même document** : le corpus du lab contenait deux contrats Rochat contradictoires. Le léger changement de classement dû aux 30 candidats a fait passer l'autre version en tête : la réponse restait ancrée, mais citait une autre durée. Un RAG ne sait pas quelle version fait foi : c'est au corpus de n'en contenir qu'une (§17.4).
+
+---
+
+## §8.10 Résumé des couches de mitigation
 
 | Couche | Mécanisme | Coût | Interface |
 |---|---|---|---|

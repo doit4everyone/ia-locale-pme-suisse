@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.17.2] : Octobre 2026
+
+Questions larges : diversité des sources et réponses partielles.
+
+### Documentation
+
+- `section-08-fiabilite.md` : §8.9, diversité des sources et réponses partielles, avec les deux tests de refus qui protègent la correction et les limites constatées ; paramètres de §8.6 mis à jour ; formulations recommandées pour les questions larges (§8.8).
+- `section-03-docker-compose.md` : nouveaux réglages dans le `.env` et le Compose ; `TOP_K` obsolète.
+- `section-17-gouvernance.md` : une seule version de chaque document dans les dossiers indexés, avec le cas observé en lab.
+- `suivi-corrections.md` : points 50 et 51 corrigés, point 52 ouvert pour le §10.
+
+### Scripts
+
+- `api/anon_main.py` : 30 candidats ; document principal limité à 9 extraits ; 6 documents complémentaires de 2 extraits, regroupés, copies écartées ; prompt avec réponse partielle explicite, synthèse document par document et noms de fichiers complets.
+- `docker-compose.yml`, `env.example` : `CANDIDATS`, `PRINCIPAL_MAX`, `CONTEXT_OTHER_DOCS`, `EXTRAITS_PAR_COMPLEMENT`.
+- `tests-apres-modification.md` : nouvelle procédure de tests après toute modification.
+
+---
+
 ## [2.17.1] : Octobre 2026
 
 ### Documentation

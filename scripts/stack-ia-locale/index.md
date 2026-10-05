@@ -68,6 +68,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | [`../purview/`](../purview/) | Sonde de déchiffrement, tests de `mip-service` | Voir §14.7 du guide |
 | [`../sharepoint/`](../sharepoint/) | Inventaires des permissions, accord `Sites.Selected` site par site, sonde | Voir §13.2 et §13.3 du guide |
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris ; affiche et contrôle les permissions du partage | Sur le serveur de fichiers, voir §5.2.4 et §16.5 du guide |
+| [`tests-apres-modification.md`](tests-apres-modification.md) | Procédure de tests après toute modification : démarrage, identité, qualité, refus, cloisonnement, synchronisation | Sur la VM, voir §8.9 et §16 |
 | `test_cloisonnement.py` | Test de non-divulgation : mode accès (filtres, quelques secondes) ou complet (questions) | Dans le conteneur `rag-api`, voir §16 |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 

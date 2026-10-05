@@ -110,15 +110,20 @@ JWT_EXPIRES_IN=4h
 
 # Paramètres avancés du pipeline
 TOP_K=20
-# 20 améliore le recall sur les gros fichiers .md (100+ chunks). Valeur validée en lab.
+# Obsolète depuis v2.17.2 : remplacé par CANDIDATS. Conservé sans effet.
 CONTEXT_THRESHOLD=0.01
 # Score RRF minimum pour déclencher l'extension de contexte.
 # Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes.
 # 0.01 déclenche l'extension sur presque toutes les questions.
 # Ne pas dépasser 0.05.
 MAX_CONTEXT_CHUNKS=14
-# Nombre maximum de chunks par extension de contexte.
-# 14 validé en lab sur CPU. Augmenter à 15-20 une fois le GPU installé.
+# Plafond d'extraits envoyés au modèle quand aucun document n'est en tête.
+# Diversité des sources (§8.9) : les valeurs par défaut, validées en lab sur CPU,
+# s'appliquent si ces lignes restent commentées.
+# CANDIDATS=30                 # candidats retenus par la recherche avant sélection
+# PRINCIPAL_MAX=9              # extraits du document principal
+# CONTEXT_OTHER_DOCS=6         # documents complémentaires
+# EXTRAITS_PAR_COMPLEMENT=2    # extraits par document complémentaire
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8
@@ -270,6 +275,10 @@ services:
       - TOP_K=${TOP_K}
       - CONTEXT_THRESHOLD=${CONTEXT_THRESHOLD}
       - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
+      - CANDIDATS=${CANDIDATS:-30}
+      - PRINCIPAL_MAX=${PRINCIPAL_MAX:-9}
+      - CONTEXT_OTHER_DOCS=${CONTEXT_OTHER_DOCS:-6}
+      - EXTRAITS_PAR_COMPLEMENT=${EXTRAITS_PAR_COMPLEMENT:-2}
       - CHUNK_SIZE=${CHUNK_SIZE}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP}
       - MIN_CHUNK_WORDS=${MIN_CHUNK_WORDS}

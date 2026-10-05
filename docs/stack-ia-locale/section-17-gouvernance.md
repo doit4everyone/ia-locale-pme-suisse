@@ -95,6 +95,10 @@ Recommandations :
 - **avant la première indexation d'un dossier, le faire relire par son propriétaire métier** : lui seul sait s'il contient des documents qui n'ont rien à faire dans un index ;
 - **écarter les secrets techniques** : clés, fichiers de configuration, exports de mots de passe n'ont pas leur place dans un corpus documentaire. Un contrôle avant indexation réduit le risque, sans le supprimer : la vraie protection est de ne pas les ranger dans les dossiers indexés.
 
+- **une seule version de chaque document** dans les dossiers indexés : archiver les versions périmées hors de l'index. Un RAG ne sait pas quelle version fait foi, et peut citer l'une ou l'autre selon de petites variations de la recherche.
+
+> **Illustré en lab.** Le corpus contenait deux contrats de maintenance pour le même client, l'un de 24 mois, l'autre d'un an, sur deux emplacements différents. Après un réglage de la recherche (§8.9), la même question a cité l'un puis l'autre : deux réponses ancrées, mais contradictoires.
+
 > **Illustré en lab.** Le serveur de fichiers de démonstration contenait un fichier nommé comme une clé TLS et des copies en clair de documents par ailleurs chiffrés. Ni l'un ni l'autre n'avait à être indexé. C'est le genre de résidu qu'un serveur ayant servi à des essais accumule, et qu'une politique de corpus écrite permet d'écarter avant qu'une IA ne le rende trouvable.
 
 ## §17.5 Droit d'accès et droit à l'effacement
