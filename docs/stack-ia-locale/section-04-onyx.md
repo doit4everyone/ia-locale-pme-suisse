@@ -15,7 +15,7 @@ description: "Validation du backend Ollama avec Onyx CE, puis déploiement d'Ope
 
 # §4 Interfaces utilisateur : Onyx CE et Open WebUI
 
-[Retour au sommaire](index.md) | [Section précédente : §3 Infrastructure Docker](section-03-docker-compose.md)
+[Retour au sommaire](index.md) | [Section précédente : §3 Docker Compose : stack complète](section-03-docker-compose.md) | [Section suivante : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026.
 
@@ -188,7 +188,7 @@ Le cloisonnement documentaire est opérationnel de bout en bout depuis l'interfa
 
 ---
 
-[Suite : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md)
+[Retour au sommaire](index.md) | [Section précédente : §3 Docker Compose : stack complète](section-03-docker-compose.md) | [Section suivante : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md)
 
 ---
 

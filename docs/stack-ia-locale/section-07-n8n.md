@@ -15,7 +15,7 @@ description: "Automatisation de la synchronisation du corpus, résolution ACL r�
 
 # §7 Pipelines n8n
 
-[Retour au sommaire](index.md) | [Section précédente : §6 Agent de codage](section-06-cline.md)
+[Retour au sommaire](index.md) | [Section précédente : §6 Cline : agent de codage](section-06-cline.md) | [Section suivante : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md)
 
 **Statut :** §7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. Le résumé des réunions Teams (§7.4) est validé en Partie 3, voir [§12](section-12-teams.md). §7.5 (OCR factures) est documentaire : l'architecture est décrite mais non validée en lab, faute de GPU pour le modèle multimodal.
 
@@ -369,7 +369,7 @@ Les pipelines §7.2 et §7.3 utilisent le même credential SMTP. Le nœud email 
 
 ---
 
-[Suite : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md)
+[Retour au sommaire](index.md) | [Section précédente : §6 Cline : agent de codage](section-06-cline.md) | [Section suivante : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md)
 
 ---
 

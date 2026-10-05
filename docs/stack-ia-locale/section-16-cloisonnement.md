@@ -15,7 +15,7 @@ description: "Test de non-divulgation automatisé, contrôle du cloisonnement ap
 
 # §16 Contrôle du cloisonnement et durcissement
 
-[Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md)
+[Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md) | [Section suivante : §17 Gouvernance](section-17-gouvernance.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, octobre 2026 : 40 cas de cloisonnement conformes, une faille du calcul des droits NTFS reproduite puis corrigée, alerte prouvée par une fuite simulée.
 

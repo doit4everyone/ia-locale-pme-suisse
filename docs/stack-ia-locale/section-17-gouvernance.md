@@ -15,7 +15,7 @@ description: "Gouvernance d'un RAG d'entreprise : qui est responsable de quoi, r
 
 # §17 Gouvernance
 
-[Retour au sommaire](index.md) | [Section précédente : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
+[Retour au sommaire](index.md) | [Section précédente : §16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md)
 
 ---
 
@@ -179,6 +179,6 @@ Les mentionner ici évite de laisser croire qu'un lab validé est prêt pour la 
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
+[Retour au sommaire](index.md) | [Section précédente : §16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md)
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

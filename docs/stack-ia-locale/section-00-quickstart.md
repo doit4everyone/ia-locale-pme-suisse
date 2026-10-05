@@ -15,7 +15,7 @@ description: "Procédure de déploiement pas à pas de la stack RAG locale : AD,
 
 # §0 Déploiement complet
 
-[Retour au sommaire](index.md)
+[Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
 > Ce guide couvre un déploiement complet depuis zéro : création du compte de service dans l'AD, montage SMB, certificat CA, lancement de la stack Docker, première indexation, synchronisation des ACL, configuration d'Open WebUI et de n8n, puis, en option, la connexion à Microsoft 365 (étape 14). Durée estimée : 2 à 3 heures pour un premier déploiement, hors Microsoft 365. Pour les sections détaillées, voir le guide complet à partir de [§1 Prérequis](section-01-prerequis.md).
 
@@ -614,7 +614,7 @@ ldapwhoami -H ldaps://<NOM-DC>:636 \
 
 ---
 
-[Suite : §1 Prérequis et création de la VM](section-01-prerequis.md)
+[Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
 ---
 

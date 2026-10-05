@@ -15,7 +15,7 @@ description: "Installation de vLLM en mode CPU sur Ubuntu 26.04, configuration p
 
 # §2 Installation et configuration de vLLM
 
-[Retour au sommaire](index.md) | [Section précédente : §1 Prérequis](section-01-prerequis.md)
+[Retour au sommaire](index.md) | [Section précédente : §1 Prérequis et création de la VM](section-01-prerequis.md) | [Section suivante : §3 Docker Compose : stack complète](section-03-docker-compose.md)
 
 **Statut :** validé partiellement sur VM-RAG-LAB, septembre 2026. Le bloc vLLM-cpu est validé. Le bloc DGX Spark est documentaire, non validé sur matériel réel.
 
@@ -175,7 +175,7 @@ Toutes les autres configurations (Docker Compose, Qdrant, n8n, Open WebUI, RAG A
 
 ---
 
-[Suite : §3 Docker Compose : stack complète](section-03-docker-compose.md)
+[Retour au sommaire](index.md) | [Section précédente : §1 Prérequis et création de la VM](section-01-prerequis.md) | [Section suivante : §3 Docker Compose : stack complète](section-03-docker-compose.md)
 
 ---
 

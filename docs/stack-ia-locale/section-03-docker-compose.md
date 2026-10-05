@@ -15,7 +15,7 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 
 # §3 Docker Compose : stack complète
 
-[Retour au sommaire](index.md) | [Section précédente : §2 vLLM](section-02-vllm.md)
+[Retour au sommaire](index.md) | [Section précédente : §2 Installation et configuration de vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
 
 **Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (§11 et suivantes) documente les connecteurs Microsoft 365.
 
@@ -543,7 +543,7 @@ unset TOKEN
 
 ---
 
-[Suite : §4 Interfaces utilisateur](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §2 Installation et configuration de vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
 
 ---
 

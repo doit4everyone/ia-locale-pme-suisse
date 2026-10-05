@@ -15,7 +15,7 @@ description: "Protection des données de la stack RAG : clé d'API Qdrant, chiff
 
 # §15 Sécurité des données
 
-[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
+[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md)
 
 **Statut :** clé d'API Qdrant, chiffrement des données au repos, et déplacement des secrets et des clés sur le disque chiffré validés en lab sur VM-RAG-LAB, octobre 2026, y compris un arrêt brutal de l'hôte et un redémarrage complet. Sauvegardes chiffrées : exigence documentée, **non validée en lab**.
 
@@ -288,6 +288,6 @@ Les sauvegardes doivent être chiffrées avant de quitter le serveur, avec une c
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement](section-16-cloisonnement.md)
+[Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md)
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

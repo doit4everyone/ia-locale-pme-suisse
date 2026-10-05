@@ -15,7 +15,7 @@ description: "Détecter et prévenir les hallucinations dans un pipeline RAG : c
 
 # §8 Fiabilité : hallucinations et contrôle d'ancrage
 
-[Retour au sommaire](index.md) | [Section précédente : §7 Pipelines n8n](section-07-n8n.md)
+[Retour au sommaire](index.md) | [Section précédente : §7 Pipelines n8n](section-07-n8n.md) | [Section suivante : §9 Sécurité et durcissement](section-09-securite.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB avec corpus Axonix SA, RAG API et Open WebUI, septembre 2026. Tous les cas de test documentés ont été reproduits en session, y compris le contrôle 3 (format de citation confirmé, voir §8.4).
 
@@ -359,7 +359,7 @@ Les couches 1 et 2 s'appliquent à toute interface sans développement spécifiq
 
 ---
 
-[Suite : §9 Sécurité, durcissement, journalisation nLPD](section-09-securite.md)
+[Retour au sommaire](index.md) | [Section précédente : §7 Pipelines n8n](section-07-n8n.md) | [Section suivante : §9 Sécurité et durcissement](section-09-securite.md)
 
 ---
 

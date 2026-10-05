@@ -15,7 +15,7 @@ description: "UFW, certificat TLS LDAP, journalisation nLPD, rotation des compte
 
 # §9 Sécurité et durcissement
 
-[Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité](section-08-fiabilite.md)
+[Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | [Section suivante : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5.
 
@@ -664,7 +664,9 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 
 ---
 
-§10 Validation et benchmarks *(à venir)*
+§10 Validation et benchmarks paraîtra après les mesures sur GPU.
+
+[Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | [Section suivante : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
 ---
 

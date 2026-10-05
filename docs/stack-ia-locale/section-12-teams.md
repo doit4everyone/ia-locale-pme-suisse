@@ -15,7 +15,7 @@ description: "Récupération des transcriptions Teams via Microsoft Graph, compt
 
 # §12 Synthèse des réunions Teams
 
-[Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
+[Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | [Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toute la chaîne a été exécutée sur un tenant Microsoft 365 réel, de la réunion Teams jusqu'à l'email reçu par l'organisateur, y compris le déclenchement planifié par n8n sans intervention manuelle.
 
@@ -449,7 +449,7 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 ---
 
-[Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
+[Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | [Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
 
 ---
 

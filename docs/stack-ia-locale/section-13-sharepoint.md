@@ -15,7 +15,7 @@ description: "Indexation des bibliothèques SharePoint Online avec propagation d
 
 # §13 Connecteur SharePoint Online
 
-[Retour au sommaire](index.md) | [Section précédente : §12 Synthèse des réunions Teams](section-12-teams.md)
+[Retour au sommaire](index.md) | [Section précédente : §12 Synthèse des réunions Teams](section-12-teams.md) | [Section suivante : §14 Documents protégés par Purview](section-14-purview.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026, sur un tenant Microsoft 365 synchronisé par Entra Connect : cinq sites, trois comptes de test, 18 réponses sur 18 conformes à la matrice de cloisonnement.
 
@@ -404,7 +404,7 @@ Le point commun : **un outil d'IA rend trouvable ce qui n'était que caché dans
 
 ---
 
-§14 Documents protégés par Purview *(à venir)*
+[Retour au sommaire](index.md) | [Section précédente : §12 Synthèse des réunions Teams](section-12-teams.md) | [Section suivante : §14 Documents protégés par Purview](section-14-purview.md)
 
 ---
 

@@ -15,7 +15,7 @@ description: "Configuration de Cline dans VS Code pour connecter un agent de cod
 
 # §6 Cline : agent de codage
 
-[Retour au sommaire](index.md) | [Section précédente : §5 Connecteurs SMB](section-05-connecteurs.md)
+[Retour au sommaire](index.md) | [Section précédente : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | [Section suivante : §7 Pipelines n8n](section-07-n8n.md)
 
 **Statut :** validé sur WIN11-AD-TESTS avec VS Code et Ollama sur LABO-G9, septembre 2026.
 
@@ -158,7 +158,7 @@ Les temps de réponse passent de plusieurs minutes (CPU, qwen2.5:14b) à quelque
 
 ---
 
-[Suite : §7 Pipelines n8n](section-07-n8n.md)
+[Retour au sommaire](index.md) | [Section précédente : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | [Section suivante : §7 Pipelines n8n](section-07-n8n.md)
 
 ---
 

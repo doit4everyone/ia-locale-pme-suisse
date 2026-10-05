@@ -15,7 +15,7 @@ description: "Création et configuration de la VM Ubuntu Server 26.04 pour la st
 
 # §1 Prérequis et création de la VM
 
-[Retour au sommaire](index.md)
+[Retour au sommaire](index.md) | [Section précédente : §0 Déploiement complet](section-00-quickstart.md) | [Section suivante : §2 Installation et configuration de vLLM](section-02-vllm.md)
 
 **Statut :** validé sur VM-RAG-LAB, septembre 2026.
 
@@ -157,7 +157,7 @@ Pour une installation **existante**, déjà en service : voir la migration de §
 
 ---
 
-[Suite : §2 Installation et configuration de vLLM](section-02-vllm.md)
+[Retour au sommaire](index.md) | [Section précédente : §0 Déploiement complet](section-00-quickstart.md) | [Section suivante : §2 Installation et configuration de vLLM](section-02-vllm.md)
 
 ---
 

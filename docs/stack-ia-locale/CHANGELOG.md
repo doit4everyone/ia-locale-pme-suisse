@@ -4,6 +4,17 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.17.4] : Octobre 2026
+
+### Documentation
+
+- Navigation harmonisée dans toutes les sections, de §0 à §17 : en haut et en bas de chaque page, retour au sommaire, section précédente et section suivante, avec leur titre complet. Le bas de §13 annonçait encore §14 « à venir ».
+- `section-05-connecteurs.md` : retrait d'un lien de navigation placé au milieu de la page ; dans §5.9, la commande de synchronisation utilise `--post-data` et lit le jeton dans le `.env` (la commande précédente envoyait un GET, refusé par la RAG API).
+- `section-11-prerequis-ms365.md` : la mention de bas de page renvoie à §14 au lieu d'annoncer Purview « à venir ».
+- `section-09-securite.md` : la section suivante est §11 ; §10 (validation et benchmarks) paraîtra après les mesures sur GPU.
+
+---
+
 ## [2.17.3] : Octobre 2026
 
 ### Documentation

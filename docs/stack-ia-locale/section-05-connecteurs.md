@@ -15,7 +15,7 @@ description: "Connecteur file server Windows SMB, lecture des ACL NTFS, résolut
 
 # §5 Connecteurs SMB et cloisonnement documentaire
 
-[Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | [Section suivante : §6 Cline : agent de codage](section-06-cline.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
 
@@ -646,9 +646,6 @@ Ce cas confirme que le filtre ne renvoie pas systématiquement zéro chunk : il 
 
 ---
 
-[Suite : §6 Agent de codage](section-06-cline.md)
-
----
 
 ## §5.9 Deux collections Qdrant : règles de gouvernance
 
@@ -680,9 +677,13 @@ cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 python indexer.py --corpus /mnt/corpus-root --reset
 # Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
-docker compose exec n8n wget -qO- \
-  --header="Authorization: Bearer <ADMIN_TOKEN>" \
-  http://rag-api:8080/admin/sync
+# --post-data est obligatoire : /admin/sync n'accepte que POST (sinon réponse 405).
+cd /root/rag-stack
+TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2-)
+docker compose exec n8n wget -qO- --post-data='' \
+  --header="Authorization: Bearer $TOKEN" \
+  http://rag-api:8080/admin/sync | python3 -m json.tool
+unset TOKEN
 ```
 
 **Règle 4 : vérifier les deux compteurs après chaque réindexation.**
@@ -695,7 +696,7 @@ curl -s http://localhost:6333/collections/documentation | python3 -m json.tool |
 
 ---
 
-[Suite : §6 Cline : agent de codage](section-06-cline.md)
+[Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | [Section suivante : §6 Cline : agent de codage](section-06-cline.md)
 
 ---
 
