@@ -95,7 +95,6 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§15 Sécurité des données](section-15-securite-donnees.md) | Clé d'API Qdrant, chiffrement des données au repos (LUKS2, TPM), secrets et clés sur le disque chiffré, migration, composants abandonnés, sauvegardes | Publié |
 | [§16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md) | Test de non-divulgation automatisé, contrôle après chaque synchronisation avec alerte, masque des droits NTFS, durcissement de la RAG API, d'Open WebUI et de n8n | Publié |
 | [§17 Gouvernance](section-17-gouvernance.md) | Responsabilités, rotation des secrets et certificats, politique de corpus, droit à l'effacement, audit périodique, limites de la conformité technique | Publié |
-| Gouvernance Microsoft 365 | Rotation des certificats, audit des accès, limites et responsabilités | À venir |
 
 Les numéros de section sont attribués à la publication.
 

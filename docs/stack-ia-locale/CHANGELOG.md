@@ -4,6 +4,15 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.17.3] : Octobre 2026
+
+### Documentation
+
+- `index.md` du guide : retrait de la ligne « Gouvernance Microsoft 365, À venir », restée dans le tableau des sections alors que §17 est publiée.
+- `README.md` : la Partie 3 est présentée comme publiée (§11 à §17), et non plus « en cours de publication ».
+
+---
+
 ## [2.17.2] : Octobre 2026
 
 Questions larges : diversité des sources et réponses partielles.

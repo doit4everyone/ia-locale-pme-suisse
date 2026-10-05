@@ -28,7 +28,7 @@ Procédures pas à pas pour déployer un pipeline RAG local opérationnel sur VM
 
 Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + Ollama + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Validé en lab sur matériel CPU sans GPU (i7-14700, 64 Go DDR5).
 
-**Partie 3 (§11 et suivantes) : Microsoft 365.** En cours de publication :
+**Partie 3 (§11 à §17) : Microsoft 365.** Publiée :
 
 - §11 : connexion à Microsoft Graph par certificat, résolution des groupes Entra ID, mise à niveau compatible des scripts.
 - §12 : synthèse des réunions Teams. La transcription est récupérée via Graph, résumée par le modèle local et envoyée en brouillon à l'organisateur seul. Traitement limité aux organisateurs membres d'un groupe d'adhésion.
