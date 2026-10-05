@@ -372,7 +372,7 @@ Sur la carte graphique de 16 Go prévue pour le §10, les fenêtres actuelles ne
 
 ### §13.8.3 Constats de gouvernance
 
-Le tenant et le serveur de fichiers du lab ont servi à de nombreux essais avant ce guide, comme ceux de beaucoup de PME qui ont testé des outils d'IA. Construire l'indexation y a mis au jour des situations typiques d'un tel environnement. La colonne « Origine » dit honnêtement d'où elles viennent : plusieurs ont été créées par nos propres essais, ce qui ne les rend pas moins représentatives. Elles sont reprises sous forme de recommandations dans la section gouvernance.
+Le tenant et le serveur de fichiers du lab ont servi à de nombreux essais avant ce guide, comme ceux de beaucoup de PME qui ont testé des outils d'IA. Construire l'indexation y a mis à jour des situations typiques d'un tel environnement. La colonne « Origine » dit honnêtement d'où elles viennent : plusieurs ont été créées par nos propres essais, ce qui ne les rend pas moins représentatives. Elles sont reprises sous forme de recommandations dans la section gouvernance.
 
 | Situation | Origine dans le lab | Risque | Traitement |
 |---|---|---|---|
