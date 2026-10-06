@@ -21,7 +21,7 @@ description: "Indexation des documents SharePoint chiffrés par une étiquette M
 
 ---
 
-> **Mise en garde : lire avant toute mise en œuvre.**
+> **Mise en garde, à lire avant toute mise en œuvre.**
 >
 > Cette section montre comment indexer des documents **chiffrés** par une étiquette de confidentialité. Techniquement, c'est possible, et les droits de chaque utilisateur restent respectés à chaque question. Mais trois conséquences doivent être acceptées en connaissance de cause :
 >
