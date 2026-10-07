@@ -4,6 +4,24 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.18.2] : Octobre 2026
+
+Trois points d'une revue externe : deux corrigés, un mesuré puis écarté.
+
+### Scripts
+
+- `api/anon_main.py` : le test d'accès (`/admin/verifier-acces`) distingue une collection absente d'une panne de Qdrant (HTTP 503) ; correspondance exacte du document par défaut (nom de fichier ou chemin complet), cas ambigu refusé (HTTP 400), correspondance partielle sur demande.
+- `test_cloisonnement.py` : même règle de correspondance, y compris en mode complet ; option `correspondance` par cas.
+- `cas_cloisonnement.exemple.json` : règle de désignation des documents.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : verdict ERREUR, correspondance exacte, le cas du guide en deux exemplaires révélé par ce contrôle, 44 sur 44.
+- `section-10-gpu.md` §10.6 : identité des extraits dans la fusion des classements, mesurée et écartée.
+- `suivi-corrections.md` : point 60 corrigé, points 61 et 62 ouverts.
+
+---
+
 ## [2.18.1] : Octobre 2026
 
 ### Documentation

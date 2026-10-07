@@ -68,12 +68,17 @@ Il renvoie trois nombres : les chunks du document dans l'index, ceux qui restent
 | **FUITE** | Document interdit accessible : le script se termine en erreur |
 | REFUS À TORT | Document autorisé inaccessible : défaut, mais dans le sens sûr |
 | ABSENT | Document non indexé : le cas ne teste rien |
+| ERREUR | Qdrant injoignable (HTTP 503), droits non résolus (403), ou cas ambigu (400) : aucun verdict n'est rendu |
+
+Un cas désigne son document par son **nom de fichier exact**, ou par son **chemin complet** quand plusieurs documents portent le même nom. Un nom partagé est refusé comme ambigu : un cas qui évalue deux documents à la fois ne prouve rien sur aucun des deux. Dans le lab, ce contrôle a révélé que le cas du guide du helpdesk portait sur deux exemplaires, l'un à la racine du site (ouvert à tous), l'autre dans le site de l'équipe IT (restreint) : il passait grâce au premier, sans dire lequel. Le cas a été précisé, et le second exemplaire a reçu son propre cas. Une correspondance partielle (`"correspondance": "fragment"`) reste possible cas par cas, pour le lab.
+
+Une **panne de Qdrant** produit une erreur, jamais un verdict : vérifié en arrêtant Qdrant pendant le test (quatre `ERREUR`, HTTP 503). Auparavant, une erreur de lecture était traitée comme une collection absente.
 
 ```bash
 docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json
 ```
 
-Les cas du lab reprennent les matrices de §9 (DENY nominatif), §13 (quatre modes de partage SharePoint, site ouvert à tous) et §14 (trois étiquettes chiffrées), plus le cas de §16.5. Résultat : **40 sur 40**, et la colonne « après ACL » montre, par exemple, le document Finances chiffré passer la première condition pour le comptable (il a accès au site), puis être retiré par Purview seul.
+Les cas du lab reprennent les matrices de §9 (DENY nominatif), §13 (quatre modes de partage SharePoint, site ouvert à tous) et §14 (trois étiquettes chiffrées), plus le cas de §16.5. Résultat : **40 sur 40**, puis **44 sur 44** avec le cas ajouté en v2.18.2, et la colonne « après ACL » montre, par exemple, le document Finances chiffré passer la première condition pour le comptable (il a accès au site), puis être retiré par Purview seul.
 
 Le mode complet garde un intérêt : il mesure la qualité de la recherche. Ses cas « manqués » (document autorisé absent des sources) ne sont pas un sujet de sécurité, mais un indicateur pour le §10.
 

@@ -243,8 +243,8 @@ def _load_collection_chunks(collection_name: str) -> list[dict]:
         )
         return [
             {
-                # Clé unique par chunk : hash du texte. Distinct du source_id
-                # qui est le hash du fichier (même pour tous les chunks d'un fichier).
+                # Empreinte du texte (chunk_key) : clé de fusion des classements et
+                # détection des copies (§8.9). Voir search_qdrant pour le choix.
                 "chunk_key":   hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
                 "text":        p.payload.get("text", ""),
                 "source":      p.payload.get("source", "inconnu"),
@@ -510,10 +510,12 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     Recherche hybride : vectorielle (Qdrant, deux collections) + mots-clés (BM25),
     fusionnée par Reciprocal Rank Fusion (RRF, k=60).
 
-    Clé RRF : hash du texte du chunk (chunk_key), unique par chunk.
-    Contrairement au source_id (hash du fichier, identique pour tous les chunks
-    d'un même fichier), le chunk_key permet à plusieurs chunks du même fichier
-    d'entrer dans le classement RRF indépendamment.
+    Clé RRF : empreinte du texte de l'extrait (chunk_key). Ce n'est PAS une
+    identité unique : deux extraits au texte identique dans deux documents sont
+    fusionnés en une seule entrée, qui porte les métadonnées du dernier vu.
+    Choix mesuré (§10.6) : une clé par position (document, rang) a fait passer
+    une copie de test d'un contrat devant le contrat lui-même. Les droits ne sont
+    pas en jeu : les deux branches sont filtrées avant la fusion.
 
     Le filtre ACL NTFS s'applique sur les deux branches.
     Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère tous les chunks
@@ -595,7 +597,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                     break
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
-        # Clé = chunk_key (hash du texte), unique par chunk.
+        # Clé = empreinte du texte (voir la docstring : choix mesuré).
         # vec_results est triée par score cosinus décroissant avant l'énumération
         # pour éviter que la collection documentation soit pénalisée par un biais
         # de rang : sans tri, les rangs de documentation commencent à top_k.
@@ -1451,7 +1453,16 @@ async def teams_sync(credentials: HTTPAuthorizationCredentials = Security(securi
 
 class VerifAccesRequest(BaseModel):
     user_id: str
-    document: str           # chemin source exact, ou fragment unique du chemin
+    document: str              # chemin source complet ou nom de fichier
+    correspondance: str = "exact"   # « exact » (défaut) ou « fragment » (lab)
+
+
+def _correspond(source: str, document: str, mode: str) -> bool:
+    """« exact » : chemin complet identique, ou nom de fichier identique.
+    « fragment » : le texte apparaît dans le chemin (pratique, moins probant)."""
+    if mode == "fragment":
+        return document in source
+    return source == document or source.rsplit("/", 1)[-1] == document
 
 
 def _scroll_tout(collection: str, scroll_filter=None) -> list:
@@ -1469,28 +1480,42 @@ def _scroll_tout(collection: str, scroll_filter=None) -> list:
             return points
 
 
-async def calculer_acces(user_id: str, document: str) -> dict:
+async def calculer_acces(user_id: str, document: str, correspondance: str = "exact") -> dict:
     """
     Combien de chunks du document sont accessibles à cet utilisateur, après
     EXACTEMENT les filtres de la recherche (filtre Qdrant sur autorises[],
     DENY par check_access, puis Purview). Ni classement, ni génération.
-    Lève PermissionError si les droits de l'utilisateur ne peuvent être résolus.
+    Lève PermissionError si les droits de l'utilisateur ne peuvent être résolus,
+    RuntimeError si Qdrant ne répond pas (une panne n'est jamais confondue avec une
+    collection absente), ValueError si le document désigne plusieurs sources en
+    correspondance exacte (cas ambigu, donc non probant).
     """
+    if correspondance not in ("exact", "fragment"):
+        raise ValueError("correspondance : « exact » ou « fragment »")
     user_groups = get_user_groups(user_id)
     if not user_groups:
         raise PermissionError("Résolution des droits impossible")
     filtre = Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=user_groups))])
+    try:
+        existantes = {c.name for c in qdrant.get_collections().collections}
+    except Exception as e:
+        raise RuntimeError(f"Qdrant ne répond pas : {e}")
     total, apres_acl, accessibles, sources = 0, 0, 0, set()
+    correspondantes = set()
     for collection in (COLLECTION, DOCUMENTATION_COLLECTION):
+        if collection not in existantes:
+            continue  # collection réellement absente (vérifié ci-dessus)
         try:
             tous = _scroll_tout(collection)
             filtres = _scroll_tout(collection, filtre)
-        except Exception:
-            continue  # collection absente
-        total += sum(1 for p in tous if document in p.payload.get("source", ""))
+        except Exception as e:
+            raise RuntimeError(f"Lecture de la collection {collection} impossible : {e}")
+        concernes = [p for p in tous if _correspond(p.payload.get("source", ""), document, correspondance)]
+        total += len(concernes)
+        correspondantes.update(p.payload.get("source", "") for p in concernes)
         candidats = []
         for p in filtres:
-            if document not in p.payload.get("source", ""):
+            if not _correspond(p.payload.get("source", ""), document, correspondance):
                 continue
             # Seconde partie de la première condition : DENY prioritaire
             if not check_access(user_groups, p.payload.get("autorises", []), p.payload.get("interdits", [])):
@@ -1501,7 +1526,11 @@ async def calculer_acces(user_id: str, document: str) -> dict:
         gardes = await filtrer_purview(candidats, user_id)
         accessibles += len(gardes)
         sources.update(c["source"] for c in gardes)
+    if correspondance == "exact" and len(correspondantes) > 1:
+        raise ValueError(f"Document ambigu : {len(correspondantes)} sources portent ce nom "
+                         f"({', '.join(sorted(correspondantes))}) ; préciser le chemin complet")
     return {"user_id": user_id, "groupes": len(user_groups), "document": document,
+            "correspondance": correspondance,
             "chunks_total": total, "chunks_apres_acl": apres_acl,
             "chunks_accessibles": accessibles, "sources": sorted(sources)}
 
@@ -1518,9 +1547,14 @@ async def verifier_acces(
     if "@" not in request.user_id or not request.document:
         raise HTTPException(status_code=400, detail="user_id (email) et document requis")
     try:
-        res = await calculer_acces(request.user_id, request.document)
+        res = await calculer_acces(request.user_id, request.document, request.correspondance)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        logger.error(f"[VERIF] {e}")
+        raise HTTPException(status_code=503, detail=str(e))
     logger.info(f"[VERIF] {request.user_id} / {request.document} : "
                 f"{res['chunks_accessibles']} chunk(s) accessible(s) sur {res['chunks_total']}")
     return res
@@ -1551,7 +1585,7 @@ async def controle_cloisonnement() -> dict | None:
             res["cas"] += 1
             libelle = f"{cas['id']} / {compte}"
             try:
-                a = await calculer_acces(compte, cas["document"])
+                a = await calculer_acces(compte, cas["document"], cas.get("correspondance", "exact"))
             except Exception as e:
                 res["erreurs"].append(f"{libelle} : {e}")
                 continue

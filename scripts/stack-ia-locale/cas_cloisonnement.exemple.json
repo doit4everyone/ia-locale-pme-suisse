@@ -1,5 +1,5 @@
 {
-  "_commentaire": "Comptes de test et documents de test : à adapter. attendu : true (accès), false (refus), absent ou \"?\" (non vérifié). Copier en /rag-pipeline/cas_cloisonnement.json.",
+  "_commentaire": "Comptes de test et documents de test : à adapter. attendu : true (accès), false (refus), absent ou \"?\" (non vérifié). document : nom de fichier exact, ou chemin complet si plusieurs documents portent le même nom (le cas est sinon refusé comme ambigu) ; \"correspondance\": \"fragment\" accepte une partie du chemin (lab uniquement, moins probant). Copier en /rag-pipeline/cas_cloisonnement.json.",
   "comptes": ["direction@votre-domaine.ch", "comptable@votre-domaine.ch", "client@votre-domaine.ch"],
   "cas": [
     {"id": "SMB-DENY", "question": "Quel contrat mentionne un forfait mensuel de CHF 9 999 ?",

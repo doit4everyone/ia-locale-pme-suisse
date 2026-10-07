@@ -67,10 +67,18 @@ def interroger(question: str, compte: str) -> dict:
 
 
 
-def verifier_acces(document: str, compte: str) -> dict:
+def correspond(source: str, document: str, mode: str) -> bool:
+    """Même règle que la RAG API : « exact » (chemin ou nom de fichier identique)
+    par défaut, « fragment » (texte contenu dans le chemin) si le cas le demande."""
+    if mode == "fragment":
+        return document in source
+    return source == document or source.rsplit("/", 1)[-1] == document
+
+
+def verifier_acces(document: str, compte: str, mode: str = "exact") -> dict:
     r = httpx.post(f"{URL}/admin/verifier-acces", timeout=300,
                    headers={"Authorization": f"Bearer {ADMIN}"},
-                   json={"user_id": compte, "document": document})
+                   json={"user_id": compte, "document": document, "correspondance": mode})
     if r.status_code != 200:
         return {"statut": r.status_code, "erreur": r.text[:200]}
     return {"statut": 200, **r.json()}
@@ -95,7 +103,8 @@ def evaluer(cas: dict, attendu, res: dict) -> tuple[str, str]:
     doc = cas["document"]
     secret = cas.get("secret", "")
     sources = res["sources"]
-    doc_present = None if sources is None else any(doc in s for s in sources)
+    mode = cas.get("correspondance", "exact")
+    doc_present = None if sources is None else any(correspond(s, doc, mode) for s in sources)
     secret_present = bool(secret) and secret in res["reponse"]
 
     if res["statut"] not in (200, 422):
@@ -162,7 +171,7 @@ def main():
             attendu = cas["attendu"].get(compte, "?")
             t0 = time.time()
             if a.mode == "acces":
-                res = verifier_acces(cas["document"], compte)
+                res = verifier_acces(cas["document"], compte, cas.get("correspondance", "exact"))
                 verdict, detail = evaluer_acces(attendu, res)
             else:
                 res = interroger(cas["question"], compte)
