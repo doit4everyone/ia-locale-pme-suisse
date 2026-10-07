@@ -198,6 +198,26 @@ Avant le GPU, le lab a comparé `qwen2.5:14b`, le modèle recommandé jusqu'ici,
 
 **`qwen3:14b` devient le modèle recommandé.** La meilleure capacité de synthèse ne s'est pas faite au prix de l'invention : les refus tiennent. Le mode de raisonnement de Qwen3 est désactivé par la directive `/no_think` en fin de prompt ; aucune réponse ne contient de balise de raisonnement.
 
+### Apertus, le modèle suisse
+
+Apertus, développé par l'EPFL, l'ETH Zurich et le Centre suisse de calcul scientifique (CSCS), est un modèle entièrement ouvert (poids, données et méthode d'entraînement) et conçu pour le multilinguisme. Pour une PME suisse attentive à l'origine de ses outils, la question de son usage se pose naturellement : il a été testé dans sa version de 8 milliards de paramètres (Apertus-8B-Instruct-2509), quantifiée en Q4_K_M, avec le même jeu de questions et le même juge.
+
+Il n'est pas disponible dans la bibliothèque officielle d'Ollama au moment du test. La version utilisée est une conversion GGUF publiée par la communauté sur Hugging Face, que l'on télécharge par `ollama pull hf.co/<auteur>/<dépôt>:Q4_K_M`. Elle tient sur la carte (5 à 6 Go) et démarre sans erreur, mais elle embarque le gabarit de conversation d'origine, écrit pour la bibliothèque Transformers, et non un gabarit au format d'Ollama. Les jetons propres à Apertus risquent alors d'être mal placés : à la question « quelle est la capitale du canton du Jura ? », le modèle répondait « Delle ». Avec un gabarit réécrit au format d'Ollama (un modèle local créé par `ollama create` à partir d'un `Modelfile`), il répond « Delémont ».
+
+| Mesure | `qwen3:14b` | Apertus 8B, gabarit d'origine | Apertus 8B, gabarit réécrit |
+|---|---|---|---|
+| Score sur le jeu de questions | 11 à 12 sur 15 | 4 sur 15 | 4 sur 15 |
+| Questions précises, bon document en tête du contexte | Réponses justes et citées | Refus | Refus |
+| Document absent pour le compte (code confidentiel) | Refus | Code **inventé** | Code **inventé** |
+| Fuite du vrai document | Aucune | Aucune | Aucune |
+
+Le gabarit n'était donc pas la seule cause. Isolé du RAG, avec un contexte d'une phrase et une consigne courte, le modèle extrait correctement l'information (sans la citer). Avec le contexte réel (environ 5 000 tokens) et un prompt strict, il refuse des questions dont la réponse est sous ses yeux, recopie des extraits bruts au lieu de répondre, et, sur la question posée par un compte sans droit, invente un code de vérification plausible. Ce dernier cas n'est pas une fuite : le cloisonnement a joué, le vrai document n'était pas dans le contexte, et le juge a signalé la réponse. Mais c'est le comportement le plus dangereux pour un outil documentaire.
+
+**Apertus 8B n'est pas adapté à ce RAG, dans cette version et cette taille.** Ce résultat ne juge pas le projet : il compare un modèle de recherche de 8 milliards de paramètres, dont les priorités sont la transparence et le multilinguisme, à un modèle de 14 milliards fortement entraîné à suivre des consignes. Le test sera à refaire avec les versions suivantes. Deux enseignements valent pour tout modèle :
+
+- **vérifier le gabarit d'une conversion communautaire** avant toute évaluation (`ollama show <modèle> --template`) : un gabarit inadapté fausse le jugement porté sur le modèle ;
+- **un test court ne prédit pas le comportement dans le RAG** : seul le jeu de questions complet, avec le vrai contexte et le vrai prompt, a montré les refus et l'invention.
+
 La synthèse Teams illustre une leçon de méthode. Comparé à un seul passage de l'ancien modèle (12 sur 14), `qwen3:14b` semblait moins bon (11). Deux passages de chaque montrent que `qwen2.5:14b` varie lui-même entre 11 et 12 : l'écart est dans le bruit. Le lab utilise donc **un seul modèle** pour les questions et la synthèse, ce qui économise 12 Go de mémoire et un rechargement à chaque passage Teams.
 
 ---

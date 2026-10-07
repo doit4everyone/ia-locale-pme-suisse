@@ -4,6 +4,14 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.18.1] : Octobre 2026
+
+### Documentation
+
+- `section-10-gpu.md` §10.5 : test d'Apertus 8B, le modèle suisse de l'EPFL, de l'ETH Zurich et du CSCS. Conversion communautaire, gabarit de conversation à vérifier, résultats sur le jeu de questions (4 sur 15 : refus avec le bon document, extraits recopiés, code inventé pour un compte sans droit, aucune fuite) et conclusion : non adapté à ce RAG dans cette version.
+
+---
+
 ## [2.18.0] : Octobre 2026
 
 Passage sur GPU (NVIDIA RTX 5060 Ti 16 Go) et campagne de mesures.
