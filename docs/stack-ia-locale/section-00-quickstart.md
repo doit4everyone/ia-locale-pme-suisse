@@ -282,9 +282,9 @@ SMB_DOMAIN=VOTREDOMAINE
 # Vérifier que les deux modèles sont présents
 curl http://<IP-HOTE-OLLAMA>:11434/api/tags | python3 -m json.tool | grep name
 
-# Résultat attendu : qwen2.5:14b et qwen3:4b dans la liste
+# Résultat attendu : qwen3:14b et qwen3:4b dans la liste
 # Si absent, sur LABO-G9 (Windows) :
-# ollama pull qwen2.5:14b
+# ollama pull qwen3:14b
 # ollama pull qwen3:4b
 ```
 

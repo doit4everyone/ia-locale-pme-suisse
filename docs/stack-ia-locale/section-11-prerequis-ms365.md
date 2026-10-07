@@ -15,7 +15,7 @@ description: "Connexion de la stack RAG à Microsoft Graph : App Registration pa
 
 # §11 Prérequis Microsoft 365
 
-[Retour au sommaire](index.md) | [Section précédente : §9 Sécurité et durcissement](section-09-securite.md) | [Section suivante : §12 Synthèse des réunions Teams](section-12-teams.md)
+[Retour au sommaire](index.md) | [Section précédente : §10 Validation et performances sur GPU](section-10-gpu.md) | [Section suivante : §12 Synthèse des réunions Teams](section-12-teams.md)
 
 **Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toutes les étapes de cette section ont été exécutées et testées sur un tenant Microsoft 365 réel synchronisé par Entra Connect. L'indexation des documents SharePoint n'est pas couverte ici : elle fait l'objet de [§13](section-13-sharepoint.md).
 
@@ -435,7 +435,7 @@ La réponse dans Open WebUI est identique à celle obtenue sans l'extension, cit
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §9 Sécurité et durcissement](section-09-securite.md) | [Section suivante : §12 Synthèse des réunions Teams](section-12-teams.md)
+[Retour au sommaire](index.md) | [Section précédente : §10 Validation et performances sur GPU](section-10-gpu.md) | [Section suivante : §12 Synthèse des réunions Teams](section-12-teams.md)
 
 ---
 

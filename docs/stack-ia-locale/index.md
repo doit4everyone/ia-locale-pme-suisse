@@ -29,7 +29,7 @@ Utilisateur → Open WebUI (VM-RAG-LAB, port 3001, authentification LDAP AD)
                   └→ RAG API FastAPI (port 8080)
                        ├→ auth.py : résolution groupes AD (LDAP, svc-rag)
                        ├→ Qdrant : index vectoriel + ACL NTFS (autorises[])
-                       └→ Ollama qwen2.5:14b (LABO-G9, hôte Windows)
+                       └→ Ollama qwen3:14b (LABO-G9, hôte Windows, GPU)
 ```
 
 Onyx CE est déployé dans §4 comme étape de validation de l'indexation et du backend Ollama. Il est ensuite remplacé par Open WebUI + RAG API FastAPI qui constituent la stack finale, avec le cloisonnement documentaire réel.
@@ -80,7 +80,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, OCR (documentaire) ; Teams : voir §12 | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
-| §10 Validation et benchmarks | Checklist complète, mesure du débit, services systemd | À venir |
+| [§10 Validation et performances sur GPU](section-10-gpu.md) | Passage sur GPU, placement des modèles, méthode de mesure, choix des modèles, construction du contexte, reranker, limites du corpus | Publié |
 
 > **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés en lab pour ces sections sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les scripts du dossier principal évoluent avec la Partie 3, en restant compatibles avec la stack SMB.
 
@@ -115,8 +115,8 @@ Les numéros de section sont attribués à la publication.
 La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance. Il reste à venir :
 
 - **le déploiement sur une VM neuve** avec le disque de données chiffré préparé dès le départ (§1.5), et des scripts de déploiement simplifiés ;
-- **les mesures de §10**, après l'installation du GPU RTX 5060 Ti : modèles, modèle d'embedding, juge, reranker, performances ;
-- **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal), comme extension de la Partie 2, après §10 ;
+- **le résumé d'un document entier** (lecture par morceaux puis synthèse), que le RAG ne sait pas faire en choisissant des extraits (§10.10) ;
+- **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal), comme extension de la Partie 2 ;
 - **une section « Du lab à la production »**, qui listera ce qu'un déploiement en entreprise exige en plus du lab.
 
 ---

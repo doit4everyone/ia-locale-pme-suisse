@@ -50,6 +50,13 @@ Variables d'environnement de l'extension :
 """
 
 import os
+
+
+def _env_nombre(nom: str, defaut, conv=int):
+    """Lit une variable numérique ; absente OU vide = valeur par défaut. Une
+    variable transmise vide par le Compose ne doit pas empêcher le démarrage."""
+    valeur = os.getenv(nom, "").strip()
+    return conv(valeur) if valeur else conv(defaut)
 import logging
 import ssl
 import urllib.parse
@@ -67,7 +74,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────
 
 LDAP_HOST    = os.getenv("LDAP_HOST",    "<NOM-DC>.votre-domaine.ch")
-LDAP_PORT    = int(os.getenv("LDAP_PORT", "636"))
+LDAP_PORT    = _env_nombre("LDAP_PORT", "636")
 LDAP_USE_TLS = os.getenv("LDAP_USE_TLS", "true").lower() == "true"
 LDAP_BASE_DN = os.getenv("LDAP_BASE_DN", "DC=votre-domaine,DC=ch")
 LDAP_BIND_DN = os.getenv("LDAP_BIND_DN",
@@ -90,7 +97,7 @@ GRAPH_TIMEOUT         = 10  # secondes
 
 # TTL du cache des groupes en secondes (évite un appel LDAP par requête)
 # Un utilisateur dont les groupes changent devra attendre ce délai
-GROUPS_CACHE_TTL = int(os.getenv("GROUPS_CACHE_TTL", "300"))  # 5 minutes
+GROUPS_CACHE_TTL = _env_nombre("GROUPS_CACHE_TTL", "300")  # 5 minutes
 
 # ─────────────────────────────────────────
 # Cache simple avec expiration

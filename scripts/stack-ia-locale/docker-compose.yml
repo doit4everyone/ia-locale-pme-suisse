@@ -1,4 +1,18 @@
 services:
+  # Reranker (§10.8), OPTIONNEL : désactivé dans la configuration recommandée.
+  # Démarrage : docker compose --profile reranker up -d reranker, puis RERANKER_URL=http://reranker:80
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    container_name: reranker
+    profiles: ["reranker"]
+    command: ["--model-id", "Alibaba-NLP/gte-multilingual-reranker-base", "--auto-truncate", "--max-batch-tokens", "4096", "--max-concurrent-requests", "64"]
+    mem_limit: 4g
+    environment:
+      - HF_HUB_OFFLINE=${RERANKER_OFFLINE:-0}
+    volumes:
+      - ./reranker_data:/data
+    restart: unless-stopped
+
 
   qdrant:
     # Versions figées, validées en lab (§3.4). Mettre à jour = revalider (§16.8).
@@ -64,7 +78,19 @@ services:
       - CANDIDATS=${CANDIDATS:-30}
       - PRINCIPAL_MAX=${PRINCIPAL_MAX:-9}
       - CONTEXT_OTHER_DOCS=${CONTEXT_OTHER_DOCS:-6}
-      - EXTRAITS_PAR_COMPLEMENT=${EXTRAITS_PAR_COMPLEMENT:-2}
+      - EXTRAITS_PAR_COMPLEMENT=${EXTRAITS_PAR_COMPLEMENT:-4}
+      - LLM_SEED=${LLM_SEED:-}
+      - JUDGE_NUM_GPU=${JUDGE_NUM_GPU:-}
+      - EMBED_NUM_GPU=${EMBED_NUM_GPU:-}
+      - PROMPT_REGLES_V2=${PROMPT_REGLES_V2:-1}
+      - COMPLEMENT_VOISINS=${COMPLEMENT_VOISINS:-1}
+      - DOC_COMPLET_MAX=${DOC_COMPLET_MAX:-15}
+      - RERANKER_URL=${RERANKER_URL:-}
+      - RERANK_CANDIDATS=${RERANK_CANDIDATS:-20}
+      - RERANK_MODE=${RERANK_MODE:-fusion}
+      - RERANK_RRF_K=${RERANK_RRF_K:-10}
+      - RERANK_TIMEOUT=${RERANK_TIMEOUT:-20}
+      - SUMMARY_KEEP_ALIVE=${SUMMARY_KEEP_ALIVE:-2m}
       - CHUNK_SIZE=${CHUNK_SIZE}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP}
       - MIN_CHUNK_WORDS=${MIN_CHUNK_WORDS}

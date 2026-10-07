@@ -73,6 +73,13 @@ import fnmatch
 import hashlib
 import json
 import os
+
+
+def _env_nombre(nom: str, defaut, conv=int):
+    """Lit une variable numérique ; absente OU vide = valeur par défaut. Une
+    variable transmise vide par le Compose ne doit pas empêcher le démarrage."""
+    valeur = os.getenv(nom, "").strip()
+    return conv(valeur) if valeur else conv(defaut)
 import re
 import sys
 import httpx
@@ -109,6 +116,7 @@ except ImportError:
 # ─────────────────────────────────────────
 
 OLLAMA_URL    = os.getenv("OLLAMA_URL",        "http://<IP-HOTE-OLLAMA>:11434")
+EMBED_NUM_GPU = os.getenv("EMBED_NUM_GPU", "")   # « 0 » : embedding sur le CPU (§10)
 EMBED_MODEL   = os.getenv("EMBED_MODEL",       "nomic-embed-text")
 QDRANT_URL    = os.getenv("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None   # clé d'API de Qdrant, vide = aucune
@@ -125,11 +133,11 @@ DOCUMENTATION_PATHS = [
     if p.strip()
 ]
 ORG_OWNER       = os.getenv("ORG_OWNER",       "Organisation interne")
-CHUNK_SIZE      = int(os.getenv("CHUNK_SIZE",      "150"))
-CHUNK_OVERLAP   = int(os.getenv("CHUNK_OVERLAP",   "20"))
+CHUNK_SIZE      = _env_nombre("CHUNK_SIZE", "150")
+CHUNK_OVERLAP   = _env_nombre("CHUNK_OVERLAP", "20")
 # Défaut aligné sur la stack validée (.env et main.py) : une valeur différente
 # déclencherait une réindexation complète, min_chunk_words étant comparé.
-MIN_CHUNK_WORDS = int(os.getenv("MIN_CHUNK_WORDS", "8"))
+MIN_CHUNK_WORDS = _env_nombre("MIN_CHUNK_WORDS", "8")
 
 # Version de l'algorithme de découpage. À incrémenter à chaque modification
 # de chunk_blocks() : les fichiers indexés avec une autre version sont
@@ -560,7 +568,10 @@ def get_embedding(text: str) -> list[float]:
     text = _re.sub(r'[. ]{10,}', ' ', text).strip()
     r = http_client().post(
         f"{OLLAMA_URL}/api/embeddings",
-        json={"model": EMBED_MODEL, "prompt": text}
+        json={"model": EMBED_MODEL, "prompt": text,
+              # Même placement que la RAG API (EMBED_NUM_GPU), sinon Ollama
+              # recharge le modèle d'embedding à chaque alternance.
+              **({"options": {"num_gpu": int(EMBED_NUM_GPU)}} if EMBED_NUM_GPU.strip() else {})}
     )
     r.raise_for_status()
     return r.json()["embedding"]

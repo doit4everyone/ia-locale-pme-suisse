@@ -243,7 +243,7 @@ L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit
 | `CANDIDATS` | 30 | Candidats retenus par la recherche avant la construction du contexte (§8.9). Remplace `TOP_K`, qui tronquait la liste fusionnée à 20 et écartait des documents pertinents |
 | `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes (vectorielle + BM25). 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
 | `MAX_CONTEXT_CHUNKS` | 14 | Plafond d'extraits envoyés au modèle quand aucun document n'est nettement en tête |
-| `PRINCIPAL_MAX`, `CONTEXT_OTHER_DOCS`, `EXTRAITS_PAR_COMPLEMENT` | 9, 6, 2 | Répartition du contexte entre le document principal et les documents complémentaires (§8.9) |
+| `PRINCIPAL_MAX`, `CONTEXT_OTHER_DOCS`, `EXTRAITS_PAR_COMPLEMENT` | 9, 6, 4 | Répartition du contexte entre le document principal et les documents complémentaires (§8.9) ; 4 extraits consécutifs par complément depuis la v2.18.0 (§10.6) |
 
 ### Limite sur les très gros fichiers
 
@@ -315,7 +315,7 @@ Résultat observé en lab : une question large sur les clients, qui obtenait une
 |---|---|---|
 | Candidats après fusion | 20 | 30 |
 | Document principal | jusqu'à 14 extraits | jusqu'à 9 extraits |
-| Complément | 3 extraits quelconques | 6 documents distincts × 2 extraits, regroupés par document |
+| Complément | 3 extraits quelconques | 6 documents distincts, 2 extraits chacun (4 extraits consécutifs depuis la v2.18.0, §10.6) |
 | Copies | non détectées | écartées : texte identique, ou même nom de fichier qu'un document retenu |
 | Volume envoyé au modèle | environ 17 extraits | environ 21 extraits |
 

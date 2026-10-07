@@ -65,6 +65,12 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 49 | Images en `latest` et `main` : versions figées et empreintes documentées (§3.4) ; contrôles automatiques du dépôt par GitHub Actions | v2.17.1 | 2026-10-04 |
 | 50 | Contexte construit pour les seules questions précises : liste tronquée à 20 candidats, 3 extraits complémentaires quelconques, copies non écartées. Diversité des sources (§8.9) | v2.17.2 | 2026-10-05 |
 | 51 | Prompt « tout ou rien » : refus dès qu'une réponse était incomplète. Réponse partielle explicite, protégée par deux tests de refus (§8.9) | v2.17.2 | 2026-10-05 |
+| 53 | Juge et embedding sur CPU par défaut, sans graine de génération : réglages `JUDGE_NUM_GPU`, `EMBED_NUM_GPU`, `LLM_SEED` ; les trois modèles validés sur la carte (§10.2) | v2.18.0 | 2026-10-07 |
+| 54 | Document principal tronqué quand son meilleur extrait est l'en-tête : document court envoyé en entier (`DOC_COMPLET_MAX`), fenêtre décalée pour les longs documents (§10.6) | v2.18.0 | 2026-10-07 |
+| 55 | Documents complémentaires réduits à leurs en-têtes : extraits consécutifs autour du meilleur extrait, mêmes filtres d'accès que le document principal (§10.6) | v2.18.0 | 2026-10-07 |
+| 56 | Fenêtre du juge plus petite que celle du modèle : sources coupées, affirmations justes déclarées non ancrées. Par défaut, la fenêtre du juge est celle du modèle (§10.6) | v2.18.0 | 2026-10-07 |
+| 57 | Réponses : balises du contexte et extraits recopiés, citations sans crochets, liens recopiés depuis un document, fausses absences. Nettoyage, normalisation des citations, règles de prompt (§10.9) | v2.18.0 | 2026-10-07 |
+| 58 | Réglages numériques transmis vides : la RAG API ne démarrait pas. Valeur vide traitée comme absente (19 lectures, RAG API, authentification, indexeur) ; réglages ajoutés au Compose avec leurs valeurs par défaut (§10.9) | v2.18.0 | 2026-10-07 |
 
 ---
 
@@ -90,6 +96,7 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 35 | Variables d'environnement d'Ollama ignorées sans message : `OLLAMA_CONTEXT_LENGTH` (espace insécable), `OLLAMA_NUM_THREADS` (inexistante) | Faible | Réglages à passer par requête ou par Modelfile (`num_ctx`, `num_thread`). Vérifier la ligne de commande des processus `llama-server`. |
 | 36 | Journal « Contexte étendu » : affiche la fenêtre demandée, pas les index réellement récupérés | Faible | A induit un diagnostic erroné en lab. Prévu avec la prochaine reconstruction. |
 | 52 | Questions larges sensibles à la formulation ; copies non détectées quand les noms diffèrent ; environ 1 min 30 par question sur CPU | Moyenne | À reprendre au §10 : `bge-m3`, reranker, MMR. |
+| 59 | Questions d'inventaire et entités mal retrouvées : limites qui relèvent du corpus (document d'index, page de synthèse) ; résumé d'un document entier à construire (§10.10) | Moyenne | Corpus et traitement dédié. |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API | Faible en lab | Open WebUI peut transmettre un jeton signé (`ENABLE_FORWARD_USER_INFO_HEADERS`, `FORWARD_USER_INFO_HEADER_JWT_SECRET`). Passage en production. |
 
 ---
@@ -178,8 +185,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §17 | Nouvelle section : gouvernance | v2.17.1 |
 | §3.4 | Versions figées et empreintes validées | v2.17.1 |
 | §8.9, §8.8, §17.4 | Diversité des sources, réponses partielles, formulations, versions de documents | v2.17.2 |
+| §10 | Nouvelle section : validation et performances sur GPU | v2.18.0 |
 | §16.8, §16.9 | Mise à jour d'Open WebUI revalidée, perte d'accès signalée | v2.17.1 |
 
 ---
 
-*Dernière mise à jour : 5 octobre 2026.*
+*Dernière mise à jour : 7 octobre 2026.*

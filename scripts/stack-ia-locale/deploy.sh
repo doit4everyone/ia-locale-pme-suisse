@@ -12,7 +12,7 @@
 #   - Compte svc-rag créé dans l'AD avec les bons groupes (voir §5.2)
 #   - Certificat CA du DC exporté si disponible (voir §9.2)
 #   - Modèles Ollama présents sur l'hôte Windows :
-#     ollama pull nomic-embed-text && ollama pull qwen2.5:14b && ollama pull qwen3:4b
+#     ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b
 # =============================================================================
 
 set -euo pipefail
@@ -73,7 +73,7 @@ info "Test de connectivite Ollama sur ${OLLAMA_BASE_URL}..."
 TAGS=$(curl -s -m 10 "${OLLAMA_BASE_URL}/api/tags") \
     || error "Ollama injoignable sur ${OLLAMA_BASE_URL}. Vérifier que OLLAMA_HOST=0.0.0.0 est defini sur l'hote Windows."
 
-for m in "nomic-embed-text" "qwen2.5:14b" "qwen3:4b"; do
+for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b"; do
     if echo "$TAGS" | grep -qE "\"${m}[\":]"; then
         ok "Modele $m present"
     else
@@ -279,7 +279,7 @@ ORG_NAME='${ORG_NAME}'
 # Ollama : LLM et embeddings
 LLM_BASE_URL=${OLLAMA_BASE_URL}
 EMBED_BASE_URL=${OLLAMA_BASE_URL}
-LLM_MODEL=qwen2.5:14b
+LLM_MODEL=qwen3:14b
 EMBED_MODEL=nomic-embed-text
 JUDGE_MODEL=qwen3:4b
 JUDGE_KEEP_ALIVE=2h

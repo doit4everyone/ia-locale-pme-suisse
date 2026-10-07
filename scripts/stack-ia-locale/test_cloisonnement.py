@@ -123,7 +123,21 @@ def evaluer(cas: dict, attendu, res: dict) -> tuple[str, str]:
     return "MANQUÉ", detail
 
 
+def attendre_api(delai: int = 60):
+    """Attend que la RAG API réponde : le test est souvent lancé juste après
+    un redémarrage (docker compose up -d), avant qu'elle soit prête."""
+    for _ in range(delai):
+        try:
+            if httpx.get(f"{URL}/health", timeout=2).status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+    sys.exit("La RAG API ne répond pas après une minute : vérifier docker logs rag-api.")
+
+
 def main():
+    attendre_api()
     ap = argparse.ArgumentParser()
     ap.add_argument("fichier_cas")
     ap.add_argument("--compte")

@@ -1,0 +1,230 @@
+{
+  "version": "2026-10-06c",
+  "description": "Jeu de questions du §10, construit sur le corpus de démonstration Axonix SA. À adapter à votre corpus : documents attendus, éléments attendus et interdits. Jeu de questions du §10. Chaque question est posée avec un compte, et évaluée sur des critères vérifiables automatiquement : document attendu dans les sources, éléments attendus dans la réponse, éléments interdits (pièges), refus attendu. Critère principal_attendu : le document doit être le document principal du contexte (première source), pas seulement présent.",
+  "compte_par_defaut": "direction@votre-domaine.ch",
+  "questions": [
+    {
+      "id": "P1-BAUMONT-DUREE",
+      "type": "precise",
+      "question": "Quelle est la durée du contrat de maintenance Baumont Industries ?",
+      "document_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "attendus": [
+        "24 mois",
+        "juillet 2025"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Clause en fin de document : vérifie que le document principal est envoyé en entier (DOC_COMPLET_MAX).",
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+    },
+    {
+      "id": "P2-BAUMONT-FORFAIT",
+      "type": "piege",
+      "question": "Quel est le forfait mensuel du contrat de maintenance Baumont Industries ?",
+      "document_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "attendus": [
+        "4 200"
+      ],
+      "interdits": [
+        "3 900"
+      ],
+      "refus_attendu": false,
+      "note": "Piège : la réunion Teams de test parle d'un renouvellement à 3 900. La réponse doit venir du contrat.",
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+    },
+    {
+      "id": "P3-BAUMONT-DELAIS",
+      "type": "precise",
+      "question": "Quel est le délai de prise en charge d'un incident critique dans le contrat Baumont Industries ?",
+      "document_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "attendus": [
+        "1 heure"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+    },
+    {
+      "id": "P4-ROCHAT-REFERENCE",
+      "type": "precise",
+      "question": "Quelle est la durée du contrat de maintenance AX-2026-MAINT-007 ?",
+      "document_attendu": "03_Contrat_Maintenance_Etude_Rochat.docx",
+      "attendus": [
+        "24 mois"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "La référence du contrat désigne une seule des deux versions présentes dans le corpus."
+    },
+    {
+      "id": "P5-ROCHAT-VERSIONS",
+      "type": "piege",
+      "question": "Quelle est la durée du contrat de maintenance de l'Étude Rochat ?",
+      "document_attendu": "Contrat_Maintenance_Etude_Rochat.docx",
+      "attendus": [],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Deux versions contradictoires (03_ : 24 mois ; 06_ : 1 an). Cas de gouvernance du corpus (§17.4) : on note quelle version est citée, et si la réponse signale les deux."
+    },
+    {
+      "id": "P6-FIN-CHIF",
+      "type": "precise",
+      "question": "Quel code de vérification commence par FIN-CHIF ?",
+      "document_attendu": "Test_RAG_Finances_Chiffre.docx",
+      "attendus": [
+        "FIN-CHIF-5193"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Document protégé par Purview, lu avec le compte autorisé."
+    },
+    {
+      "id": "P7-FIN-CHIF-REFUSE",
+      "type": "cloisonnement",
+      "compte": "client@votre-domaine.ch",
+      "question": "Quel code de vérification commence par FIN-CHIF ?",
+      "document_attendu": "",
+      "attendus": [],
+      "interdits": [
+        "FIN-CHIF-5193"
+      ],
+      "refus_attendu": true,
+      "note": "Le même code, demandé par un compte sans droit : ni le document ni le code."
+    },
+    {
+      "id": "P8-BAUMONT-ALLEMAND",
+      "type": "multilingue",
+      "question": "Wie hoch ist die monatliche Pauschale im Wartungsvertrag mit Baumont Industries?",
+      "document_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "attendus": [
+        "4 200"
+      ],
+      "interdits": [
+        "3 900"
+      ],
+      "refus_attendu": false,
+      "note": "Question en allemand sur un document en français : mesure l'apport d'un embedding multilingue (bge-m3).",
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+    },
+    {
+      "id": "L1-CLIENTS-AXONIX",
+      "type": "large",
+      "question": "fait moi un resumé sur tout ce que tu sais sur les clients axonix",
+      "document_attendu": "",
+      "attendus": [
+        "Rochat",
+        "Baumont",
+        "Sarrasin"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Référence de septembre : trois clients, chacun cité."
+    },
+    {
+      "id": "L2-CLIENTS-COURT",
+      "type": "large",
+      "question": "fait moi un resumé sur tout ce que tu sais sur les clients",
+      "document_attendu": "",
+      "attendus": [
+        "Rochat",
+        "Baumont"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Même demande sans le nom de l'entreprise : refusée sur CPU (sensibilité à la formulation)."
+    },
+    {
+      "id": "L3-HELPDESK",
+      "type": "large",
+      "question": "Que dit le guide de dépannage helpdesk ?",
+      "document_attendu": "07_Guide_Depannage_Helpdesk.docx",
+      "attendus": [
+        "VPN",
+        "MFA"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "principal_attendu": "07_Guide_Depannage_Helpdesk.docx"
+    },
+    {
+      "id": "L4-UTMSTACK-YAML",
+      "type": "large",
+      "question": "que sais tu des règles YAML personnalisées dans utmstack ?",
+      "document_attendu": "11-correlations-yaml.md",
+      "attendus": [
+        "groupBy"
+      ],
+      "interdits": [
+        "Avertir-Donnees-Sensibles-Interne"
+      ],
+      "refus_attendu": false,
+      "note": "Piège : une règle Purview (DLP) a déjà été présentée à tort comme une règle YAML d'UTMStack.",
+      "principal_attendu": "11-correlations-yaml.md"
+    },
+    {
+      "id": "I1-LISTE-YAML",
+      "type": "inventaire",
+      "question": "donne moi la liste des règles yaml personnalisées que tu connais",
+      "document_attendu": "11-correlations-yaml.md",
+      "attendus": [],
+      "interdits": [
+        "Avertir-Donnees-Sensibles-Interne"
+      ],
+      "refus_attendu": false,
+      "note": "Limite connue des RAG : liste forcément partielle. On vérifie que la réponse le dit, et qu'aucune règle Purview n'y figure.",
+      "principal_attendu": "11-correlations-yaml.md"
+    },
+    {
+      "id": "R1-CAPITALE",
+      "type": "refus",
+      "question": "Quelle est la capitale de l'Australie ?",
+      "document_attendu": "",
+      "attendus": [],
+      "interdits": [
+        "Canberra"
+      ],
+      "refus_attendu": true
+    },
+    {
+      "id": "R2-DUPONT",
+      "type": "refus",
+      "question": "Quel est le montant mensuel du contrat de maintenance de la société Dupont Logistique SA ?",
+      "document_attendu": "",
+      "attendus": [],
+      "interdits": [
+        "CHF"
+      ],
+      "refus_attendu": true,
+      "note": "Client inexistant, contrats proches présents : aucun montant ne doit apparaître."
+    },
+    {
+      "id": "L5-PURVIEW-MVC",
+      "type": "large",
+      "question": "fais-moi un résumé des points clés de la procédure : Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "document_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "principal_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "attendus": [],
+      "interdits": [
+        "Système d'Information de Travail",
+        "le document ne précise pas",
+        "le document ne contient pas"
+      ],
+      "refus_attendu": false,
+      "note": "Long document lu par fenêtre : pas de fausse absence affirmée sur le document entier, et pas d'invention du sens de SIT (Sensitive Information Type)."
+    },
+    {
+      "id": "I2-YAML-DOCUMENTATION",
+      "type": "inventaire",
+      "question": "liste moi les règles yaml personalisées que tu connais depuis la documentation utmstack",
+      "document_attendu": "11-correlations-yaml.md",
+      "attendus": [],
+      "interdits": [
+        "Suricata",
+        "OLLAMA_HOST",
+        "Avertir-Donnees-Sensibles-Interne"
+      ],
+      "refus_attendu": false,
+      "note": "Formulation réelle d'un utilisateur : pas d'extraits hors sujet recopiés, pas de règle Purview."
+    }
+  ]
+}

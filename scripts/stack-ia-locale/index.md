@@ -70,6 +70,8 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris ; affiche et contrôle les permissions du partage | Sur le serveur de fichiers, voir §5.2.4 et §16.5 du guide |
 | [`tests-apres-modification.md`](tests-apres-modification.md) | Procédure de tests après toute modification : démarrage, identité, qualité, refus, cloisonnement, synchronisation | Sur la VM, voir §8.9 et §16 |
 | `test_cloisonnement.py` | Test de non-divulgation : mode accès (filtres, quelques secondes) ou complet (questions) | Dans le conteneur `rag-api`, voir §16 |
+| [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
+| [`s10/jeu_questions_s10.json`](s10/jeu_questions_s10.json) | Jeu de 17 questions du corpus de démonstration, avec leurs critères ; à adapter à votre corpus | Lu par `mesure_s10.py` |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
@@ -109,7 +111,7 @@ Fonctionnalités :
 
 ```bash
 LLM_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
-LLM_MODEL=qwen2.5:14b
+LLM_MODEL=qwen3:14b
 JUDGE_MODEL=qwen3:4b
 JUDGE_KEEP_ALIVE=2h       # Rétention du juge en mémoire Ollama après chaque appel.
                           # Format : "5m", "2h", "-1" (indéfiniment).

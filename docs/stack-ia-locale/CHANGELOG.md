@@ -4,6 +4,30 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.18.0] : Octobre 2026
+
+Passage sur GPU (NVIDIA RTX 5060 Ti 16 Go) et campagne de mesures.
+
+### Documentation
+
+- `section-10-gpu.md` : nouvelle section. Mise en place de la carte et d'Ollama (réglages vérifiés dans son journal), placement des modèles, méthode de mesure, gains CPU contre GPU, choix du modèle principal (`qwen3:14b`) et de l'embedding (`nomic-embed-text`), construction du contexte, reranker (optionnel, désactivé), prompt et forme des réponses, pièges de configuration, limites qui relèvent du corpus, configuration recommandée et checklist.
+- Modèle principal recommandé : `qwen3:14b` au lieu de `qwen2.5:14b` (§0, §3, index, scripts).
+- `section-08-fiabilite.md`, `section-03-docker-compose.md` : nouveaux réglages ; extraits consécutifs pour les documents complémentaires.
+- `section-09-securite.md`, `section-11-prerequis-ms365.md`, `index.md`, `README.md` : §10 publiée, navigation.
+- `suivi-corrections.md` : points 53 à 58 corrigés, point 59 ouvert.
+
+### Scripts
+
+- `api/anon_main.py` : placement des modèles et graine (`JUDGE_NUM_GPU`, `EMBED_NUM_GPU`, `LLM_SEED`) ; document court en entier et fenêtre décalée ; extraits consécutifs pour les documents complémentaires ; fenêtre du juge égale par défaut à celle du modèle ; reranker optionnel avec fusion des classements ; règles de prompt complémentaires ; nettoyage des réponses et normalisation des citations ; valeurs vides traitées comme absentes.
+- `api/anon_auth.py`, `anon_indexer.py` : valeurs vides traitées comme absentes ; placement de l'embedding transmis à l'indexeur.
+- `api/teams.py` : maintien en mémoire limité pour un modèle de synthèse distinct ; modèle par défaut `qwen3:14b`.
+- `test_cloisonnement.py` : attend que la RAG API réponde avant de commencer.
+- `docker-compose.yml`, `env.example` : nouveaux réglages avec leurs valeurs par défaut ; service reranker optionnel (profil `reranker`).
+- `deploy.sh` : modèle `qwen3:14b`.
+- `s10/mesure_s10.py`, `s10/jeu_questions_s10.json` : outils de mesure du §10.
+
+---
+
 ## [2.17.4] : Octobre 2026
 
 ### Documentation

@@ -20,6 +20,13 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access, entra_en_echec
+
+
+def _env_nombre(nom: str, defaut, conv=int):
+    """Lit une variable numérique ; absente OU vide = valeur par défaut. Une
+    variable transmise vide par le Compose ne doit pas empêcher le démarrage."""
+    valeur = os.getenv(nom, "").strip()
+    return conv(valeur) if valeur else conv(defaut)
 import teams
 import teams_graph
 from rank_bm25 import BM25Okapi
@@ -41,7 +48,27 @@ SMB_DOMAIN   = os.getenv("SMB_DOMAIN", "DOMAINE")
 _sync_lock = asyncio.Lock()
 
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
-LLM_MODEL    = os.getenv("LLM_MODEL", "qwen2.5:14b")
+LLM_MODEL    = os.getenv("LLM_MODEL", "qwen3:14b")
+# Placement des modèles avec un GPU (§10) : le modèle principal sur la carte,
+# le juge et l'embedding sur le CPU. « 0 » = aucune couche sur le GPU ; vide =
+# choix d'Ollama (tout sur la carte si elle a la place). Sans GPU : sans effet.
+JUDGE_NUM_GPU = os.getenv("JUDGE_NUM_GPU", "")
+EMBED_NUM_GPU = os.getenv("EMBED_NUM_GPU", "")
+# Graine de génération : vide en usage normal (réponses variées), fixée pendant
+# les campagnes de mesure pour des réponses reproductibles (§8.6, §10).
+LLM_SEED = os.getenv("LLM_SEED", "")
+
+
+def options_ollama(base: dict, num_gpu: str = "", seed: str = "") -> dict:
+    """Ajoute num_gpu et seed aux options Ollama s'ils sont renseignés.
+    Une même valeur doit être envoyée à chaque appel d'un modèle : Ollama
+    recharge le modèle si num_gpu change d'un appel à l'autre."""
+    opts = dict(base)
+    if num_gpu.strip() != "":
+        opts["num_gpu"] = int(num_gpu)
+    if seed.strip() != "":
+        opts["seed"] = int(seed)
+    return opts
 JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b")
 JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
 # Fenêtres de contexte demandées explicitement à Ollama, modèle par modèle.
@@ -52,7 +79,10 @@ JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
 # Ne pas utiliser OLLAMA_CONTEXT_LENGTH côté serveur : il s'applique à tous
 # les modèles, y compris le juge, et augmente leur mémoire sans raison.
 LLM_NUM_CTX   = int(os.getenv("LLM_NUM_CTX", "") or "16384")
-JUDGE_NUM_CTX = int(os.getenv("JUDGE_NUM_CTX", "") or "8192")
+# Fenêtre du juge : par défaut celle du modèle principal. Plus petite, le juge
+# perd silencieusement une partie des sources sur un contexte riche et déclare
+# non ancrées des affirmations justes (mesuré en lab, §10).
+JUDGE_NUM_CTX = int(os.getenv("JUDGE_NUM_CTX", "") or str(LLM_NUM_CTX))
 QDRANT_HOST  = os.getenv("QDRANT_HOST", "http://qdrant:6333")
 COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
 # Collection dediee a la documentation technique (guides, procedures).
@@ -65,11 +95,11 @@ DOCUMENTATION_PATHS = [
     if p.strip()
 ]
 LOG_FILE     = os.getenv("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
-TOP_K              = int(os.getenv("TOP_K", "12"))
+TOP_K              = _env_nombre("TOP_K", "12")
 EMBED_MODEL        = os.getenv("EMBED_MODEL", "nomic-embed-text")
 EMBED_BASE_URL     = os.getenv("EMBED_BASE_URL", "") or os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
-CONTEXT_THRESHOLD  = float(os.getenv("CONTEXT_THRESHOLD", "0.75"))
-MAX_CONTEXT_CHUNKS = int(os.getenv("MAX_CONTEXT_CHUNKS", "15"))
+CONTEXT_THRESHOLD  = _env_nombre("CONTEXT_THRESHOLD", "0.75", float)
+MAX_CONTEXT_CHUNKS = _env_nombre("MAX_CONTEXT_CHUNKS", "15")
 # Construction du contexte (diversité des sources) :
 #   CANDIDATS            : extraits retenus par la recherche avant sélection (était TOP_K = 12)
 #   PRINCIPAL_MAX        : extraits du document principal (fenêtre autour du meilleur extrait)
@@ -77,16 +107,37 @@ MAX_CONTEXT_CHUNKS = int(os.getenv("MAX_CONTEXT_CHUNKS", "15"))
 #   EXTRAITS_PAR_COMPLEMENT : extraits par document complémentaire
 # Le volume total envoyé au modèle reste proche de l'ancien (15 + 3 extraits) :
 # 9 + 6 × 2 = 21 extraits, mais répartis entre plusieurs documents.
-CANDIDATS               = int(os.getenv("CANDIDATS", "30"))
-PRINCIPAL_MAX           = int(os.getenv("PRINCIPAL_MAX", "9"))
-CONTEXT_OTHER_DOCS      = int(os.getenv("CONTEXT_OTHER_DOCS", "6"))
-EXTRAITS_PAR_COMPLEMENT = int(os.getenv("EXTRAITS_PAR_COMPLEMENT", "2"))
+CANDIDATS               = _env_nombre("CANDIDATS", "30")
+PRINCIPAL_MAX           = _env_nombre("PRINCIPAL_MAX", "9")
+CONTEXT_OTHER_DOCS      = _env_nombre("CONTEXT_OTHER_DOCS", "6")
+EXTRAITS_PAR_COMPLEMENT = _env_nombre("EXTRAITS_PAR_COMPLEMENT", "4")
+# Document principal court (contrat, procédure) : envoyé en entier s'il compte
+# au plus DOC_COMPLET_MAX extraits. Sinon, fenêtre de PRINCIPAL_MAX extraits
+# autour du meilleur extrait, décalée si elle touche le début ou la fin.
+DOC_COMPLET_MAX         = _env_nombre("DOC_COMPLET_MAX", "15")
+# Reranker (§10) : service Text Embeddings Inference avec bge-reranker-v2-m3.
+# Vide = désactivé (ordre de la recherche hybride conservé).
+RERANKER_URL     = os.getenv("RERANKER_URL", "").rstrip("/")
+RERANK_TIMEOUT   = _env_nombre("RERANK_TIMEOUT", "20", float)
+# Nombre de meilleurs candidats reclassés (au plus 32, limite par défaut du service).
+# Sur CPU, la durée croît avec ce nombre (environ 0,45 s par extrait mesuré en lab).
+RERANK_MAX       = min(_env_nombre("RERANK_CANDIDATS", "10"), 32)
+# fusion : combine le rang de la recherche hybride et celui du reranker (le nom
+# d'un client, très présent dans la recherche par mots-clés, garde son poids) ;
+# remplacement : l'ordre du reranker seul.
+RERANK_MODE      = os.getenv("RERANK_MODE", "fusion").strip().lower()
+RERANK_RRF_K     = _env_nombre("RERANK_RRF_K", "10")
+# Règles de prompt complémentaires (§10) : fausses absences, crochets, remplissage.
+PROMPT_REGLES_V2 = os.getenv("PROMPT_REGLES_V2", "0").strip() == "1"
+# Documents complémentaires : extraits CONSÉCUTIFS autour du meilleur extrait
+# (« 1 » = activé), au lieu des extraits les mieux classés, souvent l'en-tête seul.
+COMPLEMENT_VOISINS = os.getenv("COMPLEMENT_VOISINS", "1").strip() == "1"
 ORG_NAME          = os.getenv("ORG_NAME", "votre organisation")
 
 # Purview (§14) : droits sur les documents chiffrés, évalués à la question par mip-service
 MIP_URL       = os.getenv("MIP_URL", "")
 MIP_TOKEN     = os.getenv("MIP_TOKEN", "")
-MIP_CACHE_TTL = int(os.getenv("MIP_CACHE_TTL", "3600"))
+MIP_CACHE_TTL = _env_nombre("MIP_CACHE_TTL", "3600")
 
 # ─────────────────────────────────────────
 # Application
@@ -260,7 +311,22 @@ class QueryResponse(BaseModel):
 # Prompt système strict
 # ─────────────────────────────────────────
 
+REGLES_V2 = """
+- Tu ne vois que des EXTRAITS de documents, jamais un document entier. N'affirme jamais qu'un document « ne contient pas », « ne précise pas » ou « ne mentionne pas » une information : écris que les extraits consultés ne permettent pas de le dire.
+- Même dans une longue réponse, chaque citation s'écrit entre crochets : [nom_du_fichier.docx]. Une citation sans crochets ne compte pas.
+- Synthétise avec tes propres phrases. Ne recopie jamais des passages entiers, des titres, des tableaux ou des blocs de commandes. Ne répète pas la même formule pour chaque élément d'une liste : cite seulement les éléments que les extraits décrivent réellement."""
+
+
 def get_system_prompt() -> str:
+    base = _prompt_base()
+    if not PROMPT_REGLES_V2:
+        return base
+    # Règles ajoutées avant la directive /no_think, qui reste en fin de prompt.
+    corps, sep, fin = base.rpartition("\n\n/no_think")
+    return (corps + REGLES_V2 + sep + fin) if sep else base + REGLES_V2
+
+
+def _prompt_base() -> str:
     return f"""Tu es un assistant documentaire expert au service des collaborateurs de {ORG_NAME}.
 Tu réponds UNIQUEMENT en français à partir des documents fournis dans le contexte ci-dessous.
 
@@ -286,10 +352,113 @@ async def get_embedding(text: str) -> list[float]:
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             f"{EMBED_BASE_URL}/api/embeddings",
-            json={"model": EMBED_MODEL, "prompt": text}
+            json={"model": EMBED_MODEL, "prompt": text,
+                  "options": options_ollama({}, EMBED_NUM_GPU)}
         )
         r.raise_for_status()
         return r.json()["embedding"]
+
+
+async def reclasser(query: str, chunks: list[dict]) -> list[dict]:
+    """
+    Réordonne les extraits candidats avec le reranker (bge-reranker-v2-m3), qui
+    lit chaque extrait avec la question au lieu de comparer des vecteurs.
+    Ne reçoit que des extraits déjà autorisés ; n'en ajoute ni n'en retire.
+    En cas d'échec (service absent, délai dépassé), l'ordre d'origine est
+    conservé : le reranker améliore la pertinence, il ne conditionne pas la réponse.
+    """
+    if not RERANKER_URL or len(chunks) < 2:
+        return chunks
+    lot = chunks[:RERANK_MAX]
+    t0 = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=RERANK_TIMEOUT) as client:
+            r = await client.post(f"{RERANKER_URL}/rerank", json={
+                "query": query,
+                "texts": [c.get("text", "")[:3000] for c in lot],
+                "truncate": True,
+            })
+            r.raise_for_status()
+            scores = {item["index"]: item["score"] for item in r.json()}
+    except Exception as e:
+        logger.warning(f"[RERANK] Échec, ordre de la recherche conservé : {type(e).__name__} {e}")
+        return chunks
+    for i, c in enumerate(lot):
+        c["score_rerank"] = scores.get(i, -1.0)
+        c["rang_recherche"] = i
+    par_rerank = sorted(lot, key=lambda c: c["score_rerank"], reverse=True)
+    if RERANK_MODE == "remplacement":
+        lot = par_rerank
+    else:
+        # Fusion par rangs réciproques : un extrait bien classé par la recherche
+        # ET par le reranker passe devant un extrait bien classé par un seul des deux.
+        for r, c in enumerate(par_rerank):
+            c["score_fusion"] = 1 / (RERANK_RRF_K + c["rang_recherche"] + 1) + 1 / (RERANK_RRF_K + r + 1)
+        lot = sorted(lot, key=lambda c: c["score_fusion"], reverse=True)
+    logger.info(
+        f"[RERANK] {len(lot)} extraits reclassés ({RERANK_MODE}) en {time.time() - t0:.1f} s, "
+        f"premier : '{lot[0].get('source', '?').split('/')[-1]}' (reranker {lot[0]['score_rerank']:.3f}, "
+        f"rang de recherche {lot[0]['rang_recherche'] + 1})"
+    )
+    return lot + chunks[RERANK_MAX:]
+
+
+async def etendre_complements(complements: list[dict], user_groups: list[str],
+                              user_email: str) -> list[dict]:
+    """
+    Pour chaque document complémentaire, remplace ses extraits retenus par une
+    fenêtre d'extraits CONSÉCUTIFS (EXTRAITS_PAR_COMPLEMENT), commençant juste
+    avant son meilleur extrait. Le meilleur extrait d'un contrat est souvent son
+    en-tête (il nomme le client) : la fenêtre apporte alors le contenu qui suit.
+    Mêmes filtres que pour le document principal : ACL dans la requête Qdrant,
+    check_access (DENY), puis Purview. En cas d'erreur, les extraits d'origine
+    sont conservés.
+    """
+    par_source: dict[str, list[dict]] = {}
+    for c in complements:
+        par_source.setdefault(c["source"], []).append(c)
+    resultat = []
+    for source, extraits in par_source.items():
+        meilleur = extraits[0]
+        idx = meilleur.get("chunk_index")
+        collection = meilleur.get("collection", get_collection_for_source(source))
+        if idx is None:
+            resultat.extend(extraits)
+            continue
+        idx_min = max(0, idx - 1)
+        idx_max = idx_min + EXTRAITS_PAR_COMPLEMENT - 1
+        conditions = [
+            FieldCondition(key="source", match=MatchValue(value=source)),
+            FieldCondition(key="chunk_index", range={"gte": idx_min, "lte": idx_max}),
+        ]
+        if user_groups:
+            conditions.append(FieldCondition(key="autorises", match=MatchAny(any=user_groups)))
+        try:
+            points = qdrant.scroll(collection_name=collection, scroll_filter=Filter(must=conditions),
+                                   limit=EXTRAITS_PAR_COMPLEMENT, with_payload=True)[0]
+        except Exception as e:
+            logger.warning(f"[COMPLEMENTS] Extension impossible pour '{source}' : {e}")
+            resultat.extend(extraits)
+            continue
+        fenetre = [
+            {
+                "chunk_key":   hashlib.md5(r.payload.get("text", "").encode()).hexdigest(),
+                "score":       meilleur.get("score", 0.0),
+                "text":        r.payload.get("text", ""),
+                "source":      r.payload.get("source", "inconnu"),
+                "source_id":   r.payload.get("source_id", ""),
+                "web_url":     r.payload.get("web_url", ""),
+                "collection":  collection,
+                "chunk_index": r.payload.get("chunk_index", 0),
+                **champs_purview(r.payload),
+            }
+            for r in sorted(points, key=lambda r: r.payload.get("chunk_index", 0))
+            if not user_groups or check_access(
+                user_groups, r.payload.get("autorises", []), r.payload.get("interdits", []))
+        ]
+        fenetre = await filtrer_purview(fenetre, user_email)
+        resultat.extend(fenetre or extraits)
+    return resultat
 
 
 def selectionner_complements(chunks: list[dict], best_source: str,
@@ -451,6 +620,9 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
         # Seconde condition (Purview) : droits sur les documents chiffrés
         chunks = await filtrer_purview(chunks, user_email)
 
+        # Reclassement : uniquement sur les extraits déjà autorisés (accès et Purview).
+        chunks = await reclasser(query, chunks)
+
         if bm25_results:
             logger.info(
                 f"[BM25] {len(bm25_results)} BM25 + {len(vec_results)} vectoriels"
@@ -471,9 +643,29 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
             if best_chunk_index is not None:
                 # radius calculé pour que la fenêtre tienne dans MAX_CONTEXT_CHUNKS.
                 # (MAX_CONTEXT_CHUNKS - 1) // 2 garantit idx_max - idx_min + 1 <= MAX_CONTEXT_CHUNKS.
-                radius = (PRINCIPAL_MAX - 1) // 2
-                idx_min = max(0, best_chunk_index - radius)
-                idx_max = best_chunk_index + radius
+                # Nombre d'extraits du document principal (tous, avant filtre
+                # d'accès : le filtre s'applique ensuite, extrait par extrait).
+                try:
+                    nb_doc = qdrant.count(
+                        collection_name=best_collection,
+                        count_filter=Filter(must=[FieldCondition(key="source", match=MatchValue(value=best_source))]),
+                        exact=True,
+                    ).count
+                except Exception as e:
+                    logger.warning(f"Comptage des extraits de '{best_source}' impossible : {e}")
+                    nb_doc = 0
+                if 0 < nb_doc <= DOC_COMPLET_MAX:
+                    # Document court : en entier. Le meilleur extrait est souvent
+                    # l'en-tête (il nomme le client), la clause utile est plus loin.
+                    idx_min, idx_max = 0, nb_doc - 1
+                else:
+                    radius = (PRINCIPAL_MAX - 1) // 2
+                    idx_min = max(0, best_chunk_index - radius)
+                    idx_max = idx_min + PRINCIPAL_MAX - 1
+                    # Fenêtre décalée plutôt que tronquée au début du document
+                    if nb_doc and idx_max > nb_doc - 1:
+                        idx_max = nb_doc - 1
+                        idx_min = max(0, idx_max - PRINCIPAL_MAX + 1)
                 scroll_filter_conditions = [
                     FieldCondition(key="source", match=MatchValue(value=best_source)),
                     FieldCondition(key="chunk_index", range={"gte": idx_min, "lte": idx_max}),
@@ -522,6 +714,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
             ]
             source_chunks = await filtrer_purview(source_chunks, user_email)
             complements, copies = selectionner_complements(chunks, best_source, source_chunks)
+            if COMPLEMENT_VOISINS and complements:
+                complements = await etendre_complements(complements, user_groups, user_email)
             chunks = source_chunks + complements
             idx_str = f"{idx_min}-{idx_max}" if best_chunk_index is not None else "?"
             nb_docs = len({c["source"] for c in complements})
@@ -545,6 +739,29 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
         # l'information n'existe pas.
         logger.error(f"[RECHERCHE] Échec de la recherche documentaire : {e}")
         raise HTTPException(status_code=503, detail="Recherche documentaire temporairement indisponible")
+
+
+def normaliser_citations(answer: str, chunks: list[dict]) -> str:
+    """
+    Remet entre crochets les noms de fichiers sources que le modèle a cités sans
+    crochets (fréquent dans les longues réponses), avec l'éventuel emplacement
+    recopié derrière (« fichier.docx : SharePoint, site RH, Documents »). Les
+    citations deviennent ainsi vérifiables et cliquables. Seuls les noms des
+    documents réellement fournis au modèle sont concernés.
+    """
+    noms = sorted({c.get("source", "").split("/")[-1] for c in chunks if c.get("source")},
+                  key=len, reverse=True)
+    for nom in noms:
+        # Le modèle recopie parfois un lien trouvé dans un document :
+        # « [nom.md](https://…) ». On garde la citation, sans ce lien : la RAG API
+        # ajoute elle-même l'emplacement réel du document.
+        answer = re.sub(r"\[" + re.escape(nom) + r"\]\([^)\s]*\)", f"[{nom}]", answer)
+        motif = re.compile(
+            r"(?<![\[\w])" + re.escape(nom) +
+            r"(?:\s*:\s*[^\n\[\]]*?(?=\.\s|\.$|\n|$))?"
+        )
+        answer = motif.sub(f"[{nom}]", answer)
+    return answer
 
 
 def enrichir_citations(answer: str, chunks: list[dict]) -> str:
@@ -635,6 +852,20 @@ def build_context(chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+_RE_ENTETE_DOC = re.compile(r"^\s*→\s*\S+\.\w{2,4}\s*$")
+
+
+def nettoyer_reponse(texte: str) -> str:
+    """Retire de la réponse les éléments de mise en forme du contexte que le modèle
+    recopie parfois : balises [DONNÉES DOCUMENTAIRES] / [FIN DES DONNÉES] et lignes
+    ne contenant qu'un en-tête « → nom_de_fichier.ext ». Le texte n'est pas modifié."""
+    lignes = texte.split("\n")
+    garder = [l for l in lignes
+              if l.strip() not in ("[DONNÉES DOCUMENTAIRES]", "[FIN DES DONNÉES]")
+              and not _RE_ENTETE_DOC.match(l)]
+    return "\n".join(garder).strip()
+
+
 async def generate_answer(query: str, context: str) -> str:
     """Génère une réponse ancrée sur le contexte via Ollama."""
     prompt_user = f"""[DONNÉES DOCUMENTAIRES]
@@ -650,7 +881,7 @@ Question : {query}"""
                 "model": LLM_MODEL,
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.2, "num_ctx": LLM_NUM_CTX},
+                "options": options_ollama({"temperature": 0.2, "num_ctx": LLM_NUM_CTX}, seed=LLM_SEED),
                 "messages": [
                     {"role": "system", "content": get_system_prompt()},
                     {"role": "user", "content": prompt_user}
@@ -658,7 +889,7 @@ Question : {query}"""
             }
         )
         r.raise_for_status()
-        return r.json()["message"]["content"]
+        return nettoyer_reponse(r.json()["message"]["content"])
 
 
 def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
@@ -701,7 +932,7 @@ async def warmup_judge() -> None:
                     "keep_alive": JUDGE_KEEP_ALIVE,
                     # Même fenêtre que les appels du juge : sinon Ollama
                     # rechargerait le modèle à chaque vérification
-                    "options": {"num_ctx": JUDGE_NUM_CTX},
+                    "options": options_ollama({"num_ctx": JUDGE_NUM_CTX}, JUDGE_NUM_GPU),
                 },
             )
     except Exception:
@@ -769,7 +1000,7 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                     "format": "json",
                     "think": False,
                     "keep_alive": JUDGE_KEEP_ALIVE,
-                    "options": {"temperature": 0, "num_ctx": JUDGE_NUM_CTX},
+                    "options": options_ollama({"temperature": 0, "num_ctx": JUDGE_NUM_CTX}, JUDGE_NUM_GPU),
                     "messages": [{"role": "user", "content": juge_prompt}]
                 }
             )
@@ -893,7 +1124,7 @@ async def query(
     await warmup_judge()
     chunks = await search_qdrant(request.query, user_groups=user_groups, user_email=request.user_id)
     context = build_context(chunks)
-    answer = await generate_answer(request.query, context)
+    answer = normaliser_citations(nettoyer_reponse(await generate_answer(request.query, context)), chunks)
 
     # skip_groundedness réservé à ADMIN_TOKEN uniquement.
     skip = request.skip_groundedness and credentials.credentials == ADMIN_TOKEN
@@ -1042,7 +1273,7 @@ async def _openai_chat_completions(
     await warmup_judge()
     chunks = await search_qdrant(user_query, user_groups=user_groups, user_email=owui_email2)
     context = build_context(chunks)
-    answer = await generate_answer(user_query, context)
+    answer = normaliser_citations(nettoyer_reponse(await generate_answer(user_query, context)), chunks)
     gc_result = await groundedness_check(answer, chunks)
     log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
 
@@ -1379,7 +1610,7 @@ async def admin_sync(
                  "--rapport", "/var/log/rag/rapport_indexer.json"],
                 capture_output=True,
                 text=True,
-                timeout=int(os.getenv("SYNC_TIMEOUT_INDEXER", "600")),
+                timeout=_env_nombre("SYNC_TIMEOUT_INDEXER", "600"),
                 env={
                     "PATH": os.environ.get("PATH", ""),
                     "HOME": os.environ.get("HOME", ""),
@@ -1389,6 +1620,7 @@ async def admin_sync(
                     "EMBED_MODEL": EMBED_MODEL,
                     "QDRANT_URL": QDRANT_HOST,
                     "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+                    "EMBED_NUM_GPU": EMBED_NUM_GPU,
                     "QDRANT_COLLECTION": COLLECTION,
                     "ORG_OWNER": ORG_NAME,
                     "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
@@ -1435,7 +1667,7 @@ async def admin_sync(
                  "--rapport", "/var/log/rag/rapport_acl.json"],
                 capture_output=True,
                 text=True,
-                timeout=int(os.getenv("SYNC_TIMEOUT_ACL", "300")),
+                timeout=_env_nombre("SYNC_TIMEOUT_ACL", "300"),
                 env={
                     "PATH": os.environ.get("PATH", ""),
                     "HOME": os.environ.get("HOME", ""),
@@ -1446,6 +1678,7 @@ async def admin_sync(
                     "SMB_DOMAIN": SMB_DOMAIN,
                     "QDRANT_URL": QDRANT_HOST,
                     "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+                    "EMBED_NUM_GPU": EMBED_NUM_GPU,
                     "QDRANT_COLLECTION": COLLECTION,
                     # Variables de routage des collections
                     "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
@@ -1500,6 +1733,7 @@ async def admin_sync(
                         "EMBED_MODEL": EMBED_MODEL,
                         "QDRANT_URL": QDRANT_HOST,
                         "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+                        "EMBED_NUM_GPU": EMBED_NUM_GPU,
                         "QDRANT_COLLECTION": COLLECTION,
                         "ORG_OWNER": ORG_NAME,
                         "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),

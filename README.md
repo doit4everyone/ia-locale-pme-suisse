@@ -26,7 +26,7 @@ Procédures pas à pas pour déployer un pipeline RAG local opérationnel sur VM
 - Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + Ollama + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Validé en lab sur matériel CPU sans GPU (i7-14700, 64 Go DDR5).
+Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + Ollama + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Validé en lab sur CPU (i7-14700, 64 Go DDR5), puis sur GPU (NVIDIA RTX 5060 Ti 16 Go, §10).
 
 **Partie 3 (§11 à §17) : Microsoft 365.** Publiée :
 

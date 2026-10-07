@@ -19,6 +19,7 @@ doit vérifier en priorité.
 
 Variables d'environnement :
   SUMMARY_MODEL    : modèle de synthèse (défaut : LLM_MODEL)
+  SUMMARY_KEEP_ALIVE : maintien en mémoire du modèle de synthèse après usage (défaut : 2m)
   SUMMARY_NUM_CTX  : fenêtre de contexte demandée à Ollama (défaut : 16384)
   SUMMARY_TIMEOUT  : délai maximal de génération en secondes (défaut : 900)
 """
@@ -33,7 +34,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 LLM_BASE_URL    = os.getenv("LLM_BASE_URL", "http://localhost:11434")
-SUMMARY_MODEL   = os.getenv("SUMMARY_MODEL", "") or os.getenv("LLM_MODEL", "qwen2.5:14b")
+SUMMARY_MODEL   = os.getenv("SUMMARY_MODEL", "") or os.getenv("LLM_MODEL", "qwen3:14b")
+# Durée pendant laquelle Ollama garde le modèle de synthèse en mémoire après
+# usage. Courte par défaut : quand la synthèse a son propre modèle, il ne doit
+# pas occuper la mémoire entre deux passages horaires (environ 12 Go pour un 14B).
+SUMMARY_KEEP_ALIVE = os.getenv("SUMMARY_KEEP_ALIVE", "2m")
+# Ne s'applique qu'à un modèle DÉDIÉ : si la synthèse utilise le modèle des
+# questions, le décharger forcerait la RAG API à le recharger ensuite.
+_MODELE_DEDIE = SUMMARY_MODEL != os.getenv("LLM_MODEL", "qwen3:14b")
 SUMMARY_NUM_CTX = int(os.getenv("SUMMARY_NUM_CTX", "") or "16384")
 SUMMARY_TIMEOUT = int(os.getenv("SUMMARY_TIMEOUT", "") or "900")
 
@@ -184,6 +192,7 @@ async def synthetiser(texte: str) -> dict:
             f"{LLM_BASE_URL}/api/chat",
             json={
                 "model": SUMMARY_MODEL,
+                **({"keep_alive": SUMMARY_KEEP_ALIVE} if _MODELE_DEDIE else {}),
                 "stream": False,
                 "think": False,
                 "format": "json",
