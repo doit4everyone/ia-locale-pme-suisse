@@ -35,7 +35,7 @@ Jusqu'ici, toute la stack tournait sur le processeur de LABO-G9. Cette section d
 | Alimentation du PC | 550 W au minimum selon le constructeur ; l'alimentation d'origine du PC du lab a dû être remplacée |
 | Emplacement | Le slot PCIe câblé en x16 (sur la carte mère du lab, le long slot marqué `X16PCIEXP`) ; un slot de même longueur mais câblé en x4 fonctionnerait, avec un chargement des modèles plus lent |
 
-Pour un modèle de langage, la vitesse de génération dépend surtout de la **bande passante mémoire**, pas de la puissance de calcul : c'est elle qui limite le nombre de mots produits par seconde.
+Pour un modèle de langage, la vitesse de génération dépend surtout de la **bande passante mémoire**, pas de la puissance de calcul, c'est elle qui limite le nombre de mots produits par seconde.
 
 ### Le pilote, en installation minimale
 
@@ -202,7 +202,7 @@ Avant le GPU, le lab a comparé `qwen2.5:14b`, le modèle recommandé jusqu'ici,
 
 Apertus, développé par l'EPFL, l'ETH Zurich et le Centre suisse de calcul scientifique (CSCS), est un modèle entièrement ouvert (poids, données et méthode d'entraînement) et conçu pour le multilinguisme. Pour une PME suisse attentive à l'origine de ses outils, la question de son usage se pose naturellement : il a été testé dans sa version de 8 milliards de paramètres (Apertus-8B-Instruct-2509), quantifiée en Q4_K_M, avec le même jeu de questions et le même juge.
 
-Il n'est pas disponible dans la bibliothèque officielle d'Ollama au moment du test. La version utilisée est une conversion GGUF publiée par la communauté sur Hugging Face, que l'on télécharge par `ollama pull hf.co/<auteur>/<dépôt>:Q4_K_M`. Elle tient sur la carte (5 à 6 Go) et démarre sans erreur, mais elle embarque le gabarit de conversation d'origine, écrit pour la bibliothèque Transformers, et non un gabarit au format d'Ollama. Les jetons propres à Apertus risquent alors d'être mal placés : à la question « quelle est la capitale du canton du Jura ? », le modèle répondait « Delle ». Avec un gabarit réécrit au format d'Ollama (un modèle local créé par `ollama create` à partir d'un `Modelfile`), il répond « Delémont ».
+Il n'est pas disponible dans la bibliothèque officielle d'Ollama au moment du test. La version utilisée est une conversion GGUF publiée par la communauté sur Hugging Face, que l'on télécharge par `ollama pull hf.co/<auteur>/<dépôt>:Q4_K_M`. Elle tient sur la carte (5 à 6 Go) et démarre sans erreur, mais elle embarque le gabarit de conversation d'origine, écrit pour la bibliothèque Transformers, et non un gabarit au format d'Ollama. Les jetons propres à Apertus risquent alors d'être mal placés. À une question de géographie suisse simple, le modèle donnait une mauvaise réponse avec le gabarit d'origine, et la bonne avec le gabarit réécrit.
 
 | Mesure | `qwen3:14b` | Apertus 8B, gabarit d'origine | Apertus 8B, gabarit réécrit |
 |---|---|---|---|
