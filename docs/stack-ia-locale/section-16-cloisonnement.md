@@ -155,7 +155,7 @@ En figeant les versions (§3.4), le lab est passé d'une construction de dévelo
 
 La leçon tient en une règle : **une mise à jour d'Open WebUI, de n8n ou de Qdrant ne s'installe pas sur une invitation à mettre à jour**. Elle se fait sur décision, puis se revalide : connexions d'Open WebUI, transmission de l'identité (`[AUTH] /v1` dans les journaux), test de cloisonnement, synchronisation.
 
-## §16.9 Une perte d'accès doit se dire
+## §16.9 Une perte d'accès doit se détecter
 
 Pendant ces tests, une coupure réseau de quelques instants a empêché la RAG API de joindre Microsoft Entra. Pour l'utilisateur concerné, la résolution des identités cloud a échoué : il n'a gardé que ses groupes AD (3 au lieu de 8), et a perdu l'accès à tous les documents SharePoint. Le comportement de sécurité était le bon (moins d'accès, jamais plus), mais la réponse ne l'était pas : « Cette information ne figure pas dans les documents disponibles », alors que le document existait et que l'utilisateur y avait droit.
 
