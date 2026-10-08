@@ -23,17 +23,17 @@ description: "Indexation des documents SharePoint chiffrés par une étiquette M
 
 > **Mise en garde, à lire avant toute mise en œuvre.**
 >
-> Cette section montre comment indexer des documents **chiffrés** par une étiquette de confidentialité. Techniquement, c'est possible, et les droits de chaque utilisateur restent respectés à chaque question. Mais trois conséquences doivent être acceptées en connaissance de cause :
+> Cette section montre comment indexer des documents **chiffrés** par une étiquette de confidentialité. Techniquement c'est possible et les droits de chaque utilisateur restent respectés à chaque question. Mais trois conséquences doivent être acceptées en connaissance de cause :
 >
 > 1. **Le contenu sort de la protection de l'étiquette.** Une fois indexé, le texte des documents est stocké en clair dans Qdrant, sur votre serveur. Microsoft 365 Copilot déchiffre à l'intérieur du périmètre de Microsoft ; ce RAG déchiffre à l'extérieur. Le serveur, ses disques et ses sauvegardes deviennent aussi sensibles que les documents eux-mêmes.
 > 2. **L'application de déchiffrement est l'identité la plus puissante de la stack.** Elle peut lire tout le contenu protégé du tenant. Son certificat doit être protégé en conséquence.
 > 3. **Les prérequis de sécurité ne sont pas facultatifs** : clé d'API Qdrant, chiffrement des données au repos, sauvegardes chiffrées (§14.2).
 >
-> **Posez-vous d'abord la question : avez-vous vraiment besoin qu'une IA lise ces documents ?** Pour beaucoup de PME, la bonne réponse est de ne pas les indexer, comme le fait §13 par défaut. Dans tous les cas, nous recommandons d'**exclure les données RH** (contrats, salaires, dossiers du personnel) : l'intérêt de les interroger par une IA est faible face au risque. Le lab les indexe uniquement pour démontrer le fonctionnement de la double condition.
+> **Posez-vous d'abord la question : avez-vous vraiment besoin qu'une IA lise ces documents ?** Pour beaucoup de PME, la bonne réponse est de ne pas les indexer, comme le fait §13 par défaut. Dans tous les cas, nous recommandons d'**exclure les données RH** (contrats, salaires, dossiers du personnel), l'intérêt de les interroger par une IA est faible face au risque. Le lab les indexe uniquement pour démontrer le fonctionnement de la double condition.
 
 ---
 
-> **Ce que cette section documente :** un service interne, `mip-service`, déchiffre les documents protégés au moment de l'indexation. À chaque question, l'accès à un document chiffré exige **deux conditions** : avoir accès au document dans SharePoint, comme en §13, **et** disposer des droits de l'étiquette. La seconde condition est évaluée par Purview lui-même, au nom de l'utilisateur, au moment de la question. Tout fonctionne depuis Linux, sans poste Windows ni exportation manuelle.
+> **Ce que cette section documente :** un service interne, `mip-service`, déchiffre les documents protégés au moment de l'indexation. À chaque question, l'accès à un document chiffré exige **deux conditions** : avoir accès au document dans SharePoint, comme en §13, **et** disposer des droits de l'étiquette. La seconde condition est évaluée par Purview lui-même, au nom de l'utilisateur et au moment de la question. Tout fonctionne depuis Linux, sans poste Windows ni exportation manuelle.
 
 ---
 
