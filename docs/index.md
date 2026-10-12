@@ -15,7 +15,7 @@ description: "Procédures de déploiement d'une stack IA locale conçue pour fac
 
 [Retour à l'accueil](../) | [Guides décisionnels](../guides/)
 
-Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose), sans GPU.
+Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif, NVIDIA RTX 5060 Ti 16 Go) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose).
 
 ---
 
@@ -27,7 +27,7 @@ Les procédures sont publiées après validation en lab, sur l'environnement de 
 |---|---|---|
 | Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
 | Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance | §11 à §17 |
-| Mesures et benchmarks | Validation complète et mesures de performance, après l'installation du GPU | §10 (à venir) |
+| Validation et performances sur GPU | Passage sur GPU, placement des modèles, méthode de mesure reproductible, choix des modèles et construction du contexte mesurés, limites qui relèvent du corpus | §10 |
 
 Les scripts et workflows correspondants sont publiés dans [scripts](../scripts/).
 
@@ -35,7 +35,7 @@ Les scripts et workflows correspondants sont publiés dans [scripts](../scripts/
 
 ## Lien avec le plan d'apprentissage
 
-Le [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf) décrit la progression en 14 phases, dont 2 optionnelles nécessitant un tenant Microsoft 365. Le guide de déploiement en est la mise en œuvre validée en lab : les phases y sont couvertes dans l'ordre du déploiement, et non comme des procédures séparées.
+Le [plan d'apprentissage RAG local](../guides/plan-apprentissage-rag-2026.pdf) décrit la progression en 17 phases : 12 pour le pipeline sur file server Windows, 3 pour les connecteurs Microsoft 365 qui demandent un tenant actif, et 2 pour la preuve du cloisonnement et la mesure. Le guide de déploiement en est la mise en œuvre validée en lab : les phases y sont couvertes dans l'ordre du déploiement, et non comme des procédures séparées.
 
 ---
 

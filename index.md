@@ -38,7 +38,7 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 | Document | Format | Date |
 |---|---|---|
 | [IA locale pour PME suisse : guide décisionnel 2026](guides/gpu-ia-pme-suisse-2026.pdf) | PDF | Août 2026 |
-| [Plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf) | PDF | Août 2026 |
+| [Plan d'apprentissage RAG local](guides/plan-apprentissage-rag-2026.pdf) | PDF | Octobre 2026 |
 
 ---
 

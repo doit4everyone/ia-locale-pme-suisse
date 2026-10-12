@@ -12,7 +12,7 @@ Guides décisionnels, procédures RAG, scripts Python. Publié à titre document
 
 ### Guides décisionnels
 
-Deux documents PDF destinés aux décideurs et consultants IT : le guide décisionnel « IA locale pour PME suisse » (architectures, TCO sur 3 ans, performances d'inférence, ingénierie RAG, sécurité nLPD) et le plan d'apprentissage RAG local en 14 phases (dont 2 optionnelles nécessitant un tenant Microsoft 365), refondu en septembre 2026 pour refléter la stack validée en lab.
+Deux documents PDF destinés aux décideurs et consultants IT : le guide décisionnel « IA locale pour PME suisse » (architectures, TCO sur 3 ans, performances d'inférence, ingénierie RAG, sécurité nLPD) et le plan d'apprentissage RAG local en 17 phases (12 sur file server Windows, 3 pour les connecteurs Microsoft 365, 2 pour la preuve du cloisonnement et la mesure), refondu en octobre 2026 pour refléter la stack validée en lab, sur CPU puis sur GPU.
 
 ### Guide de déploiement stack IA locale
 

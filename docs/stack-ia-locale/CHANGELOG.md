@@ -4,6 +4,24 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.19.0] : Octobre 2026
+
+Refonte du plan d'apprentissage.
+
+### Guides
+
+- `guides/plan-apprentissage-rag-2026.docx` et `.pdf` : refonte complète, 17 phases au lieu de 14, en trois ensembles. Phases 1 à 12 : le pipeline sur file server Windows, sur CPU. Phases 13 à 15 : connecteurs Microsoft 365 (SharePoint Online, documents protégés par Purview, synthèse des réunions Teams), qui demandent un tenant actif. Phases 16 et 17 : contrôle automatisé du cloisonnement, puis passage sur GPU et méthode de mesure reproductible.
+- Modèle principal `qwen3:14b` au lieu de `qwen2.5:14b`, cohérent avec §10.
+- Corrections de fond : la phase Purview remplace la piste du coffre de clés par le service de déchiffrement réellement validé ; la synthèse Teams part en brouillon à l'organisateur et non dans un canal ; la phase NTFS intègre la lecture du masque des droits ; la phase Docker Compose intègre le piège des variables non transmises au conteneur.
+- Chaque phase porte désormais les enseignements mesurés en lab, y compris les décisions renversées par la mesure.
+
+### Documentation
+
+- `docs/index.md` : §10 publiée au lieu de « à venir », environnement de référence avec GPU, renvoi au plan en 17 phases.
+- `index.md`, `README.md`, `guides/index.md` : dates et description du plan.
+
+---
+
 ## [2.18.2] : Octobre 2026
 
 Trois points d'une revue externe : deux corrigés, un mesuré puis écarté.

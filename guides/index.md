@@ -19,7 +19,7 @@ description: "Guides décisionnels et plan d'apprentissage, en PDF et en Word."
 | Guide | PDF | Word |
 |---|---|---|
 | IA locale pour PME suisse : guide décisionnel et technique | [PDF](gpu-ia-pme-suisse-2026.pdf) | [DOCX](gpu-ia-pme-suisse-2026.docx) |
-| Plan d'apprentissage RAG local | [PDF](plan-apprentissage-rag-2026.pdf) | [DOCX](plan-apprentissage-rag-2026.docx) |
+| Plan d'apprentissage RAG local, 17 phases, octobre 2026 | [PDF](plan-apprentissage-rag-2026.pdf) | [DOCX](plan-apprentissage-rag-2026.docx) |
 
 ---
 
