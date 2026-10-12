@@ -59,7 +59,7 @@ C'est la seule décision à prendre avant de commencer. Le détail et les mesure
 |---|---|---|
 | Questions simultanées | **Une à la fois** : la suivante attend | **Plusieurs en même temps** |
 | Pour qui | Un à deux utilisateurs simultanés, un essai, un poste unique | **Plusieurs utilisateurs simultanés : une PME en service** |
-| Système | Windows ou Linux | Linux ; sous Windows, dans WSL2 |
+| Système | Windows ou Linux | Linux ; sous Windows, dans WSL2 (essai seulement, pas la production) |
 | Installation | Simple, quelques minutes | Plus technique, une à deux heures |
 
 Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en même temps sont servies presque aussi vite qu'une seule (+6 %). **Recommandation : vLLM pour une PME en service, Ollama pour un essai ou un à deux utilisateurs.** Le choix n'est pas définitif : on passe de l'un à l'autre sans réindexer ni réinstaller la stack (§2.5).
@@ -197,7 +197,7 @@ ollama list
 
 ### 3B : vLLM
 
-Sur un poste Windows, vLLM tourne dans WSL2. Sur un serveur Linux, commencer au point 2 (configuration non testée en lab, §2.4.1).
+Sur un poste Windows, vLLM tourne dans WSL2, ce qui convient au lab et à l'essai mais pas à la production (§2.4.1). Sur un serveur Linux, commencer au point 2 (configuration non testée en lab, §2.4.1).
 
 **1. Préparer WSL2 (poste Windows seulement).** Dans PowerShell en administrateur :
 

@@ -52,7 +52,7 @@ Une question prend de 2 secondes (une question précise) à près d'une minute (
 |---|---|---|
 | Questions simultanées | Une à la fois (la suivante attend) | Plusieurs en même temps |
 | Pour qui | Un à deux utilisateurs simultanés, un essai, un poste unique | Plusieurs utilisateurs simultanés : une PME en service |
-| Système | Windows ou Linux | Linux seulement ; sous Windows, dans WSL2, le Linux intégré à Windows |
+| Système | Windows ou Linux | Linux seulement ; sous Windows, dans WSL2, le Linux intégré à Windows (lab et essai, pas la production) |
 | Installation | Quelques minutes, plus le téléchargement des modèles | Une à deux heures, plus le téléchargement des modèles |
 | Mémoire de la carte | Chargée et libérée à la demande : trois modèles sur 16 Go (rédaction, juge `qwen3:4b`, embedding) | Réservée au démarrage : deux modèles sur 16 Go, le modèle de rédaction sert aussi de juge |
 | Score sur le jeu de questions du lab (15 questions, 5 passages) | 61 sur 75 | 65 sur 75 (§10.12) |
@@ -159,13 +159,13 @@ vLLM est un moteur conçu pour servir plusieurs requêtes en même temps. Ce qu'
 
 | Machine | Statut |
 |---|---|
-| Poste Windows 11 avec la carte, vLLM dans WSL2 | **Validé en lab** (RTX 5060 Ti 16 Go, pilote Windows 616.92) |
-| Serveur Linux (Ubuntu) avec une carte NVIDIA | Non testé. Même procédure à partir de §2.4.3, sans la partie WSL2 ; le pilote NVIDIA pour Linux est alors à installer |
+| Poste Windows 11 avec la carte, vLLM dans WSL2 | **Validé en lab** (RTX 5060 Ti 16 Go, pilote Windows 616.92). Pour le lab et l'essai, **pas pour la production** |
+| Serveur Linux (Ubuntu) avec une carte NVIDIA | La cible de production. Non testé en lab. Même procédure à partir de §2.4.3, sans la partie WSL2 ; le pilote NVIDIA pour Linux est alors à installer |
 | DGX Spark | Documentaire (§2.6) |
 
 Prévoir une carte d'au moins 16 Go, et environ 12 Go de disque pour les modèles, plus l'environnement de vLLM (plusieurs gigaoctets).
 
-> **WSL2 convient à un poste de travail, pas à un service permanent.** Constaté dans le lab : quand on ferme le dernier terminal Ubuntu, WSL2 s'arrête (`wsl -l -v` indique `Stopped` après trois minutes) et les serveurs de modèles s'arrêtent avec lui. Tant qu'un terminal Ubuntu reste ouvert, les services fonctionnent. Le lab n'a pas testé de moyen de garder WSL2 actif sans terminal, ni son démarrage au lancement de Windows. Pour un service que toute l'entreprise utilise en permanence, prévoir un serveur Linux dédié.
+> **WSL2 sert au lab et à l'essai, pas à la production.** Constaté dans le lab : quand on ferme le dernier terminal Ubuntu, WSL2 s'arrête (`wsl -l -v` indique `Stopped` après trois minutes) et les serveurs de modèles s'arrêtent avec lui. Tant qu'un terminal Ubuntu reste ouvert, les services fonctionnent. Le lab n'a pas testé de moyen de garder WSL2 actif sans terminal, ni son démarrage au lancement de Windows. Pour un service que les utilisateurs de l'entreprise attendent en permanence, installer vLLM sur un serveur Linux.
 
 ### §2.4.2 Préparer WSL2 (poste Windows seulement)
 
