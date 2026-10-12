@@ -280,7 +280,7 @@ vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code \
 
 **5. Vérifier**, dans un troisième terminal : `curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/v1/models`, puis la même chose avec le port 8001. **Attendu :** `401` deux fois (le serveur répond, et exige la clé). L'essai complet, qui contrôle aussi la qualité des réponses, est au §2.4.6.
 
-> **Les deux serveurs s'arrêtent si on ferme leur terminal.** Les laisser ouverts pendant tout le déploiement. Le démarrage automatique par des services systemd est décrit au §2.4.7 ; il n'est pas encore validé en lab. Si un démarrage échoue, les messages rencontrés et leur solution sont au §2.4.9.
+> **Les deux serveurs s'arrêtent si on ferme leur terminal.** Les laisser ouverts pendant tout le déploiement. Le démarrage automatique par des services systemd est décrit au §2.4.7 ; validé dans WSL2, il ne dispense pas de garder un terminal Ubuntu ouvert, car WSL2 s'arrête quand le dernier se ferme. Si un démarrage échoue, les messages rencontrés et leur solution sont au §2.4.9.
 
 ---
 

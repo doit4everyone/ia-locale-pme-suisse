@@ -17,7 +17,7 @@ description: "Choisir et installer le moteur qui fait tourner les modèles d'IA 
 
 [Retour au sommaire](index.md) | [Section précédente : §1 Prérequis et création de la VM](section-01-prerequis.md) | [Section suivante : §3 Docker Compose : stack complète](section-03-docker-compose.md)
 
-**Statut :** validé en lab, octobre 2026, sur une carte NVIDIA RTX 5060 Ti 16 Go. Ollama : validé sous Windows, puis sous Linux dans WSL2. vLLM 0.31.0 : validé dans WSL2 (Ubuntu 26.04), avec le jeu de questions, le test de cloisonnement (44 sur 44) et deux campagnes de questions simultanées. **Non validés :** le démarrage automatique de vLLM par systemd (§2.4.7), un serveur Linux dédié, le DGX Spark (§2.6).
+**Statut :** validé en lab, octobre 2026, sur une carte NVIDIA RTX 5060 Ti 16 Go. Ollama : validé sous Windows, puis sous Linux dans WSL2. vLLM 0.31.0 : validé dans WSL2 (Ubuntu 26.04), avec le jeu de questions, le test de cloisonnement (44 sur 44) et deux campagnes de questions simultanées. Services systemd (§2.4.7) : validés dans WSL2. **Non validés :** un serveur Linux dédié, le DGX Spark (§2.6), le démarrage de WSL2 au lancement de Windows sans session ouverte.
 
 ---
 
@@ -165,7 +165,7 @@ vLLM est un moteur conçu pour servir plusieurs requêtes en même temps. Ce qu'
 
 Prévoir une carte d'au moins 16 Go, et environ 12 Go de disque pour les modèles, plus l'environnement de vLLM (plusieurs gigaoctets).
 
-> **WSL2 convient à un poste dédié, avec une réserve.** WSL2 démarre quand on ouvre un terminal Ubuntu. Le lab n'a pas encore vérifié qu'il démarre et reste actif sans session Windows ouverte. Pour un service permanent, un serveur Linux dédié reste préférable ; à défaut, vérifier ce point sur votre poste avant la mise en service.
+> **WSL2 convient à un poste de travail, pas à un service permanent.** Constaté dans le lab : quand on ferme le dernier terminal Ubuntu, WSL2 s'arrête (`wsl -l -v` indique `Stopped` après trois minutes) et les serveurs de modèles s'arrêtent avec lui. Tant qu'un terminal Ubuntu reste ouvert, les services fonctionnent. Le lab n'a pas testé de moyen de garder WSL2 actif sans terminal, ni son démarrage au lancement de Windows. Pour un service que toute l'entreprise utilise en permanence, prévoir un serveur Linux dédié.
 
 ### §2.4.2 Préparer WSL2 (poste Windows seulement)
 
@@ -392,7 +392,7 @@ curl -m 5 -s -o /dev/null -w "%{http_code}\n" http://<IP-SERVEUR-MODELES>:8001/v
 
 ### §2.4.7 Démarrage automatique
 
-> **Non validé en lab.** Les fichiers ci-dessous reprennent exactement les commandes validées au §2.4.5, mais leur fonctionnement en service n'a pas encore été vérifié. Contrôler chaque point de la liste qui suit avant de s'y fier.
+> **Validé en lab dans WSL2**, avec un terminal Ubuntu ouvert : démarrage des deux services dans le bon ordre, relance automatique après un plantage, libération complète de la carte à l'arrêt (tableau ci-dessous). Les fichiers reprennent exactement les commandes validées au §2.4.5. Sur un serveur Linux dédié, ils n'ont pas encore été essayés.
 
 Arrêter d'abord les deux serveurs lancés à la main (Ctrl+C dans chaque terminal), puis créer les deux services, en remplaçant `<utilisateur>` par votre utilisateur Linux :
 
@@ -451,7 +451,9 @@ Le serveur d'embedding attend que celui de la rédaction réponde : les deux ré
 | Journal d'un service | `journalctl -u vllm-llm -n 30 --no-pager` | Les quatre lignes de §2.4.5, puis `Application startup complete` |
 | La clé est exigée | Les deux `curl` sans clé de §2.4.6 | `401` deux fois |
 | La réflexion est désactivée | L'essai complet de §2.4.6 | `'OK'` en 2 tokens |
-| Démarrage sans intervention | Redémarrer le poste, ne pas ouvrir de terminal Ubuntu, puis tester depuis la VM | `401` : sinon, WSL2 ne démarre pas seul (§2.4.1) |
+| Relance après un plantage | `sudo systemctl kill -s KILL vllm-llm`, puis `systemctl status vllm-llm --no-pager` | Le service redémarre seul après 15 secondes et répond de nouveau environ 35 secondes plus tard ; le serveur d'embedding n'est pas touché |
+| La carte est libérée à l'arrêt | `sudo systemctl stop vllm-llm vllm-embed`, puis `nvidia-smi --query-gpu=memory.used --format=csv` | Une centaine de Mio utilisés ; relancer ensuite avec `sudo systemctl start vllm-llm vllm-embed` |
+| Démarrage sans intervention | Redémarrer le poste, ne pas ouvrir de terminal Ubuntu, puis tester depuis la VM | Sur un serveur Linux : `401`. Dans WSL2 : non validé, WSL2 s'arrête quand le dernier terminal se ferme (§2.4.1) |
 
 ### §2.4.8 Raccorder la stack
 
@@ -577,6 +579,6 @@ Les modèles `nvidia/*-NVFP4` intègrent leur quantification : vLLM la détecte 
 
 ---
 
-*Validé en lab sur LABO-G9 (Windows 11, WSL2 avec Ubuntu 26.04, NVIDIA RTX 5060 Ti 16 Go ; vLLM 0.31.0, PyTorch 2.13.0, CUDA 13.2 ; Ollama 0.40.3 sous Linux) et VM-RAG-LAB (Ubuntu Server 26.04), octobre 2026. Démarrage automatique de vLLM, serveur Linux dédié et DGX Spark : non validés.*
+*Validé en lab sur LABO-G9 (Windows 11, WSL2 avec Ubuntu 26.04, NVIDIA RTX 5060 Ti 16 Go ; vLLM 0.31.0, PyTorch 2.13.0, CUDA 13.2 ; Ollama 0.40.3 sous Linux) et VM-RAG-LAB (Ubuntu Server 26.04), octobre 2026. Services systemd validés dans WSL2. Serveur Linux dédié, DGX Spark et démarrage de WSL2 sans session Windows : non validés.*
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*
