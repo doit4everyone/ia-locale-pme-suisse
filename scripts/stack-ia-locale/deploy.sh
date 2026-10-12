@@ -116,7 +116,7 @@ else
         info "Test du serveur vLLM ${ROLE} sur ${URL}..."
         CODE_SANS=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "${URL}/v1/models" || true)
         [[ "$CODE_SANS" == "000" ]] && error "Serveur vLLM ${ROLE} injoignable sur ${URL}. Vérifier qu'il tourne et le pare-feu (§2.4)."
-        [[ "$CODE_SANS" == "401" ]] || warn "Le serveur ${ROLE} répond sans clé (code ${CODE_SANS}) : --api-key manquant ? (§2.4.5)"
+        [[ "$CODE_SANS" == "401" ]] || error "Le serveur ${ROLE} répond sans clé (code ${CODE_SANS}) : il n'exige pas de clé d'API. Le relancer avec --api-key (§2.4.5), puis refaire ce déploiement."
         MODELES=$(curl -s -m 10 -H "Authorization: Bearer ${VLLM_API_KEY}" "${URL}/v1/models" || true)
         if echo "$MODELES" | grep -q "\"${MODELE}\""; then
             ok "Serveur ${ROLE} : modèle ${MODELE} servi"

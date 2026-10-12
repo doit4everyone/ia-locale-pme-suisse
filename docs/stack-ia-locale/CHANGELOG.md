@@ -4,6 +4,22 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.20.1] : Octobre 2026
+
+Corrections après relecture du dépôt : un contrôle de sécurité de `deploy.sh` et des extraits du §3 qui ne correspondaient plus aux fichiers.
+
+### Scripts
+
+- `deploy.sh` : le test de la clé d'API vLLM est bloquant. Un serveur qui répond sans clé (code autre que 401) arrête le déploiement au lieu d'émettre un avertissement.
+
+### Documentation
+
+- `section-03-docker-compose.md` : `QDRANT_API_KEY` ajouté aux extraits du `.env` et du Compose, comme dans les fichiers du dépôt. Les contrôles de §3.6, les snapshots et la restauration envoient la clé de Qdrant et le jeton d'administration, lus dans le `.env` ; les jetons d'exemple (`changeme-api-token`) sont retirés des commandes.
+- `section-02-vllm.md` : §2.4.10, avant une mise en production (transport en HTTP, modèles et code distant non figés, charge non mesurée). Ces trois points ne sont pas testés en lab.
+- `suivi-corrections.md` : points 70 et 71 corrigés, points 72 et 73 ouverts.
+
+---
+
 ## [2.20.0] : Octobre 2026
 
 Deux moteurs pour le serveur de modèles : Ollama, pour un à deux utilisateurs simultanés, et vLLM, pour plusieurs. Le démarrage rapide est réécrit pour partir de l'un ou de l'autre.

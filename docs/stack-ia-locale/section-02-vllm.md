@@ -509,6 +509,16 @@ Tous ces cas se sont produits pendant la mise en place du lab. Ils sont classés
 | Questions refusées avec une erreur 503, journal : `Échec de la recherche documentaire` | Le serveur d'embedding (port 8001) est arrêté : sans vecteur, pas de recherche | `ss -ltn` sur le serveur : relancer le serveur manquant |
 | Réponses quatre fois plus lentes, serveur souvent inactif entre deux questions | Une synchronisation du corpus tournait en même temps | Mesurer au repos (§10.3) |
 
+### §2.4.10 Avant une mise en production
+
+Ce qui précède est validé sur un réseau de lab de confiance. Trois points ne le sont pas, et sont à traiter avant de mettre le service à disposition de toute l'entreprise :
+
+| Point | Situation | À faire avant la production |
+|---|---|---|
+| Transport | La VM parle aux deux serveurs en HTTP : la clé d'API et les questions circulent sans chiffrement. La clé protège l'accès, pas le contenu des échanges. | Limiter l'accès aux ports 8000 et 8001 à l'adresse de la VM, placer les deux machines sur un réseau isolé, ou chiffrer le lien (TLS). Non testé en lab. |
+| Modèles téléchargés | Les commandes de §2.4.4 désignent les modèles par leur nom de dépôt, qui renvoie à la version courante au moment du téléchargement. Le modèle d'embedding est lancé avec `--trust-remote-code`, qui exécute le code Python fourni avec lui. | Relever la révision de chaque modèle, en conserver une copie locale validée (le répertoire `/opt/hf`) et lire le code distant avant d'autoriser son exécution. vLLM propose les options `--revision` et `--code-revision` : à vérifier dans la documentation de votre version, non testé en lab. |
+| Charge | Seules deux séries de questions simultanées ont été mesurées (§10.12). | Mesurer la charge attendue (par exemple quatre questions simultanées, avec les durées maximales et la mémoire de la carte) avant d'annoncer une capacité. |
+
 ---
 
 ## §2.5 Passer d'un moteur à l'autre

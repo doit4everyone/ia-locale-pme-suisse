@@ -66,6 +66,9 @@ EMBED_MODEL=nomic-embed-text
 # Qdrant
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
+# Clé d'API obligatoire (section 15) : openssl rand -hex 32
+# Les commandes curl vers Qdrant doivent envoyer l'en-tête « api-key: <clé> ».
+QDRANT_API_KEY=changeme-qdrant-api-key
 # Deux collections Qdrant : corpus entreprise (documents) et documentation technique (documentation).
 # Les dossiers racine listés dans DOCUMENTATION_PATHS vont dans DOCUMENTATION_COLLECTION.
 # Ces dossiers doivent être à la racine du partage SMB uniquement.
@@ -247,6 +250,9 @@ services:
       - "127.0.0.1:6333:6333"
     volumes:
       - ./qdrant_data:/qdrant/storage
+    environment:
+      # Clé d'API obligatoire pour tout accès à Qdrant (section 15)
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
     restart: unless-stopped
 
   n8n:
@@ -273,6 +279,7 @@ services:
     # Empêche la falsification de l'en-tête X-OpenWebUI-User-Email depuis le LAN.
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
       # LLM_BASE_URL : génération (Ollama : port 11434 ; vLLM : port 8000, §2)
       # EMBED_BASE_URL : embeddings (Ollama : port 11434 ; vLLM : port 8001).
@@ -429,8 +436,13 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 ## §3.6 Validation de la stack
 
 ```bash
-# Qdrant opérationnel
-curl http://localhost:6333/collections
+# Les valeurs sont lues dans le .env : ni copiées à la main, ni laissées
+# dans l'historique du shell.
+cd /root/rag-stack
+set -a && source .env && set +a
+
+# Qdrant opérationnel (la clé d'API est obligatoire)
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections
 
 # n8n health check
 curl http://localhost:5678/healthz
@@ -439,13 +451,13 @@ curl http://localhost:5678/healthz
 docker compose exec n8n wget -qO- http://rag-api:8080/health
 
 # RAG API stats (vérifie la connectivité Qdrant et la config LLM)
-docker compose exec n8n wget -qO- http://rag-api:8080/stats
+docker compose exec n8n wget -qO- --header="Authorization: Bearer $ADMIN_TOKEN" http://rag-api:8080/stats
 
 # Test requête authentifiée via /query (endpoint machine à machine)
 # user_id doit être un email valide, sinon retourne 403
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/query \
-  -H "Authorization: Bearer changeme-api-token" \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "Test RAG", "user_id": "admin@votre-domaine.ch"}'
 
@@ -458,14 +470,14 @@ docker run --rm --network rag-stack_default curlimages/curl \
 # Test rejet user_id sans @ (doit retourner 403)
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/query \
-  -H "Authorization: Bearer changeme-api-token" \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "test", "user_id": "invalide"}'
 
 # Test endpoint OpenAI-Compatible (pour Open WebUI)
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/v1/chat/completions \
-  -H "Authorization: Bearer changeme-api-token" \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model": "rag", "messages": [{"role": "user", "content": "Test"}]}'
 
@@ -486,15 +498,17 @@ Qdrant stocke les vecteurs et les métadonnées (ACL, hashes, org_name) dans `./
 ### Créer un snapshot
 
 ```bash
+set -a && source /root/rag-stack/.env && set +a
+
 # Snapshot de la collection documents
-curl -X POST http://localhost:6333/collections/documents/snapshots
+curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/snapshots
 
 # Snapshot de la collection documentation
-curl -X POST http://localhost:6333/collections/documentation/snapshots
+curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation/snapshots
 
 # Lister les snapshots disponibles
-curl http://localhost:6333/collections/documents/snapshots
-curl http://localhost:6333/collections/documentation/snapshots
+curl -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/snapshots
+curl -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation/snapshots
 ```
 
 Les snapshots sont écrits dans `./qdrant_data/snapshots/`. Les copier hors du conteneur pour les conserver :
@@ -515,15 +529,16 @@ rm -rf ~/rag-stack/qdrant_data/
 # Redémarrer Qdrant seul
 docker compose up -d qdrant
 sleep 5
+set -a && source /root/rag-stack/.env && set +a
 
 # Restaurer la collection documents depuis le snapshot
 curl -X POST "http://localhost:6333/collections/documents/snapshots/recover" \
-  -H "Content-Type: application/json" \
+  -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
   -d '{"location": "file:///qdrant/storage/snapshots/documents/<nom-du-snapshot>.snapshot"}'
 
 # Restaurer la collection documentation
 curl -X POST "http://localhost:6333/collections/documentation/snapshots/recover" \
-  -H "Content-Type: application/json" \
+  -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
   -d '{"location": "file:///qdrant/storage/snapshots/documentation/<nom-du-snapshot>.snapshot"}'
 
 # Redémarrer la stack complète
