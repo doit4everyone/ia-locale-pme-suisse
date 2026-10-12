@@ -1,6 +1,6 @@
 ---
 title: "Scripts pipeline RAG local | DoIt4Everyone"
-description: "Scripts Python du pipeline RAG local : indexation SMB avec résolution ACL NTFS, RAG API FastAPI avec authentification LDAP Active Directory, extension Entra ID, synthèse des réunions Teams, journalisation nLPD. Ubuntu Server 26.04, Docker Compose, Qdrant, Ollama."
+description: "Scripts Python du pipeline RAG local : indexation SMB avec résolution ACL NTFS, RAG API FastAPI avec authentification LDAP Active Directory, extension Entra ID, synthèse des réunions Teams, journalisation nLPD. Ubuntu Server 26.04, Docker Compose, Qdrant, Ollama ou vLLM."
 ---
 
 <style>
@@ -37,14 +37,14 @@ Utilisateur (authentifié LDAP via Open WebUI)
     ↓
 RAG API FastAPI (main.py + auth.py)
     ├→ Qdrant                     → chunks filtrés par ACL NTFS
-    ├→ Ollama (hôte Windows)      → génération LLM locale
+    ├→ Ollama ou vLLM (§2)        → génération LLM locale
     └→ Microsoft Graph            → groupes Entra ID (optionnel, §11)
     ↓
 Journal nLPD (/var/log/rag/rag-queries.jsonl)
 
 n8n (toutes les heures) → POST /teams/sync (teams.py + teams_graph.py)
     ├→ Microsoft Graph            → transcriptions Teams du groupe d'adhésion
-    ├→ Ollama                     → compte rendu
+    ├→ Ollama ou vLLM             → compte rendu
     └→ email                      → brouillon à l'organisateur (§12)
 ```
 
@@ -98,11 +98,12 @@ Fonctionnalités :
   après chaque synchronisation réussie. Chaque chunk BM25 inclut son `chunk_index` pour que l'extension de contexte fonctionne même quand BM25 gagne le RRF. BM25 capture les termes exacts (noms de fichiers,
   acronymes, commandes) là où la recherche vectorielle seule échoue sur les reformulations.
 - `TOP_K` configurable (défaut 20), validé en lab pour améliorer le recall sur les gros fichiers .md
-- `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire
+- `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire (sans objet avec vLLM, dont les modèles restent chargés)
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
 - Prompt système : citation du nom exact du fichier entre crochets, jamais `[Document X]`
 - Quatre contrôles d'ancrage déterministes (chunks vides, sources inexistantes, réponse sans citation, réponse longue sans citation)
-- Juge LLM post-génération (`qwen3:4b`)
+- Juge LLM post-génération (`qwen3:4b` avec Ollama, le modèle principal avec vLLM)
+- Deux protocoles de serveur de modèles (`LLM_API`, `EMBED_API`) : l'API native d'Ollama (défaut) ou l'API compatible OpenAI de vLLM (§2). Avec vLLM, les vecteurs d'embedding sont ramenés à une longueur de 1, comme avec Ollama, et un refus du serveur (fenêtre dépassée, HTTP 400) est écrit au journal
 - Journalisation nLPD par utilisateur avec hash de la question
 - Verrou `asyncio.Lock` contre les synchronisations simultanées
 - Environnement restreint transmis aux sous-processus (aucun secret superflu)
@@ -110,13 +111,17 @@ Fonctionnalités :
 **Variables d'environnement requises :**
 
 ```bash
-LLM_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+LLM_API=ollama           # « openai » avec vLLM (§2)
+EMBED_API=ollama         # « openai » avec vLLM
+LLM_BASE_URL=http://<IP-SERVEUR-MODELES>:11434    # vLLM : port 8000
+EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:11434  # vLLM : port 8001
+JUDGE_BASE_URL=          # vide : même serveur que LLM_BASE_URL
+VLLM_API_KEY=            # avec vLLM : la clé --api-key des serveurs
 LLM_MODEL=qwen3:14b
-JUDGE_MODEL=qwen3:4b
-JUDGE_KEEP_ALIVE=2h       # Rétention du juge en mémoire Ollama après chaque appel.
+JUDGE_MODEL=qwen3:4b     # qwen3:14b avec vLLM
+JUDGE_KEEP_ALIVE=2h       # Ollama seulement : rétention du juge en mémoire après chaque appel.
                           # Format : "5m", "2h", "-1" (indéfiniment).
                           # Passer à -1 une fois le GPU installé.
-EMBED_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
 EMBED_MODEL=nomic-embed-text
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
@@ -178,9 +183,9 @@ Fonctionnalités :
   - PDF : extraction page par page via `pdfplumber`. Les PDF scannés sans couche texte produisent un avertissement et tombent en quarantaine.
   - PowerPoint : extraction slide par slide sur les zones de texte. Les tables et SmartArt ne sont pas extraits.
 - Chunking par blocs de mots avec recouvrement configurable
-- Embedding via Ollama (`nomic-embed-text` par défaut, configurable)
+- Embedding via Ollama ou vLLM (`EMBED_API`, `nomic-embed-text` par défaut, configurable). Avec vLLM, un texte plus long que la fenêtre du serveur, refusé par celui-ci, est raccourci avec un avertissement
 - Vérification de la dimension du modèle contre la collection existante au démarrage
-- Indexation incrémentale : comparaison `content_hash` + paramètres d'indexation + `chunker_version`. Les fichiers non modifiés sont ignorés sans appel Ollama. ACL reportées sur les fichiers modifiés.
+- Indexation incrémentale : comparaison `content_hash` + paramètres d'indexation + `chunker_version`. Les fichiers non modifiés sont ignorés sans appel au serveur de modèles. ACL reportées sur les fichiers modifiés.
 - IDs de chunks déterministes + upsert : plus de fenêtre d'indisponibilité lors d'une réindexation
 - Suppression des chunks excédentaires après réindexation (document raccourci)
 - Index de payload Qdrant créés automatiquement : `source` (keyword) + `chunk_index` (integer)
@@ -209,7 +214,9 @@ python indexer.py --corpus /mnt/corpus-root --reset
 **Variables d'environnement :**
 
 ```bash
-OLLAMA_URL=http://<IP-HOTE-OLLAMA>:11434
+OLLAMA_URL=http://<IP-SERVEUR-MODELES>:11434   # le serveur d'EMBEDDING ; vLLM : port 8001
+EMBED_API=ollama                                # « openai » avec vLLM
+VLLM_API_KEY=                                   # avec vLLM
 QDRANT_URL=http://localhost:6333
 ORG_OWNER=<Nom de l'organisation>
 EMBED_MODEL=nomic-embed-text
@@ -305,7 +312,7 @@ Synthèse des réunions Teams (Partie 3, guide §12). Après chaque réunion pla
 `teams.py` :
 
 - Lecture du VTT (intervenants, fusion des répliques consécutives)
-- Contrôle de longueur : fenêtre de contexte demandée explicitement à Ollama (16 384 tokens par défaut), refus plutôt que troncature silencieuse
+- Contrôle de longueur : fenêtre de contexte demandée explicitement à Ollama (16 384 tokens par défaut), refus plutôt que troncature silencieuse ; avec vLLM (`LLM_API=openai`), la fenêtre est celle du serveur, et `SUMMARY_NUM_CTX` ne doit pas la dépasser
 - Prompt à température 0, sortie JSON, transcription délimitée et neutralisée contre l'injection de prompt
 - Contrôles déterministes : chiffres absents de la transcription, responsable inconnu, termes de santé
 - Complément des échéances à partir du texte des actions, sans invention

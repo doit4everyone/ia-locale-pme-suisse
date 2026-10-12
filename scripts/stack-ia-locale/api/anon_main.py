@@ -69,6 +69,47 @@ def options_ollama(base: dict, num_gpu: str = "", seed: str = "") -> dict:
     if seed.strip() != "":
         opts["seed"] = int(seed)
     return opts
+
+
+# Protocole des serveurs de modèles (§2). « ollama » (défaut) : API native
+# d'Ollama. « openai » : API compatible OpenAI (vLLM : /v1/chat/completions,
+# /v1/embeddings). Réglable séparément pour la génération (et le juge) et pour
+# l'embedding. Avec « openai », la fenêtre de contexte est fixée au lancement du
+# serveur (--max-model-len) : LLM_NUM_CTX, JUDGE_NUM_CTX, *_NUM_GPU et
+# JUDGE_KEEP_ALIVE n'ont plus d'effet.
+LLM_API   = os.getenv("LLM_API", "").strip().lower() or "ollama"
+EMBED_API = os.getenv("EMBED_API", "").strip().lower() or "ollama"
+for _nom_api, _val_api in (("LLM_API", LLM_API), ("EMBED_API", EMBED_API)):
+    if _val_api not in ("ollama", "openai"):
+        raise ValueError(f"{_nom_api}={_val_api!r} : valeurs acceptées « ollama » ou « openai »")
+# Clé d'API des serveurs vLLM (--api-key). Vide : aucun en-tête d'autorisation.
+VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
+# Serveur du juge : par défaut celui de la génération.
+JUDGE_BASE_URL = os.getenv("JUDGE_BASE_URL", "") or LLM_BASE_URL
+
+
+def entetes_openai() -> dict:
+    return {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+
+
+def verifier_reponse_openai(r: httpx.Response) -> None:
+    """raise_for_status, avec le motif du refus dans le journal. vLLM refuse
+    (400) une requête qui dépasse --max-model-len, là où Ollama tronque sans
+    erreur : sans ce message, la cause serait invisible."""
+    if r.status_code >= 400:
+        logger.error(f"Serveur de modèles (API OpenAI) : HTTP {r.status_code} : {r.text[:300]}")
+    r.raise_for_status()
+
+
+def normaliser_vecteur(v: list[float]) -> list[float]:
+    """Ramène le vecteur à la norme 1. vLLM renvoie des vecteurs non normalisés
+    (norme ≈ 19 mesurée avec nomic-embed-text) ; l'index Qdrant en distance
+    cosinus est insensible à l'échelle, mais tout calcul de similarité en Python
+    doit voir les mêmes vecteurs qu'avec Ollama."""
+    norme = sum(x * x for x in v) ** 0.5
+    return [x / norme for x in v] if norme > 0 else v
+
+
 JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b")
 JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
 # Fenêtres de contexte demandées explicitement à Ollama, modèle par modèle.
@@ -350,6 +391,14 @@ RÈGLES ABSOLUES :
 async def get_embedding(text: str) -> list[float]:
     """Génère un embedding via le service d'embedding."""
     async with httpx.AsyncClient(timeout=60) as client:
+        if EMBED_API == "openai":
+            r = await client.post(
+                f"{EMBED_BASE_URL}/v1/embeddings",
+                headers=entetes_openai(),
+                json={"model": EMBED_MODEL, "input": text},
+            )
+            verifier_reponse_openai(r)
+            return normaliser_vecteur(r.json()["data"][0]["embedding"])
         r = await client.post(
             f"{EMBED_BASE_URL}/api/embeddings",
             json={"model": EMBED_MODEL, "prompt": text,
@@ -877,6 +926,24 @@ async def generate_answer(query: str, context: str) -> str:
 Question : {query}"""
 
     async with httpx.AsyncClient(timeout=300) as client:
+        if LLM_API == "openai":
+            # Réflexion désactivée au lancement du serveur
+            # (--default-chat-template-kwargs '{"enable_thinking": false}').
+            corps = {
+                "model": LLM_MODEL,
+                "stream": False,
+                "temperature": 0.2,
+                "messages": [
+                    {"role": "system", "content": get_system_prompt()},
+                    {"role": "user", "content": prompt_user}
+                ]
+            }
+            if LLM_SEED.strip() != "":
+                corps["seed"] = int(LLM_SEED)
+            r = await client.post(f"{LLM_BASE_URL}/v1/chat/completions",
+                                  headers=entetes_openai(), json=corps)
+            verifier_reponse_openai(r)
+            return nettoyer_reponse(r.json()["choices"][0]["message"]["content"] or "")
         r = await client.post(
             f"{LLM_BASE_URL}/api/chat",
             json={
@@ -923,11 +990,14 @@ def verifier_citations(answer: str, chunks: list[dict]) -> list[str]:
 
 
 async def warmup_judge() -> None:
-    """Ping du juge Ollama pour le maintenir chargé en mémoire."""
+    """Ping du juge Ollama pour le maintenir chargé en mémoire. Sans objet avec
+    vLLM : le modèle reste chargé tant que le serveur tourne."""
+    if LLM_API == "openai":
+        return
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(
-                f"{LLM_BASE_URL}/api/generate",
+                f"{JUDGE_BASE_URL}/api/generate",
                 json={
                     "model": JUDGE_MODEL,
                     "prompt": "",
@@ -994,20 +1064,35 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                f"{LLM_BASE_URL}/api/chat",
-                json={
-                    "model": JUDGE_MODEL,
-                    "stream": False,
-                    "format": "json",
-                    "think": False,
-                    "keep_alive": JUDGE_KEEP_ALIVE,
-                    "options": options_ollama({"temperature": 0, "num_ctx": JUDGE_NUM_CTX}, JUDGE_NUM_GPU),
-                    "messages": [{"role": "user", "content": juge_prompt}]
-                }
-            )
-            r.raise_for_status()
-            result = json.loads(r.json()["message"]["content"])
+            if LLM_API == "openai":
+                r = await client.post(
+                    f"{JUDGE_BASE_URL}/v1/chat/completions",
+                    headers=entetes_openai(),
+                    json={
+                        "model": JUDGE_MODEL,
+                        "stream": False,
+                        "temperature": 0,
+                        "response_format": {"type": "json_object"},
+                        "messages": [{"role": "user", "content": juge_prompt}]
+                    }
+                )
+                verifier_reponse_openai(r)
+                result = json.loads(r.json()["choices"][0]["message"]["content"])
+            else:
+                r = await client.post(
+                    f"{JUDGE_BASE_URL}/api/chat",
+                    json={
+                        "model": JUDGE_MODEL,
+                        "stream": False,
+                        "format": "json",
+                        "think": False,
+                        "keep_alive": JUDGE_KEEP_ALIVE,
+                        "options": options_ollama({"temperature": 0, "num_ctx": JUDGE_NUM_CTX}, JUDGE_NUM_GPU),
+                        "messages": [{"role": "user", "content": juge_prompt}]
+                    }
+                )
+                r.raise_for_status()
+                result = json.loads(r.json()["message"]["content"])
             # Valider strictement : accepter uniquement True booléen.
             # {"ancree": "false"} en chaîne ou clé absente vaut True par défaut
             # sans cette validation, ce qui laisserait passer des réponses non ancrées.
@@ -1097,6 +1182,8 @@ async def stats(credentials: HTTPAuthorizationCredentials = Security(security)):
         "chunks_documents": count,
         "chunks_documentation": count_doc,
         "llm": LLM_BASE_URL,
+        "llm_api": LLM_API,
+        "embed_api": EMBED_API,
         "model": LLM_MODEL,
         "judge_model": JUDGE_MODEL
     }
@@ -1655,6 +1742,8 @@ async def admin_sync(
                     "QDRANT_URL": QDRANT_HOST,
                     "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                     "EMBED_NUM_GPU": EMBED_NUM_GPU,
+                    "EMBED_API": EMBED_API,
+                    "VLLM_API_KEY": VLLM_API_KEY,
                     "QDRANT_COLLECTION": COLLECTION,
                     "ORG_OWNER": ORG_NAME,
                     "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
@@ -1768,6 +1857,8 @@ async def admin_sync(
                         "QDRANT_URL": QDRANT_HOST,
                         "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                         "EMBED_NUM_GPU": EMBED_NUM_GPU,
+                        "EMBED_API": EMBED_API,
+                        "VLLM_API_KEY": VLLM_API_KEY,
                         "QDRANT_COLLECTION": COLLECTION,
                         "ORG_OWNER": ORG_NAME,
                         "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),

@@ -15,7 +15,7 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 
 # §3 Docker Compose : stack complète
 
-[Retour au sommaire](index.md) | [Section précédente : §2 Installation et configuration de vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
 
 **Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (§11 et suivantes) documente les connecteurs Microsoft 365.
 
@@ -51,15 +51,17 @@ Toutes les variables sensibles sont centralisées dans `.env`. Ne jamais committ
 Le fichier complet est fourni en téléchargement dans ce dépôt sous le nom `env.example`. Voici les variables clés à adapter à votre environnement :
 
 ```bash
-# Génération LLM : Ollama sur LABO-G9 (hôte Windows, port 11434)
-LLM_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+# Serveur de modèles (§2) : bloc A, Ollama (port 11434).
+# Avec vLLM : bloc B de env.example (ports 8000 et 8001, LLM_API=openai).
+LLM_API=ollama
+EMBED_API=ollama
+LLM_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
+EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
 LLM_MODEL=qwen3:14b
 JUDGE_MODEL=qwen3:4b
-
-# Embeddings : identique au service qui a servi à indexer
-# En cas de changement de modèle, réindexer avec indexer.py --reset
-EMBED_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
 EMBED_MODEL=nomic-embed-text
+# Le modèle d'embedding doit rester celui qui a servi à indexer :
+# en cas de changement de modèle, réindexer avec indexer.py --reset
 
 # Qdrant
 QDRANT_HOST=http://qdrant:6333
@@ -132,7 +134,7 @@ MIN_CHUNK_WORDS=8
 #                             Passer à -1 une fois le GPU installé
 ```
 
-> **Point critique :** `LLM_BASE_URL` et `EMBED_BASE_URL` doivent utiliser l'IP réseau de l'hôte Windows ou la passerelle Docker (`172.17.0.1`), jamais `localhost`. Depuis l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même. Pour vérifier l'IP de la passerelle Docker : `ip addr show docker0 | grep "inet "`.
+> **Point critique :** `LLM_BASE_URL` et `EMBED_BASE_URL` doivent utiliser l'adresse réseau du serveur de modèles (ou la passerelle Docker `172.17.0.1` s'il tourne sur la VM elle-même), jamais `localhost`. Depuis l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même. Pour vérifier l'IP de la passerelle Docker : `ip addr show docker0 | grep "inet "`.
 >
 > **Docker et variables vides :** avec `- VAR=${VAR}`, si `VAR` est absente du `.env`, Compose transmet une chaîne vide. Le code Python ne voit pas la valeur par défaut définie dans le script. Toute variable listée dans le bloc `environment` du Compose doit donc être définie dans `.env`.
 
@@ -272,15 +274,21 @@ services:
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
-      # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000 sur DGX Spark)
-      # EMBED_BASE_URL : embeddings. Doit correspondre au service qui a servi
-      # à indexer. Si les deux services diffèrent, définir EMBED_BASE_URL
-      # explicitement dans .env, sinon les vecteurs de requête sont incohérents.
+      # LLM_BASE_URL : génération (Ollama : port 11434 ; vLLM : port 8000, §2)
+      # EMBED_BASE_URL : embeddings (Ollama : port 11434 ; vLLM : port 8001).
+      # Le modèle d'embedding doit être celui qui a servi à indexer, sinon les
+      # vecteurs des questions ne correspondent plus à ceux de l'index.
       - LLM_BASE_URL=${LLM_BASE_URL}
       - EMBED_BASE_URL=${EMBED_BASE_URL}
       - EMBED_MODEL=${EMBED_MODEL}
       - LLM_MODEL=${LLM_MODEL}
       - JUDGE_MODEL=${JUDGE_MODEL}
+      # Protocole des serveurs de modèles (§2) : « ollama » (défaut) ou « openai »
+      # (vLLM). JUDGE_BASE_URL vide = LLM_BASE_URL. VLLM_API_KEY : clé --api-key de vLLM.
+      - LLM_API=${LLM_API:-ollama}
+      - EMBED_API=${EMBED_API:-ollama}
+      - JUDGE_BASE_URL=${JUDGE_BASE_URL:-}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
       - ORG_NAME=${ORG_NAME}
       - API_TOKEN=${API_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
@@ -569,7 +577,7 @@ unset TOKEN
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §2 Installation et configuration de vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
+[Retour au sommaire](index.md) | [Section précédente : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
 
 ---
 

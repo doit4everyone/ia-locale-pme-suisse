@@ -58,15 +58,21 @@ services:
       - LOG_HMAC_KEY=${LOG_HMAC_KEY}
       - CAS_CLOISONNEMENT=${CAS_CLOISONNEMENT}
       - QDRANT_COLLECTION=${QDRANT_COLLECTION}
-      # LLM_BASE_URL : génération (Ollama 11434, ou vLLM 8000 sur DGX Spark)
-      # EMBED_BASE_URL : embeddings. Doit correspondre au service qui a servi
-      # à indexer. Si les deux services diffèrent, définir EMBED_BASE_URL
-      # explicitement dans .env, sinon les vecteurs de requête sont incohérents.
+      # LLM_BASE_URL : génération (Ollama : port 11434 ; vLLM : port 8000, §2)
+      # EMBED_BASE_URL : embeddings (Ollama : port 11434 ; vLLM : port 8001).
+      # Le modèle d'embedding doit être celui qui a servi à indexer, sinon les
+      # vecteurs des questions ne correspondent plus à ceux de l'index.
       - LLM_BASE_URL=${LLM_BASE_URL}
       - EMBED_BASE_URL=${EMBED_BASE_URL}
       - EMBED_MODEL=${EMBED_MODEL}
       - LLM_MODEL=${LLM_MODEL}
       - JUDGE_MODEL=${JUDGE_MODEL}
+      # Protocole des serveurs de modèles (§2) : « ollama » (défaut) ou « openai »
+      # (vLLM). JUDGE_BASE_URL vide = LLM_BASE_URL. VLLM_API_KEY : clé --api-key de vLLM.
+      - LLM_API=${LLM_API:-ollama}
+      - EMBED_API=${EMBED_API:-ollama}
+      - JUDGE_BASE_URL=${JUDGE_BASE_URL:-}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
       - ORG_NAME=${ORG_NAME}
       - API_TOKEN=${API_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}

@@ -60,7 +60,7 @@ Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c
 - Journalisation nLPD : chaque requête est tracée avec l'identité de l'utilisateur et les sources consultées.
 - Synchronisation et résolution des permissions automatisées via n8n.
 
-**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama (qwen2.5:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama ou vLLM (qwen3:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 ---
 

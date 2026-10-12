@@ -15,7 +15,7 @@ description: "Procédures de déploiement d'une stack IA locale conçue pour fac
 
 [Retour à l'accueil](../) | [Guides décisionnels](../guides/)
 
-Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, Ollama natif, NVIDIA RTX 5060 Ti 16 Go) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose).
+Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, NVIDIA RTX 5060 Ti 16 Go, Ollama natif puis vLLM dans WSL2) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose).
 
 ---
 
@@ -25,7 +25,7 @@ Les procédures sont publiées après validation en lab, sur l'environnement de 
 
 | Partie | Contenu | Sections |
 |---|---|---|
-| Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
+| Parties 1 et 2 : file server Windows | Pipeline RAG complet : Open WebUI, RAG API FastAPI, Qdrant, Ollama ou vLLM, n8n. Authentification LDAP AD, cloisonnement documentaire par ACL NTFS, contrôle d'ancrage, journalisation nLPD, durcissement | §0 à §9 |
 | Partie 3 : Microsoft 365 | Microsoft Graph et groupes Entra ID, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance | §11 à §17 |
 | Validation et performances sur GPU | Passage sur GPU, placement des modèles, méthode de mesure reproductible, choix des modèles et construction du contexte mesurés, limites qui relèvent du corpus | §10 |
 

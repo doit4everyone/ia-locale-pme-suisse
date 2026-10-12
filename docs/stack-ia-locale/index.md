@@ -1,6 +1,6 @@
 ---
 title: "Guide de déploiement : stack IA locale sur VM Ubuntu Server | DoIt4Everyone"
-description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter la conformité à la nLPD : Open WebUI, RAG API FastAPI, Qdrant, Ollama, cloisonnement ACL NTFS, authentification LDAP AD, journalisation nLPD."
+description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter la conformité à la nLPD : Open WebUI, RAG API FastAPI, Qdrant, Ollama ou vLLM, cloisonnement ACL NTFS, authentification LDAP AD, journalisation nLPD."
 ---
 <style>
   header, footer { display: none !important; }
@@ -14,7 +14,7 @@ description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter
 
 # Guide de déploiement : stack IA locale sur VM Ubuntu Server
 
-*Architecture : VM-RAG-LAB (Ubuntu Server 26.04) + LABO-G9 (Ollama)*
+*Architecture : VM de la stack (Ubuntu Server 26.04) + serveur de modèles (Ollama ou vLLM)*
 
 ---
 
@@ -22,19 +22,19 @@ description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter
 
 ### Architecture validée en lab
 
-Ce guide documente le déploiement d'une stack RAG locale pour PME, validée en lab sur matériel CPU sans GPU. L'architecture en service à l'issue de ce guide :
+Ce guide documente le déploiement d'une stack RAG locale pour PME, validée en lab sur processeur, puis sur carte graphique (§10). L'architecture en service à l'issue de ce guide :
 
 ```
 Utilisateur → Open WebUI (VM-RAG-LAB, port 3001, authentification LDAP AD)
                   └→ RAG API FastAPI (port 8080)
                        ├→ auth.py : résolution groupes AD (LDAP, svc-rag)
                        ├→ Qdrant : index vectoriel + ACL NTFS (autorises[])
-                       └→ Ollama qwen3:14b (LABO-G9, hôte Windows, GPU)
+                       └→ Serveur de modèles : Ollama ou vLLM, qwen3:14b (§2)
 ```
 
 Onyx CE est déployé dans §4 comme étape de validation de l'indexation et du backend Ollama. Il est ensuite remplacé par Open WebUI + RAG API FastAPI qui constituent la stack finale, avec le cloisonnement documentaire réel.
 
-vLLM est documenté dans §2 comme cible de production sur DGX Spark. Ce n'est pas le backend en service dans la configuration décrite : Ollama sur LABO-G9 assure l'inférence.
+Le serveur de modèles fonctionne avec l'un de deux moteurs, documentés au §2 et comparés au §10.12 : **Ollama**, simple à installer, pour un à deux utilisateurs simultanés, et **vLLM**, qui traite plusieurs questions en même temps et convient à une PME dont plusieurs collaborateurs utilisent l'assistant. Les deux ont été validés en lab.
 
 ### Périmètre : cloisonnement documentaire
 
@@ -60,7 +60,7 @@ Chaque section porte en tête une de ces trois lignes :
 
 ### Contexte de validation
 
-Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstation, sans GPU. VM Ubuntu Server 26.04 LTS, 16 Go RAM, 6 vCPU. Les mesures de performance données dans ce guide valent pour cette configuration et ne sont pas transposables à d'autres environnements.
+Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstation, d'abord sans GPU, puis avec une carte NVIDIA RTX 5060 Ti 16 Go (§10). VM Ubuntu Server 26.04 LTS, 16 Go RAM, 6 vCPU. Les mesures de performance données dans ce guide valent pour cette configuration et ne sont pas transposables à d'autres environnements.
 
 ---
 
@@ -70,9 +70,9 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 | Section | Contenu | Statut |
 |---|---|---|
-| [§0 Déploiement complet](section-00-quickstart.md) | Procédure condensée de déploiement de bout en bout, Microsoft 365 en option (étape 14) | Publié |
+| [§0 Démarrage rapide](section-00-quickstart.md) | Déploiement de bout en bout, avec Ollama ou vLLM, Microsoft 365 en option (étape 17) | Publié |
 | [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker | Publié |
-| [§2 vLLM, validation CPU](section-02-vllm.md) | vLLM-cpu pour validation, configuration production DGX Spark | Publié |
+| [§2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | Choisir le moteur selon le nombre d'utilisateurs simultanés, installer Ollama ou vLLM (WSL2), vérifications, pièges, bascule, DGX Spark | Publié |
 | [§3 Infrastructure : Qdrant, n8n, RAG API, Open WebUI](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API complète, Open WebUI | Publié |
 | [§4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | Validation backend avec Onyx CE, déploiement Open WebUI, LDAP AD, cloisonnement | Publié |
 | [§5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | Montage SMB, ACL NTFS, résolution LDAP, filtrage Qdrant par identité | Publié |
@@ -80,7 +80,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, OCR (documentaire) ; Teams : voir §12 | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
-| [§10 Validation et performances sur GPU](section-10-gpu.md) | Passage sur GPU, placement des modèles, méthode de mesure, choix des modèles, construction du contexte, reranker, limites du corpus | Publié |
+| [§10 Validation et performances sur GPU](section-10-gpu.md) | Passage sur GPU, placement des modèles, méthode de mesure, choix des modèles, construction du contexte, reranker, limites du corpus, Ollama contre vLLM | Publié |
 
 > **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés en lab pour ces sections sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les scripts du dossier principal évoluent avec la Partie 3, en restant compatibles avec la stack SMB.
 

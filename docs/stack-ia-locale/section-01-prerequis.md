@@ -15,7 +15,7 @@ description: "Création et configuration de la VM Ubuntu Server 26.04 pour la st
 
 # §1 Prérequis et création de la VM
 
-[Retour au sommaire](index.md) | [Section précédente : §0 Déploiement complet](section-00-quickstart.md) | [Section suivante : §2 Installation et configuration de vLLM](section-02-vllm.md)
+[Retour au sommaire](index.md) | [Section précédente : §0 Démarrage rapide](section-00-quickstart.md) | [Section suivante : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md)
 
 **Statut :** validé sur VM-RAG-LAB, septembre 2026.
 
@@ -28,11 +28,11 @@ Ce guide a été validé sur la configuration suivante, dans VMware Workstation 
 | Ressource | Minimum | Recommandé | Remarque |
 |---|---|---|---|
 | vCPU | 4 | 6 | Épingler sur P-cores physiques (voir §1.3) |
-| RAM | 16 Go | 16 Go | Open WebUI + RAG API + Docker Compose complet : environ 8 à 10 Go en charge. Pour exécuter vLLM dans la VM, porter à 20 Go (voir §2) |
+| RAM | 16 Go | 16 Go | Open WebUI + RAG API + Docker Compose complet : environ 8 à 10 Go en charge. Les modèles ne tournent pas dans cette VM, mais sur le serveur de modèles (§2) |
 | Disque | 80 Go | 100 Go | Type NVMe recommandé dans VMware Workstation |
 | Réseau | NAT | Réseau lab dédié | Un réseau lab donne accès aux ressources AD, SMB, DNS |
 
-> **Note VMware Workstation :** choisir **1 processeur, 6 cœurs** (et non 2 processeurs × 3 cœurs). Un seul socket évite les problèmes de topologie NUMA que vLLM pourrait mal interpréter en mode CPU. Pour le disque virtuel, choisir **NVMe** et le pilote réseau **vmxnet3** plutôt que e1000.
+> **Note VMware Workstation :** choisir **1 processeur, 6 cœurs** (et non 2 processeurs × 3 cœurs). Un seul socket évite des problèmes de topologie NUMA. Pour le disque virtuel, choisir **NVMe** et le pilote réseau **vmxnet3** plutôt que e1000.
 
 ---
 
@@ -157,7 +157,7 @@ Pour une installation **existante**, déjà en service : voir la migration de §
 
 ---
 
-[Retour au sommaire](index.md) | [Section précédente : §0 Déploiement complet](section-00-quickstart.md) | [Section suivante : §2 Installation et configuration de vLLM](section-02-vllm.md)
+[Retour au sommaire](index.md) | [Section précédente : §0 Démarrage rapide](section-00-quickstart.md) | [Section suivante : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md)
 
 ---
 

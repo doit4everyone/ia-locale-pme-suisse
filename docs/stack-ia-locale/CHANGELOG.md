@@ -4,6 +4,30 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.20.0] : Octobre 2026
+
+Deux moteurs pour le serveur de modèles : Ollama, pour un à deux utilisateurs simultanés, et vLLM, pour plusieurs. Le démarrage rapide est réécrit pour partir de l'un ou de l'autre.
+
+### Documentation
+
+- `section-00-quickstart.md` : réécrit pour des lecteurs non spécialistes. Les trois machines, le choix du moteur, les conventions (où lancer chaque commande, valeurs à remplacer, résultat attendu à chaque étape), l'installation d'Ollama (3A) ou de vLLM (3B), les scripts récupérés par `git clone`, tous les secrets générés automatiquement, le bloc du serveur de modèles dans le `.env`, un contrôle depuis le conteneur (la VM qui joint le serveur ne suffit pas), le test de cloisonnement en contrôle final, et un dépannage étendu (pare-feu, réseau Docker sans adresse, serveur d'embedding arrêté, synchronisation en cours).
+- `section-02-vllm.md` : réécrit, « Le serveur de modèles : Ollama ou vLLM ». Rôle du serveur, choix du moteur, Ollama sous Windows et sous Linux, vLLM dans WSL2 (préparation, installation, modèles, clé d'API, lancement, vérifications, services systemd non encore validés, raccordement), onze pièges rencontrés en lab, bascule sans réindexation, DGX Spark (documentaire). Le contenu sur vLLM en mode CPU est retiré.
+- `section-10-gpu.md` : §10.12, Ollama contre vLLM mesurés sur la même carte (score 61 et 65 sur 75, une question seule plus lente avec vLLM, deux séries simultanées servies presque aussi vite qu'une seule, index réutilisable sans réindexation, juge `qwen3:4b` en variante qui raisonne toujours) ; §10.3, le piège d'une synchronisation pendant une mesure ; §10.4, durées actuelles ; §10.11, le moteur dans la configuration recommandée.
+- `index.md`, `section-01-prerequis.md`, `section-03-docker-compose.md` : les deux moteurs, mémoire de la VM sans vLLM, extraits du `.env` et du Compose.
+- `suivi-corrections.md` : points 63 et 64 corrigés, points 65 à 69 ouverts, doc.5 complété.
+- `README.md`, `index.md`, `docs/index.md` : description de la stack et environnement de référence, avec les deux moteurs.
+
+### Scripts
+
+- `api/anon_main.py`, `api/teams.py` : protocole du serveur de modèles réglable, `LLM_API` et `EMBED_API` (`ollama` par défaut, `openai` pour vLLM), `JUDGE_BASE_URL` (vide : le serveur de génération), `VLLM_API_KEY`. Avec vLLM : juge et synthèse Teams en JSON contraint, vecteurs d'embedding ramenés à une longueur de 1, refus du serveur écrit au journal. Variables transmises aux indexeurs lancés par `/admin/sync`. Sans ces réglages, le comportement est inchangé.
+- `anon_indexer.py` : embedding et contrôle de démarrage par l'API de vLLM ; un texte trop long pour le serveur est raccourci avec un avertissement.
+- `s10/mesure_s10.py` : moteur noté dans le rapport, déchargement des modèles sans objet avec vLLM.
+- `docker-compose.yml` : `LLM_API`, `EMBED_API`, `JUDGE_BASE_URL`, `VLLM_API_KEY`, avec leurs valeurs par défaut.
+- `env.example` : bloc du serveur de modèles en deux variantes (Ollama, vLLM) ; `JUDGE_NUM_CTX` porté de 8 192 à 16 384 (règle du §10.6) ; contrôle de Qdrant avec la clé d'API ; repères du lab retirés de l'en-tête.
+- `deploy.sh` : choix du moteur, contrôle des deux serveurs vLLM (refus sans clé, modèles servis), `.env` adapté, `JUDGE_NUM_CTX=16384`, contrôle du serveur de modèles depuis le conteneur. Testé sur des serveurs simulés ; pas encore rejoué sur une VM neuve (suivi doc.5).
+
+---
+
 ## [2.19.0] : Octobre 2026
 
 Refonte du plan d'apprentissage.

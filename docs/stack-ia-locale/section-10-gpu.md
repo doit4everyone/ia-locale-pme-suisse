@@ -17,7 +17,7 @@ description: "Passage de la stack RAG sur GPU (RTX 5060 Ti 16 Go) : mise en plac
 
 [Retour au sommaire](index.md) | [Section précédente : §9 Sécurité et durcissement](section-09-securite.md) | [Section suivante : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB et LABO-G9, octobre 2026, avec une carte NVIDIA RTX 5060 Ti 16 Go. Mesures sur un jeu de 17 questions, graine de génération fixée, cloisonnement contrôlé à 40 cas sur 40 (et en mode complet sur les cas Purview, écriture seule et refus explicite) après chaque modification.
+**Statut :** validé en lab sur VM-RAG-LAB et LABO-G9, octobre 2026, avec une carte NVIDIA RTX 5060 Ti 16 Go. Mesures sur un jeu de 17 questions, graine de génération fixée, cloisonnement contrôlé à 40 cas sur 40 (et en mode complet sur les cas Purview, écriture seule et refus explicite) après chaque modification. Comparaison des moteurs Ollama et vLLM (§10.12) : même carte, octobre 2026, cloisonnement à 44 sur 44.
 
 Jusqu'ici, toute la stack tournait sur le processeur de LABO-G9. Cette section documente le passage sur une carte graphique, puis la campagne de mesures qui a suivi : ce que la carte change, et surtout ce qu'elle ne change pas. Car le résultat principal tient en une phrase : **la carte divise les temps de réponse par cinq à dix, sans rien changer à la qualité ni à la sécurité**. La qualité, elle, s'est gagnée ailleurs : dans la construction du contexte, dans le prompt, et dans le corpus.
 
@@ -157,6 +157,16 @@ Avec `LLM_SEED` fixé (42 dans le lab), la génération devient reproductible : 
 
 Ollama garde le calcul du dernier texte lu. Une question posée **deux fois de suite** est servie beaucoup plus vite (23 secondes au lieu de plus d'une minute sur CPU, dans le lab) : on mesure alors le cache, pas le modèle. Le script pose les questions du jeu dans l'ordre, passage après passage, pour qu'une même question ne soit jamais posée deux fois d'affilée. Le premier appel après un redémarrage ou un changement de réglage inclut, lui, le chargement des modèles.
 
+### Le piège de la synchronisation
+
+Une première campagne avec vLLM (§10.12) a donné des durées trois à cinq fois plus longues que prévu (44,6 s au lieu de 8,7 s pour la même question précise), et très variables d'un passage à l'autre malgré la graine fixée (38,0 s puis 7,5 s pour une autre question). Le journal de vLLM montrait un serveur inactif la plupart du temps, sans aucune file d'attente. En cause : une synchronisation du corpus, lancée par n8n peu avant la campagne, tournait en même temps (indexation, résolution des droits, SharePoint), et occupait la VM et le serveur d'embedding. Relancée au repos, la même campagne a donné 8,7 s, reproductibles au dixième de seconde. La configuration du serveur différait aussi entre les deux campagnes (cache sur 8 bits), mais sa vitesse de lecture, mesurée seule, était équivalente : elle n'explique pas un tel écart.
+
+Avant une mesure, vérifier qu'aucune synchronisation ne tourne, et attendre la ligne « Terminé » :
+
+```bash
+docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -3
+```
+
 ### Le script
 
 `mesure_s10.py`, lancé dans le conteneur de la RAG API, pose chaque question au nom du compte indiqué (comme Open WebUI), lit les sources dans le journal des requêtes, évalue la réponse et produit un rapport JSON avec la configuration mesurée (modèles, graine, réglages). Il est fourni dans le dépôt avec le jeu de questions.
@@ -182,6 +192,8 @@ Mêmes modèles, même configuration, seul le matériel change :
 | Cloisonnement | 40 sur 40 | 40 sur 40 |
 
 Le gain est d'un facteur cinq à dix, sans aucun effet sur la qualité ni la sécurité : c'est attendu, puisque les modèles sont les mêmes. Ce qui change vraiment, c'est l'usage : une campagne de mesure de 15 questions prend désormais une à deux minutes. Les comparaisons qui suivent n'auraient pas été réalistes sur CPU.
+
+Ces durées datent du passage sur GPU. Avec la configuration finale (§10.11), la campagne d'octobre donne en médiane 1 à 6 s pour les questions précises et 10 à 19 s pour les questions larges et l'inventaire (§10.12). La synthèse du guide du helpdesk, mesurée à 14 s au §10.9, y prend 49 s : l'écart n'est pas encore expliqué (suivi des corrections).
 
 ---
 
@@ -403,7 +415,8 @@ Une cinquième limite relève d'un traitement à venir : **résumer un long docu
 | Composant | Choix | Réglages |
 |---|---|---|
 | Modèle principal | `qwen3:14b`, sur la carte | `LLM_MODEL=qwen3:14b`, `LLM_NUM_CTX=16384` |
-| Juge | `qwen3:4b`, sur la carte | `JUDGE_NUM_GPU` vide |
+| Moteur | Ollama pour un à deux utilisateurs simultanés, vLLM au-delà | §2 et §10.12 |
+| Juge | `qwen3:4b`, sur la carte ; avec vLLM, le modèle principal | `JUDGE_NUM_GPU` vide ; avec vLLM, `JUDGE_MODEL=qwen3:14b` |
 | Embedding | `nomic-embed-text`, sur la carte | `EMBED_NUM_GPU` vide |
 | Synthèse Teams | Le modèle principal | `SUMMARY_MODEL` vide |
 | Reranker | Désactivé | `RERANKER_URL` vide ; le service reste disponible en option |
@@ -448,6 +461,87 @@ Les colonnes `si` et `so` (entrées et sorties du swap par seconde) doivent rest
 | Test de cloisonnement | 40 sur 40, et en mode complet sur les cas Purview, écriture seule et refus explicite |
 | Synthèse Teams | Durée et score sur la réunion de test |
 | `vmstat` dans la VM | Pas de swap actif |
+| Avec vLLM | Les contrôles de §2.4.6 à §2.4.8, dont l'accès depuis le conteneur |
+
+---
+
+## §10.12 Ollama ou vLLM : le moteur mesuré
+
+Le §2 documente deux moteurs pour le serveur de modèles. Ils ont été comparés sur le même poste (RTX 5060 Ti 16 Go, Linux dans WSL2 pour les deux), avec le même index, le même jeu de 15 questions en cinq passages et la même graine. Le cloisonnement est resté à 44 sur 44 après la bascule.
+
+### Les configurations comparées
+
+| | Ollama 0.40.3 | vLLM 0.31.0 |
+|---|---|---|
+| Rédaction | `qwen3:14b`, compression sur 4 bits | `Qwen/Qwen3-14B-AWQ`, compression sur 4 bits |
+| Juge | `qwen3:4b` | Le modèle de rédaction, sur le même serveur |
+| Embedding | `nomic-embed-text` | `nomic-ai/nomic-embed-text-v1.5` |
+| Fenêtre de contexte | 16 384 tokens | 16 384 tokens |
+| Questions traitées ensemble | Une (`OLLAMA_NUM_PARALLEL=1`) | Jusqu'à quatre |
+
+Le juge diffère par contrainte, pas par choix : vLLM réserve la mémoire de la carte au démarrage, et 16 Go ne tiennent que le modèle de rédaction et l'embedding. Le modèle de rédaction sert donc aussi de juge.
+
+### L'index reste valable
+
+Avant toute mesure, 50 extraits tirés au hasard de l'index construit avec Ollama ont été recalculés par vLLM : vecteurs identiques, similarité de 1,00000 pour chacun. vLLM ne ramène pas ses vecteurs à une longueur de 1 (longueur mesurée : 19,3) ; la distance utilisée par Qdrant n'y est pas sensible, et la RAG API les normalise désormais elle-même. **Changer de moteur ne demande pas de réindexer.**
+
+### Une question à la fois
+
+Durées médianes, additionnées par type de question :
+
+| Questions | Ollama | vLLM |
+|---|---|---|
+| Précises (8 questions) | 26,2 s | 57,4 s |
+| Larges et inventaire (5 questions) | 105,3 s | 125,5 s |
+| Refus (2 questions) | 3,6 s | 6,5 s |
+| **Campagne complète** (75 questions) | **13,2 min** | **16,3 min** |
+| **Score** | **61 sur 75** | **65 sur 75** |
+
+**Une question seule est plus lente avec vLLM**, surtout les plus courtes : une question précise passe de 1 à 6 s à 2 à 9 s. Sur une question précise, le journal de la RAG API donne la répartition : 1,3 s pour l'identité, la recherche et le contexte, 5,4 s pour la rédaction, 4,4 s pour le juge. Le juge 14B relit toutes les sources avec un modèle trois fois plus grand que le 4B : c'est l'essentiel de l'écart.
+
+**Une seule question change de verdict** : celle sur la configuration YAML d'UTMStack passe de 1 sur 5 à 5 sur 5, et explique à elle seule l'écart de score. Deux différences peuvent en être la cause : le juge (14B au lieu de 4B) et la réponse elle-même (même modèle, mais compressé autrement et servi par un autre moteur). Les deux échecs restants (un avertissement d'ancrage sur une question large, et l'inventaire des règles YAML, où la recherche place un autre chapitre en tête) échouent cinq fois sur cinq avec les deux moteurs : ils relèvent du corpus (§10.10), pas du moteur.
+
+**La reproductibilité est excellente avec vLLM** : la synthèse du guide du helpdesk a pris 53,1 à 53,7 s sur les cinq passages.
+
+### Plusieurs questions à la fois
+
+Deux campagnes de 30 questions (deux passages), lancées au même moment dans deux terminaux :
+
+| Mesure | Une campagne seule | Deux campagnes ensemble |
+|---|---|---|
+| Durée de chaque campagne | 6,5 min | 6,9 min |
+| Questions traitées | 30 en 6,5 min | 60 en 6,9 min |
+| Synthèse du guide du helpdesk | 53,3 s | 56,7 s |
+| Question précise | 8,7 s | 8,9 s |
+| Score de chaque campagne | 13 sur 15 par passage | Identique, mêmes échecs |
+
+Le journal de vLLM affichait `Running: 2 reqs`, avec un cache occupé à 38 % : les deux questions étaient traitées ensemble, sans éviction. **La carte sert presque deux fois plus de questions dans le même temps, et chacune ne prend que 6 % de plus.** Avec Ollama réglé sur une question à la fois, la seconde attendrait la fin de la première ; ce cas n'a pas été mesuré, pas plus qu'Ollama réglé sur plusieurs questions à la fois.
+
+### La vitesse brute
+
+| Mesure | Résultat |
+|---|---|
+| Production de texte, une requête | 43,8 tokens par seconde avec vLLM, 42,2 avec Ollama : équivalent |
+| Lecture d'un prompt de 12 000 tokens, avec vLLM | 8,8 s (1 360 tokens par seconde), avant le premier mot |
+| Le même prompt, relu une seconde fois | 0,1 s : vLLM garde en mémoire le calcul d'un début de texte déjà lu |
+| Cache sur 8 bits contre cache normal, lecture | 1 256 contre 1 360 tokens par seconde : aucun gain |
+
+La lecture du contexte pèse lourd : la rédaction comme le juge relisent tous les extraits, soit 4 000 à 11 000 tokens chacun. Le cache sur 8 bits, qui économise la mémoire, n'a rien apporté en vitesse et impose des composants qui exigent le compilateur CUDA (§2.4.9) : il n'est pas retenu. La production de texte avec vLLM a été mesurée avec ce cache ; elle n'a pas été remesurée seule avec la configuration finale, dont les durées de questions sont celles des tableaux ci-dessus.
+
+### Le juge `qwen3:4b` d'Ollama
+
+Dans la bibliothèque d'Ollama, l'étiquette `qwen3:4b` désigne la variante *Qwen3-4B-Thinking-2507*, qui raisonne toujours. Interrogée sans contrainte de format, avec la consigne de ne pas réfléchir, elle a écrit 143 tokens de raisonnement pour répondre « OK », là où le 14B servi par vLLM répond en 2 tokens. Dans la stack, la réponse du juge est contrainte au format JSON dès le premier mot, ce qui la rend utilisable. Ses résultats sont ceux du tableau ci-dessus ; l'effet de cette variante sur la qualité du jugement n'a pas été mesuré séparément.
+
+### Ce que coûte vLLM
+
+Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son pare-feu, un compilateur C, le choix d'un calcul qui se passe du compilateur CUDA, la désactivation d'un échantillonneur, un réglage de la mémoire au centième près, deux serveurs à surveiller, une clé d'API, et l'adaptation de la RAG API à l'API d'OpenAI (`LLM_API=openai`). Ollama, c'est une installation, six variables et trois téléchargements.
+
+### Verdict
+
+| Situation | Moteur |
+|---|---|
+| Un essai, un poste unique, un à deux utilisateurs simultanés | **Ollama** : plus simple, et plus rapide sur une question seule grâce à son petit juge |
+| Plusieurs utilisateurs simultanés, une PME en service | **vLLM** : presque deux fois plus de questions servies dans le même temps, pour des réponses à peine plus longues (+6 %) |
 
 ---
 

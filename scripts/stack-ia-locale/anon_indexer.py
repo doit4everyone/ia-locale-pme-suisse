@@ -118,6 +118,12 @@ except ImportError:
 OLLAMA_URL    = os.getenv("OLLAMA_URL",        "http://<IP-HOTE-OLLAMA>:11434")
 EMBED_NUM_GPU = os.getenv("EMBED_NUM_GPU", "")   # « 0 » : embedding sur le CPU (§10)
 EMBED_MODEL   = os.getenv("EMBED_MODEL",       "nomic-embed-text")
+# « ollama » (défaut) ou « openai » (vLLM : /v1/embeddings, §2). OLLAMA_URL
+# désigne dans les deux cas le serveur d'embedding.
+EMBED_API     = os.getenv("EMBED_API", "").strip().lower() or "ollama"
+if EMBED_API not in ("ollama", "openai"):
+    sys.exit(f"EMBED_API={EMBED_API!r} : valeurs acceptées « ollama » ou « openai »")
+VLLM_API_KEY  = os.getenv("VLLM_API_KEY", "")
 QDRANT_URL    = os.getenv("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None   # clé d'API de Qdrant, vide = aucune
 
@@ -561,11 +567,40 @@ def http_client() -> httpx.Client:
     return _http_client
 
 
+def _entetes_openai() -> dict:
+    return {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+
+
+def _embedding_openai(text: str) -> list[float]:
+    """Embedding via l'API OpenAI de vLLM. Le vecteur est ramené à la norme 1
+    (vLLM ne normalise pas, Ollama oui : même valeur stockée dans les deux cas).
+    Un texte plus long que --max-model-len du serveur est refusé (HTTP 400) :
+    on raccourcit alors le texte et on signale la troncature."""
+    essai = text
+    for tentative in range(5):
+        r = http_client().post(f"{OLLAMA_URL}/v1/embeddings", headers=_entetes_openai(),
+                               json={"model": EMBED_MODEL, "input": essai})
+        if r.status_code == 400 and len(essai) > 200:
+            essai = essai[: int(len(essai) * 0.75)]
+            continue
+        r.raise_for_status()
+        if essai != text:
+            print(f"    Avertissement : texte tronqué à {len(essai)} caractères "
+                  f"(sur {len(text)}) pour tenir dans --max-model-len du serveur d'embedding.")
+        v = r.json()["data"][0]["embedding"]
+        norme = sum(x * x for x in v) ** 0.5
+        return [x / norme for x in v] if norme > 0 else v
+    r.raise_for_status()
+    raise RuntimeError("Embedding impossible même après troncature")
+
+
 def get_embedding(text: str) -> list[float]:
     import re as _re
     # Nettoyer les suites de points répétitifs (tables des matières PDF)
     # qui font planter nomic-embed-text avec une erreur 500.
     text = _re.sub(r'[. ]{10,}', ' ', text).strip()
+    if EMBED_API == "openai":
+        return _embedding_openai(text)
     r = http_client().post(
         f"{OLLAMA_URL}/api/embeddings",
         json={"model": EMBED_MODEL, "prompt": text,
@@ -916,16 +951,21 @@ def index_corpus(
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     init_collection(qdrant_client, reset=reset)
 
-    print(f"Vérification Ollama : {OLLAMA_URL}")
+    print(f"Vérification du serveur d'embedding ({EMBED_API}) : {OLLAMA_URL}")
     try:
-        r = http_client().get(f"{OLLAMA_URL}/api/tags", timeout=10)
-        models = [m['name'] for m in r.json().get('models', [])]
+        if EMBED_API == "openai":
+            r = http_client().get(f"{OLLAMA_URL}/v1/models", headers=_entetes_openai(), timeout=10)
+            r.raise_for_status()
+            models = [m['id'] for m in r.json().get('data', [])]
+        else:
+            r = http_client().get(f"{OLLAMA_URL}/api/tags", timeout=10)
+            models = [m['name'] for m in r.json().get('models', [])]
         if not any(EMBED_MODEL.split(':')[0] in m for m in models):
             print(f"Erreur : modèle d'embedding '{EMBED_MODEL}' non trouvé.")
             sys.exit(1)
         print(f"Modèle d'embedding : {EMBED_MODEL} ✓")
     except Exception as e:
-        print(f"Erreur connexion Ollama : {e}")
+        print(f"Erreur connexion au serveur d'embedding : {e}")
         sys.exit(1)
 
     if org_arg:

@@ -1,6 +1,6 @@
 ---
-title: "§0 Déploiement complet | Guide de déploiement stack IA locale"
-description: "Procédure de déploiement pas à pas de la stack RAG locale : AD, SMB, certificat CA, Docker, indexation, ACL, Open WebUI et n8n."
+title: "§0 Démarrage rapide | Guide de déploiement stack IA locale"
+description: "Déployer la stack RAG locale de bout en bout : Active Directory, serveur de modèles Ollama ou vLLM, VM Ubuntu, indexation des documents, droits d'accès, Open WebUI et n8n."
 ---
 <style>
   header, footer { display: none !important; }
@@ -13,35 +13,98 @@ description: "Procédure de déploiement pas à pas de la stack RAG locale : AD,
   blockquote { border-left: 4px solid #2563A8; margin: 20px 0; padding: 10px 20px; background: #f0f4ff; }
 </style>
 
-# §0 Déploiement complet
+# §0 Démarrage rapide
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-> Ce guide couvre un déploiement complet depuis zéro : création du compte de service dans l'AD, montage SMB, certificat CA, lancement de la stack Docker, première indexation, synchronisation des ACL, configuration d'Open WebUI et de n8n, puis, en option, la connexion à Microsoft 365 (étape 14). Durée estimée : 2 à 3 heures pour un premier déploiement, hors Microsoft 365. Pour les sections détaillées, voir le guide complet à partir de [§1 Prérequis](section-01-prerequis.md).
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). Le script `deploy.sh`, qui automatise une partie des étapes, n'a pas encore été rejoué sur une VM neuve (encadré de l'étape 6).
 
 ---
 
-## Vue d'ensemble de la séquence
+## Ce que vous allez obtenir
 
-```
-AD (Windows)          VM Ubuntu (Linux)              Open WebUI / n8n
-─────────────         ─────────────────              ────────────────
-1. svc-rag        →   3. montage SMB
-2. certificat CA  →   4. ad-chain.pem
-                      5. .env + tokens
-                      6. docker compose up
-                      7. indexer.py
-                      8. acl_resolver.py        →    9. connexion RAG API
-                                                     10. workflow n8n
+Un assistant comparable à ChatGPT, mais **installé chez vous**. Vos collaborateurs lui posent des questions dans leur navigateur ; il répond **à partir des documents de l'entreprise** (le serveur de fichiers, et en option SharePoint), cite ses sources, et **ne montre à chacun que les documents qu'il a déjà le droit d'ouvrir** sur le serveur de fichiers. Les questions et les réponses sont traitées sur vos machines : aucun service d'IA externe n'est appelé.
 
-Microsoft 365 (facultatif) : 14. Entra ID, Teams, SharePoint
-```
+Ce guide mène d'une installation vierge à un assistant en service. Comptez une journée pour un premier déploiement : deux à trois heures pour la stack elle-même, plus l'installation du serveur de modèles (une demi-heure avec Ollama, une à deux heures avec vLLM) et le téléchargement des modèles (environ 12 Go). Microsoft 365, en option, vient ensuite.
 
 ---
 
-## Étape 1 : créer le compte de service svc-rag (Windows, PowerShell admin)
+## Les trois machines
 
-`svc-rag` est le compte qui lit les fichiers et les ACL NTFS sur le file server. Il a accès à l'intégralité du corpus : traiter son mot de passe comme un secret à privilèges.
+| Machine | Rôle | Ce qui y tourne |
+|---|---|---|
+| **Serveur Windows existant** | L'annuaire et les documents | Active Directory, serveur de fichiers (partage réseau) |
+| **VM de la stack**, Ubuntu Server 26.04 | L'application | Open WebUI (l'interface de discussion), la RAG API (le cœur : identité, droits, recherche, contrôle des réponses), Qdrant (l'index des documents), n8n (les tâches planifiées) |
+| **Serveur de modèles**, avec une carte graphique NVIDIA | Les modèles d'IA | Le moteur, Ollama ou vLLM, et trois modèles : rédaction, vérification, recherche (§2.1) |
+
+```
+ Utilisateur (navigateur)
+        │
+        ▼
+ VM de la stack ── Open WebUI → RAG API → Qdrant (index des documents)
+                                  │
+                                  ├→ Active Directory : qui est l'utilisateur, quels sont ses groupes
+                                  └→ Serveur de modèles : rédaction, vérification, recherche
+```
+
+Dans le lab, la VM de la stack tourne dans VMware Workstation sur le poste Windows qui porte la carte graphique. Ce peuvent aussi être deux machines distinctes.
+
+---
+
+## Choisir le moteur du serveur de modèles
+
+C'est la seule décision à prendre avant de commencer. Le détail et les mesures sont au §2.2.
+
+| | **Ollama** | **vLLM** |
+|---|---|---|
+| Questions simultanées | **Une à la fois** : la suivante attend | **Plusieurs en même temps** |
+| Pour qui | Un à deux utilisateurs simultanés, un essai, un poste unique | **Plusieurs utilisateurs simultanés : une PME en service** |
+| Système | Windows ou Linux | Linux ; sous Windows, dans WSL2 |
+| Installation | Simple, quelques minutes | Plus technique, une à deux heures |
+
+Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en même temps sont servies presque aussi vite qu'une seule (+6 %). **Recommandation : vLLM pour une PME en service, Ollama pour un essai ou un à deux utilisateurs.** Le choix n'est pas définitif : on passe de l'un à l'autre sans réindexer ni réinstaller la stack (§2.5).
+
+---
+
+## Avant de commencer
+
+- **Les droits d'administrateur** sur l'Active Directory et sur le serveur de fichiers.
+- **Une VM Ubuntu Server 26.04** préparée selon le §1 : 6 vCPU, 16 Go de mémoire, 100 Go de disque, Docker installé (§1.4). Préparer aussi le **disque de données chiffré** (§1.5) **avant l'étape 6** : préparé après coup, il laisse des copies en clair des secrets et des données sur le disque système.
+- **Une carte graphique NVIDIA d'au moins 16 Go** sur le serveur de modèles (le lab : une RTX 5060 Ti 16 Go). Sans carte, Ollama fonctionne sur le processeur, mais une question prend une à deux minutes (§10.4) ; vLLM exige une carte.
+- **Un accès à Internet** pendant l'installation : paquets, images Docker, modèles.
+- **Les informations de votre réseau** : l'adresse IP de la VM, celle du serveur de modèles, le nom DNS du contrôleur de domaine, le nom du serveur de fichiers et du partage à indexer.
+
+> **Conventions de ce guide.** Les blocs `powershell` se lancent sur Windows, dans PowerShell **ouvert en administrateur**. Les blocs `bash` se lancent sur Linux. Sur la VM, **toutes les commandes se lancent en root** : ouvrir d'abord une session root avec `sudo -i`. Les valeurs entre chevrons, `<comme-ceci>`, sont à remplacer par les vôtres, chevrons compris. Chaque étape se termine par un résultat **attendu** : ne pas passer à la suite tant qu'il n'est pas obtenu.
+
+---
+
+## Les étapes en un coup d'œil
+
+| Étape | Où | Quoi |
+|---|---|---|
+| 1 | Windows, Active Directory | Créer le compte de service `svc-rag` |
+| 2 | Windows, Active Directory | Exporter le certificat de l'autorité de certification |
+| 3 | Serveur de modèles | Installer **Ollama (3A)** ou **vLLM (3B)** |
+| 4 | VM | Préparer la VM |
+| 5 | VM | Monter le partage de fichiers |
+| 6 | VM | Récupérer les scripts du dépôt |
+| 7 | VM | Remplir le fichier de configuration `.env` |
+| 8 | VM | Vérifier que la VM joint le serveur de modèles |
+| 9 | VM | Lancer la stack |
+| 10 | VM | Vérifier que la stack joint le serveur de modèles |
+| 11 | VM | Préparer Python pour l'indexation |
+| 12 | VM | Première indexation des documents |
+| 13 | VM | Synchronisation des droits d'accès |
+| 14 | Navigateur | Configurer Open WebUI |
+| 15 | Navigateur | Configurer n8n |
+| 16 | VM et navigateur | Contrôles finaux |
+| 17 | Microsoft 365, facultatif | Entra ID, Teams, SharePoint |
+
+---
+
+## Étape 1 : créer le compte de service svc-rag (Windows)
+
+`svc-rag` est le compte avec lequel la stack lit les fichiers et leurs droits d'accès (les ACL NTFS) sur le serveur de fichiers, et interroge l'Active Directory. Il a accès à l'intégralité du corpus : son mot de passe est un secret à privilèges.
 
 ```powershell
 # Adapter le chemin de l'OU à votre organisation
@@ -54,10 +117,9 @@ New-ADUser -Name "svc-rag" `
     -Enabled $true `
     -Path "OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" `
     -Description "Compte de service indexeur RAG - lecture seule"
-
 ```
 
-**Donner la lecture par un groupe dédié, pas par les groupes métier.** Sur le serveur de fichiers, en administrateur, le script [`Set-AccesIndexationRAG.ps1`](../../scripts/stack-ia-locale/Set-AccesIndexationRAG.ps1) crée le groupe `GRP-RAG-Indexation`, y ajoute `svc-rag`, et accorde la lecture seule sur chaque dossier à indexer, y compris les sous-dossiers à héritage coupé :
+**Donner la lecture par un groupe dédié, pas par les groupes métier.** Sur le serveur de fichiers, en administrateur, le script [`Set-AccesIndexationRAG.ps1`](../../scripts/stack-ia-locale/Set-AccesIndexationRAG.ps1) crée le groupe `GRP-RAG-Indexation`, y ajoute `svc-rag`, et accorde la lecture seule sur chaque dossier à indexer, y compris les sous-dossiers dont l'héritage est coupé :
 
 ```powershell
 # Vérification seule : affiche ce qui manque, ne modifie rien
@@ -67,67 +129,173 @@ New-ADUser -Name "svc-rag" `
 .\Set-AccesIndexationRAG.ps1 -Racine "D:\FileService" -Exclure "UTILISATEURS"
 ```
 
-Adapter la racine du partage et la liste des dossiers exclus (dossiers personnels notamment). **Ne pas ajouter `svc-rag` aux groupes métier** (`GRP-RH`, `GRP-Finances`, etc.) : il hériterait de tous leurs droits, et le retrait d'un de ces groupes lui couperait la lecture sans avertissement. Explications et cas réel : [§5.2.4](section-05-connecteurs.md).
-
-Vérifier les groupes du compte : seuls `GRP-RAG-Indexation` et les utilisateurs du domaine doivent apparaître.
+Adapter la racine du partage et la liste des dossiers exclus (les dossiers personnels notamment). **Ne pas ajouter `svc-rag` aux groupes métier** (`GRP-RH`, `GRP-Finances`, etc.) : il hériterait de tous leurs droits, et son retrait d'un de ces groupes lui couperait la lecture sans avertissement. Explications et cas réel : [§5.2.4](section-05-connecteurs.md).
 
 ```powershell
 Get-ADPrincipalGroupMembership -Identity "svc-rag" | Select Name
 ```
 
-> **Politique de mot de passe :** `PasswordNeverExpires $false` force la rotation selon la politique du domaine. Planifier la mise à jour de `/etc/smbcredentials/svc-rag` et de `.env` à chaque rotation (voir §9.5.1). Une rotation non répercutée sur la VM fait tomber le montage SMB au prochain redémarrage sans message explicite.
+**Attendu :** seulement `GRP-RAG-Indexation` et les utilisateurs du domaine.
+
+> **Mot de passe :** `PasswordNeverExpires $false` impose sa rotation selon la politique du domaine. À chaque rotation, reporter le nouveau mot de passe sur la VM (étapes 5 et 7, procédure au §9.5.1) : sinon, le montage du partage tombe au prochain redémarrage, sans message clair.
 
 ---
 
-## Étape 2 : exporter le certificat CA du contrôleur de domaine (Windows)
+## Étape 2 : exporter le certificat de l'autorité de certification (Windows)
 
-Le certificat CA est nécessaire pour que la VM valide la connexion LDAP TLS vers l'AD. Sans lui, `auth.py` refuse la connexion et tout le monde est refusé avec 403.
+La VM vérifie l'identité du contrôleur de domaine avant de lui envoyer le mot de passe de `svc-rag` (connexion LDAP chiffrée). Pour cela, elle a besoin du certificat de l'autorité de certification du domaine. Sans lui, tout le monde est refusé (erreur 403).
 
 ```powershell
-# Ouvrir le gestionnaire de certificats
-# Démarrer → Exécuter → certlm.msc → Autorités de certification racines de confiance
+# Ou par l'interface : certlm.msc → Autorités de certification racines de confiance
 # → Certificats → clic droit sur le certificat racine → Toutes les tâches → Exporter
-
-# Ou via PowerShell :
 $cert = Get-ChildItem -Path Cert:\LocalMachine\Root |
     Where-Object { $_.Subject -like "*votre-domaine*" } |
     Select-Object -First 1
 
-Export-Certificate -Cert $cert `
-    -FilePath "C:\Temp\ad-root-ca.cer" `
-    -Type CERT
+Export-Certificate -Cert $cert -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
 ```
 
-Copier le fichier `ad-root-ca.cer` sur la VM (via SCP ou partage réseau).
+Copier `ad-root-ca.cer` sur la VM, dans `/tmp` (par `scp` ou par un partage). Il sera converti à l'étape 4.
 
-```bash
-# Sur la VM : convertir et installer
-openssl x509 -inform DER -in /tmp/ad-root-ca.cer \
-    -out /etc/ssl/certs/ad-chain.pem
-
-# Vérifier
-openssl x509 -in /etc/ssl/certs/ad-chain.pem -noout -subject -dates
-```
-
-> **Certificat intermédiaire :** si l'AD utilise une PKI à deux niveaux (CA racine + CA émettrice), exporter aussi le certificat intermédiaire et les concaténer dans le même fichier : `cat ca-root.pem ca-intermediate.pem > /etc/ssl/certs/ad-chain.pem`.
+> **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter aussi le certificat intermédiaire. Les deux seront réunis dans le même fichier à l'étape 4.
 
 ---
 
-## Étape 3 : préparer la VM Ubuntu
+## Étape 3 : installer le serveur de modèles
+
+Suivre **3A** ou **3B** selon le moteur choisi. Les explications de chaque réglage sont au §2.
+
+### 3A : Ollama (sous Windows)
+
+**1. Installer Ollama** depuis [ollama.com](https://ollama.com), dans sa dernière version.
+
+**2. Le régler**, dans PowerShell ouvert **avec le compte qui fera tourner Ollama** :
+
+```powershell
+[Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_KV_CACHE_TYPE", "q8_0", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "1h", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_NO_CLOUD", "1", "User")
+```
+
+Puis quitter Ollama depuis la zone de notification et le relancer : les réglages ne sont lus qu'au démarrage.
+
+**3. Télécharger les trois modèles :**
+
+```powershell
+ollama pull qwen3:14b
+ollama pull qwen3:4b
+ollama pull nomic-embed-text
+ollama list
+```
+
+**Attendu :** les trois modèles dans la liste. La vérification depuis la VM vient à l'étape 8.
+
+> **Ollama tourne dans la session Windows ouverte.** Se déconnecter de la session l'arrête. Fermer simplement la fenêtre du Bureau à distance le laisse tourner. Ollama sous Linux : §2.3.
+
+### 3B : vLLM
+
+Sur un poste Windows, vLLM tourne dans WSL2. Sur un serveur Linux, commencer au point 2 (configuration non testée en lab, §2.4.1).
+
+**1. Préparer WSL2 (poste Windows seulement).** Dans PowerShell en administrateur :
+
+```powershell
+wsl --install -d Ubuntu-26.04
+```
+
+Au premier lancement, Ubuntu demande de créer un utilisateur Linux. Créer ensuite le fichier `C:\Users\<utilisateur>\.wslconfig` :
+
+```ini
+[wsl2]
+memory=16GB
+swap=8GB
+networkingMode=mirrored
+```
+
+Puis, toujours en administrateur, appliquer et ouvrir les ports de vLLM dans le pare-feu de WSL2 :
+
+```powershell
+wsl --shutdown
+New-NetFirewallHyperVRule -Name "vllm-entrant" -DisplayName "vLLM entrant 8000 et 8001" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 8000,8001 -Action Allow
+```
+
+Rouvrir Ubuntu et vérifier que la carte est visible : `nvidia-smi`. **N'installer aucun pilote NVIDIA dans Ubuntu** : WSL2 utilise celui de Windows. Avant d'activer WSL2 sur un poste qui fait aussi tourner VMware Workstation, lire la mise en garde du §2.4.2.
+
+**2. Installer vLLM**, dans Ubuntu :
 
 ```bash
-# Dépendances système
-# python3.11 n'est pas dans les dépôts Ubuntu 26.04 (python3 → 3.12+).
-sudo apt update && sudo apt install -y \
+sudo apt update && sudo apt install -y build-essential
+sudo mkdir -p /opt/vllm && sudo chown $USER /opt/vllm
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env
+cd /opt/vllm
+uv venv --python 3.12 --seed --managed-python
+source .venv/bin/activate
+uv pip install vllm==0.31.0 --torch-backend=auto
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+**Attendu :** `True` (la carte est accessible).
+
+**3. Télécharger les modèles et créer la clé d'API :**
+
+```bash
+source /opt/vllm/.venv/bin/activate
+sudo mkdir -p /opt/hf /etc/vllm && sudo chown $USER /opt/hf
+export HF_HOME=/opt/hf
+hf download Qwen/Qwen3-14B-AWQ
+hf download nomic-ai/nomic-embed-text-v1.5
+echo "VLLM_API_KEY=$(openssl rand -hex 32)" | sudo tee /etc/vllm/vllm.env > /dev/null
+sudo chown root:$USER /etc/vllm/vllm.env && sudo chmod 640 /etc/vllm/vllm.env
+```
+
+La clé protège vLLM, visible depuis tout le réseau local. Elle ne s'affiche jamais : ne pas la coller dans un message ou un ticket.
+
+**4. Lancer les deux serveurs**, chacun dans son propre terminal Ubuntu, en commençant par le premier :
+
+```bash
+# Terminal 1 : rédaction et juge, port 8000
+cd /opt/vllm && source .venv/bin/activate
+set -a; source /etc/vllm/vllm.env; set +a
+export HF_HOME=/opt/hf VLLM_USE_FLASHINFER_SAMPLER=0
+vllm serve Qwen/Qwen3-14B-AWQ --served-model-name qwen3:14b \
+  --max-model-len 16384 --gpu-memory-utilization 0.87 --max-num-seqs 4 \
+  --reasoning-parser qwen3 --default-chat-template-kwargs '{"enable_thinking": false}' \
+  --host 0.0.0.0 --port 8000 --api-key "$VLLM_API_KEY"
+```
+
+Attendre `Application startup complete` (une à trois minutes), puis :
+
+```bash
+# Terminal 2 : embedding, port 8001
+cd /opt/vllm && source .venv/bin/activate
+set -a; source /etc/vllm/vllm.env; set +a
+export HF_HOME=/opt/hf
+vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code \
+  --served-model-name nomic-embed-text --max-model-len 2048 --gpu-memory-utilization 0.06 \
+  --host 0.0.0.0 --port 8001 --api-key "$VLLM_API_KEY"
+```
+
+**5. Vérifier**, dans un troisième terminal : `curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/v1/models`, puis la même chose avec le port 8001. **Attendu :** `401` deux fois (le serveur répond, et exige la clé). L'essai complet, qui contrôle aussi la qualité des réponses, est au §2.4.6.
+
+> **Les deux serveurs s'arrêtent si on ferme leur terminal.** Les laisser ouverts pendant tout le déploiement. Le démarrage automatique par des services systemd est décrit au §2.4.7 ; il n'est pas encore validé en lab. Si un démarrage échoue, les messages rencontrés et leur solution sont au §2.4.9.
+
+---
+
+## Étape 4 : préparer la VM
+
+Ouvrir une session root (`sudo -i`), puis :
+
+```bash
+apt update && apt install -y \
     cifs-utils smbclient samba-common-bin \
     ldap-utils curl wget git \
     python3 python3-pip python3-venv
-
-# Configurer le DNS pour résoudre les noms AD
-sudo nano /etc/systemd/resolved.conf
 ```
 
-Ajouter :
+**Le DNS du domaine**, pour que la VM trouve le contrôleur de domaine et le serveur de fichiers par leur nom. Dans `/etc/systemd/resolved.conf` (avec `nano`), section `[Resolve]` :
 
 ```ini
 [Resolve]
@@ -136,372 +304,378 @@ Domains=votre-domaine.ch
 ```
 
 ```bash
-sudo systemctl restart systemd-resolved
-
-# Vérifier la résolution
+systemctl restart systemd-resolved
 nslookup <NOM-FILESERVER>
 nslookup <NOM-DC>
 ```
 
----
+**Attendu :** les deux noms donnent une adresse IP.
 
-## Étape 4 : monter le partage SMB
+**Le certificat de l'étape 2**, converti au format attendu par Linux :
 
 ```bash
-# Créer le fichier de credentials (jamais de mot de passe en ligne de commande)
-sudo mkdir -p /etc/smbcredentials
-sudo nano /etc/smbcredentials/svc-rag
+openssl x509 -inform DER -in /tmp/ad-root-ca.cer -out /etc/ssl/certs/ad-chain.pem
+openssl x509 -in /etc/ssl/certs/ad-chain.pem -noout -subject -dates
 ```
 
-Contenu du fichier :
+**Attendu :** le nom de l'autorité de certification et ses dates de validité. Avec une PKI à deux niveaux, convertir aussi le certificat intermédiaire, puis réunir les deux : `cat ca-root.pem ca-intermediate.pem > /etc/ssl/certs/ad-chain.pem`.
+
+---
+
+## Étape 5 : monter le partage de fichiers
+
+Le mot de passe de `svc-rag` va dans un fichier lisible par root seulement, jamais dans une ligne de commande :
+
+```bash
+mkdir -p /etc/smbcredentials
+nano /etc/smbcredentials/svc-rag
+```
+
+Contenu :
 
 ```
 username=svc-rag
-password=<mot-de-passe-fort>
+password=<mot-de-passe-svc-rag>
 domain=VOTREDOMAINE
 ```
 
 ```bash
-# Protéger en lecture root uniquement
-sudo chmod 600 /etc/smbcredentials/svc-rag
-sudo chown root:root /etc/smbcredentials/svc-rag
+chmod 600 /etc/smbcredentials/svc-rag
 
-# Créer le point de montage et monter
-sudo mkdir -p /mnt/corpus-root
-sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
+mkdir -p /mnt/corpus-root
+mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
     -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000
-
-# Vérifier
 ls /mnt/corpus-root/
 ```
 
-Rendre le montage persistant :
+**Attendu :** les dossiers du partage. Rendre ensuite le montage permanent :
 
 ```bash
-sudo tee -a /etc/fstab << 'FSTAB'
+cat >> /etc/fstab << 'FSTAB'
 
-# Partage SMB corpus RAG (monté par svc-rag)
+# Partage du corpus RAG (monté avec svc-rag)
 //<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
 FSTAB
-
-# Tester sans rebooter
-sudo mount -a && mount | grep corpus-root
+mount -a && mount | grep corpus-root
 ```
 
 ---
 
-## Étape 5 : structure des répertoires et fichiers
+## Étape 6 : récupérer les scripts du dépôt
+
+Les scripts sont publiés dans ce dépôt GitHub. Ceux qui contiennent des valeurs d'exemple portent le préfixe `anon_` : on les renomme en les copiant.
 
 ```bash
-# Répertoires de la stack
-mkdir -p ~/rag-stack/{qdrant_data,n8n_data,openwebui_data,api}
-mkdir -p /root/rag-pipeline
-mkdir -p /var/log/rag
+cd /root
+git clone https://github.com/doit4everyone/ia-locale-pme-suisse.git
+cd ia-locale-pme-suisse/scripts/stack-ia-locale
+
+# Dossiers de la stack (déjà présents, sous forme de liens, si le disque chiffré du §1.5 est prêt)
+mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data} /root/rag-pipeline /var/log/rag
+mkdir -p /etc/rag-certs && chmod 700 /etc/rag-certs
+
+# La stack : Compose, configuration d'exemple, RAG API, service Purview
+cp docker-compose.yml env.example /root/rag-stack/
+mkdir -p /root/rag-stack/api /root/rag-stack/mip-service
+cp -r api/. /root/rag-stack/api/
+mv /root/rag-stack/api/anon_main.py /root/rag-stack/api/main.py
+mv /root/rag-stack/api/anon_auth.py /root/rag-stack/api/auth.py
+cp -r mip-service/. /root/rag-stack/mip-service/
+
+# Les scripts d'indexation, des droits et de contrôle
+cp anon_indexer.py /root/rag-pipeline/indexer.py
+cp anon_acl_resolver.py /root/rag-pipeline/acl_resolver.py
+cp sp_indexer.py test_cloisonnement.py cas_cloisonnement.exemple.json /root/rag-pipeline/
+
+ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 ```
 
-Déposer les fichiers (depuis le dépôt GitHub) :
+**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py` et `test_cloisonnement.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-```
-~/rag-stack/
-├── .env                    ← à créer depuis env.example
-├── docker-compose.yml
-└── api/
-    ├── main.py             ← anon_main.py du dépôt, renommé
-    ├── auth.py             ← anon_auth.py du dépôt, renommé
-    ├── teams.py
-    ├── teams_graph.py
-    ├── Dockerfile
-    └── requirements.txt
-
-/root/rag-pipeline/
-├── indexer.py              ← anon_indexer.py du dépôt, renommé
-├── acl_resolver.py         ← anon_acl_resolver.py du dépôt, renommé
-└── sp_indexer.py
-```
-
-`teams.py`, `teams_graph.py` et `sp_indexer.py` servent à la Partie 3. Ils restent inactifs tant que leurs variables ne sont pas renseignées dans `.env`.
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie aussi que la stack joint le serveur de modèles. **Statut :** adapté aux deux moteurs dans cette version, mais pas encore rejoué de bout en bout sur une VM neuve. Pour un premier déploiement, la procédure manuelle reste la référence. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier.
 
 ---
 
-## Étape 6 : fichier .env
+## Étape 7 : remplir le fichier de configuration .env
+
+Le fichier `.env` réunit tous les réglages et secrets de la stack. Il ne doit jamais être publié ni copié dans un document.
+
+**1. Créer le fichier et générer les secrets automatiquement :**
 
 ```bash
-cd ~/rag-stack
+cd /root/rag-stack
 cp env.example .env
+chmod 600 .env
+for v in API_TOKEN ADMIN_TOKEN WEBUI_SECRET_KEY QDRANT_API_KEY LOG_HMAC_KEY MIP_TOKEN; do
+    sed -i "s|^${v}=.*|${v}=$(openssl rand -hex 32)|" .env
+done
+sed -i "s|^N8N_BASIC_AUTH_PASSWORD=.*|N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)|" .env
+grep -c changeme .env
 ```
 
-**Générer des tokens forts :**
+**Attendu :** `0` : plus aucune valeur d'exemple pour les secrets.
+
+**2. Compléter le reste à la main** avec `nano .env` :
+
+| Réglage | Valeur | Exemple |
+|---|---|---|
+| Bloc du serveur de modèles | Voir le point 3 ci-dessous | |
+| `ORG_NAME`, `ORG_OWNER` | Le nom de votre organisation, le même dans les deux | `Exemple SA` |
+| `LDAP_HOST` | Le nom DNS complet du contrôleur de domaine, pas son adresse IP | `dc01.votre-domaine.ch` |
+| `LDAP_BASE_DN` | Le domaine, en notation LDAP | `DC=votre-domaine,DC=ch` |
+| `LDAP_BIND_DN` | Le compte `svc-rag`, avec son OU | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
+| `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5 | |
+| `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTREDOMAINE` |
+| `SMB_SHARE` | Le partage à indexer | `//FILESERVER/FileService` |
+| `DOCUMENTATION_PATHS` | Le dossier de documentation technique à la racine du partage, s'il existe (§3.2) | `DOCUMENTATION` |
+
+**3. Le bloc du serveur de modèles**, en haut du fichier. Il contient deux blocs : **A pour Ollama**, actif par défaut, et **B pour vLLM**, désactivé (chaque ligne commence par `#`). **Un seul bloc doit être actif.**
+
+- **Avec Ollama :** dans le bloc A, remplacer `<IP-SERVEUR-MODELES>` par l'adresse de la machine Ollama.
+- **Avec vLLM :** ajouter un `#` au début de chaque ligne du bloc A, retirer le `#` des lignes du bloc B, remplacer `<IP-SERVEUR-MODELES>` par l'adresse du poste ou du serveur vLLM, et `<clé-vllm>` par la clé créée à l'étape 3B. Pour la copier sans l'afficher depuis un poste Windows : §2.4.4.
+
+Plus bas dans le fichier, `OLLAMA_URL` prend la même valeur que `EMBED_BASE_URL` : port 11434 avec Ollama, **port 8001 avec vLLM**. Malgré son nom, cette ligne désigne le serveur d'embedding, avec les deux moteurs.
+
+> **Jamais `localhost`** dans ces adresses, même si la VM et le serveur de modèles tournent sur le même poste : à l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même.
+
+**4. Contrôler** qu'il ne reste aucune valeur à remplacer :
 
 ```bash
-# Deux tokens distincts, ne jamais utiliser les valeurs changeme en production
-echo "API_TOKEN=$(openssl rand -hex 32)"
-echo "ADMIN_TOKEN=$(openssl rand -hex 32)"
-echo "WEBUI_SECRET_KEY=$(openssl rand -hex 32)"
+grep -nE "^[A-Z_]+=.*<" .env
 ```
 
-Éditer `.env` avec ces valeurs. Variables obligatoires à adapter :
-
-```bash
-# Ollama : IP du poste Windows qui fait tourner Ollama
-LLM_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
-EMBED_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
-
-# Tokens générés ci-dessus
-API_TOKEN=<sortie openssl>
-ADMIN_TOKEN=<sortie openssl distinct>
-WEBUI_SECRET_KEY=<sortie openssl distinct>
-
-# Organisation
-ORG_NAME=<Nom de votre organisation>
-
-# LDAP : connexion à l'AD pour la résolution des groupes
-LDAP_HOST=<NOM-DC>.votre-domaine.ch
-LDAP_PORT=636
-LDAP_USE_TLS=true
-LDAP_BASE_DN=DC=votre-domaine,DC=ch
-LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
-LDAP_BIND_PWD=<mot-de-passe-svc-rag>
-LDAP_DOMAIN=VOTREDOMAINE
-LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
-
-# SMB : partage à indexer
-SMB_SHARE=//NOM-FILESERVER/FileService
-SMB_MOUNT=/mnt/corpus-root
-SMB_USER=svc-rag
-SMB_PASSWORD=<mot-de-passe-svc-rag>
-SMB_DOMAIN=VOTREDOMAINE
-```
-
-> **`LDAP_CA_CERT` et `SMB_PASSWORD` identiques :** `svc-rag` est utilisé à la fois pour le montage SMB et pour la résolution LDAP. Le même mot de passe doit être renseigné dans `/etc/smbcredentials/svc-rag` et dans `.env`.
+**Attendu :** seulement des lignes `ENTRA_`, `TEAMS_`, `SP_` et `MIP_TENANT_DOMAINE`, qui concernent Microsoft 365 et restent inactives tant qu'il n'est pas configuré.
 
 ---
 
-## Étape 7 : vérifier Ollama depuis la VM
+## Étape 8 : vérifier que la VM joint le serveur de modèles
+
+**Avec Ollama :**
 
 ```bash
-# Vérifier que les deux modèles sont présents
-curl http://<IP-HOTE-OLLAMA>:11434/api/tags | python3 -m json.tool | grep name
-
-# Résultat attendu : qwen3:14b et qwen3:4b dans la liste
-# Si absent, sur LABO-G9 (Windows) :
-# ollama pull qwen3:14b
-# ollama pull qwen3:4b
+curl -s http://<IP-SERVEUR-MODELES>:11434/api/tags | python3 -m json.tool | grep '"name"'
 ```
 
-> **Ollama doit écouter sur toutes les interfaces :** sur Windows, vérifier que `OLLAMA_HOST=0.0.0.0:11434` est défini dans les variables d'environnement système. Sans cela, Ollama n'écoute que sur `127.0.0.1` et la VM ne peut pas le joindre.
+**Attendu :** `qwen3:14b`, `qwen3:4b` et `nomic-embed-text`. Sans réponse : le réglage `OLLAMA_HOST` (étape 3A) ou le pare-feu Windows (§2.3).
+
+**Avec vLLM :**
+
+```bash
+set -a; source /root/rag-stack/.env; set +a
+curl -s -H "Authorization: Bearer $VLLM_API_KEY" http://<IP-SERVEUR-MODELES>:8000/v1/models | python3 -m json.tool | grep '"id"'
+curl -s -H "Authorization: Bearer $VLLM_API_KEY" http://<IP-SERVEUR-MODELES>:8001/v1/models | python3 -m json.tool | grep '"id"'
+```
+
+**Attendu :** `qwen3:14b`, puis `nomic-embed-text`. Si `curl` reste bloqué : la règle de pare-feu de l'étape 3B. Si la réponse est vide : la clé du `.env` ne correspond pas à celle du serveur.
 
 ---
 
-## Étape 8 : lancer la stack Docker
+## Étape 9 : lancer la stack
 
 ```bash
-cd ~/rag-stack
-
-# Construire l'image rag-api (nécessaire au premier lancement)
+cd /root/rag-stack
 docker compose build --no-cache rag-api
-
-# Lancer tous les services
 docker compose up -d
-
-# Vérifier l'état
 docker compose ps
 ```
 
-Résultat attendu :
-
-```
-NAME         STATUS
-n8n          Up
-open-webui   Up (healthy)
-qdrant       Up
-rag-api      Up
-```
-
-Si `rag-api` redémarre en boucle :
-
-```bash
-docker logs rag-api 2>&1 | tail -30
-```
-
-Causes fréquentes : variable manquante dans `.env`, `ad-chain.pem` absent, Qdrant pas encore prêt au démarrage (relancer `docker compose restart rag-api` après 30 secondes).
+**Attendu :** `qdrant`, `n8n`, `rag-api` en `Up`, et `open-webui` en `Up (healthy)` après une minute environ. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent une variable manquante dans `.env`, ou le certificat de l'étape 4 absent).
 
 ---
 
-## Étape 9 : environnement Python pour les scripts
+## Étape 10 : vérifier que la stack joint le serveur de modèles
+
+Que la VM joigne le serveur de modèles ne suffit pas : c'est le conteneur `rag-api` qui l'interroge, par le réseau interne de Docker. Ce contrôle l'interroge depuis le conteneur, avec les réglages qu'il a réellement reçus :
+
+```bash
+docker exec rag-api python3 -c "
+import os, httpx
+api = os.environ.get('LLM_API', 'ollama')
+cle = os.environ.get('VLLM_API_KEY', '')
+h = {'Authorization': 'Bearer ' + cle} if cle else {}
+for nom in ('LLM_BASE_URL', 'EMBED_BASE_URL'):
+    u = os.environ[nom] + ('/v1/models' if api == 'openai' else '/api/tags')
+    print(nom, httpx.get(u, headers=h, timeout=10).status_code)
+"
+```
+
+**Attendu :** `LLM_BASE_URL 200`, puis `EMBED_BASE_URL 200`. En cas d'erreur `No route to host` alors que l'étape 8 a réussi : voir « En cas de problème », en fin de page.
+
+---
+
+## Étape 11 : préparer Python pour l'indexation
+
+L'indexation et la synchronisation des droits se lancent depuis la VM, dans un environnement Python isolé :
 
 ```bash
 cd /root/rag-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
-
 pip install qdrant-client python-docx pdfplumber python-pptx httpx \
     ldap3 impacket rank-bm25 smbprotocol
 ```
 
-Tester la connexion LDAP avant d'aller plus loin :
+Tester ensuite les deux accès de `svc-rag`, à l'annuaire et au partage :
 
 ```bash
-set -a && source ~/rag-stack/.env && set +a
+set -a && source /root/rag-stack/.env && set +a
 
-ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} \
-    -D "${LDAP_BIND_DN}" \
-    -w "${LDAP_BIND_PWD}" \
-    -ZZ 2>&1
-# Attendu : dn:CN=svc-rag,...
+LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem \
+    ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} -D "${LDAP_BIND_DN}" -w "${LDAP_BIND_PWD}" 2>&1
+smbclient //<NOM-FILESERVER>/FileService -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
 ```
 
-Tester la connexion SMB :
-
-```bash
-smbclient //<NOM-FILESERVER>/FileService \
-    -U svc-rag%<mot-de-passe> \
-    -c "ls" 2>&1 | head -10
-# Attendu : liste des dossiers racines du partage
-```
+**Attendu :** `dn:CN=svc-rag,...`, puis la liste des dossiers du partage.
 
 ---
 
-## Étape 10 : première indexation
+## Étape 12 : première indexation des documents
+
+L'indexeur lit chaque document du partage, le découpe en extraits, calcule leurs vecteurs avec le modèle d'embedding, et les range dans Qdrant.
 
 ```bash
 cd /root/rag-pipeline && source .venv/bin/activate
-set -a && source ~/rag-stack/.env && set +a
+set -a && source /root/rag-stack/.env && set +a
 
-python indexer.py \
-    --corpus /mnt/corpus-root \
-    --rapport /var/log/rag/rapport_indexation_initial.json
-
+python indexer.py --corpus /mnt/corpus-root --rapport /var/log/rag/rapport_indexation_initial.json
 echo "Code de sortie : $?"
 ```
 
-Résultat attendu : code 0, rapport JSON produit. Vérifier :
+**Attendu :** au début, `Vérification du serveur d'embedding (ollama)`, ou `(openai)` avec vLLM, puis `Modèle d'embedding : nomic-embed-text ✓` ; à la fin, le code de sortie `0`. Compter les extraits indexés :
 
 ```bash
-# Nombre de chunks indexés
-curl -s http://localhost:6333/collections/documents | \
-    python3 -c "import sys,json; r=json.load(sys.stdin); \
-    print('documents :', r['result']['points_count'])"
-
-curl -s http://localhost:6333/collections/documentation | \
-    python3 -c "import sys,json; r=json.load(sys.stdin); \
-    print('documentation :', r['result']['points_count'])"
+for c in documents documentation; do
+    curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/$c | \
+        python3 -c "import sys,json; print('$c :', json.load(sys.stdin)['result']['points_count'])"
+done
 ```
 
-> **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable par la cascade de détection est mis en quarantaine et n'est pas indexé. Il apparaît dans le rapport JSON avec le statut `quarantaine`. Un PDF scanné sans couche texte ou un fichier corrompu ne produit aucun chunk et prend le statut `vide`. Un document court est indexé en un seul chunk.
+> **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable est mis en quarantaine et n'est pas indexé ; il apparaît dans le rapport avec le statut `quarantaine`. Un PDF scanné sans texte ou un fichier corrompu ne produit aucun extrait (statut `vide`).
 
 ---
 
-## Étape 11 : synchronisation des ACL
+## Étape 13 : synchronisation des droits d'accès
+
+L'outil de résolution des ACL recopie, dans chaque extrait indexé, la liste des groupes et des comptes autorisés à ouvrir son document. C'est ce qui permet ensuite de ne montrer à chacun que ses documents.
 
 ```bash
 python acl_resolver.py \
     --share //<NOM-FILESERVER>/FileService \
     --mount /mnt/corpus-root \
     --rapport /var/log/rag/rapport_acl_initial.json
-
 echo "Code de sortie : $?"
 ```
 
-Résultat attendu : code 0, `Fichiers sans ACL : 0`, rapport JSON produit.
-
-Vérifier qu'un chunk porte bien les ACL :
+**Attendu :** code `0` et `Fichiers sans ACL : 0`. Vérifier qu'un extrait porte bien ses droits :
 
 ```bash
-curl -s http://localhost:6333/collections/documents/points/scroll \
-    -H "Content-Type: application/json" \
-    -d '{"limit":1,"with_payload":["source","autorises","interdits"]}' \
-    | python3 -m json.tool | head -15
+curl -s -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
+    http://localhost:6333/collections/documents/points/scroll \
+    -d '{"limit":1,"with_payload":["source","autorises","interdits"]}' | python3 -m json.tool | head -15
 ```
+
+**Attendu :** un champ `autorises` non vide.
 
 ---
 
-## Étape 12 : configuration Open WebUI
+## Étape 14 : configurer Open WebUI
 
-Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau.
+Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau. Le premier compte créé devient administrateur.
 
-**Connexion RAG API :**
+**Raccorder la RAG API :**
 
-1. Settings → Admin → Connections → API compatibles OpenAI → `+`
+1. *Settings → Admin → Connections → API compatibles OpenAI → +*
 2. URL : `http://rag-api:8080/v1`
-3. Clé API : valeur de `API_TOKEN` dans le `.env`
-4. Enregistrer → le modèle `rag-api` doit apparaître dans la liste
+3. Clé API : la valeur de `API_TOKEN` du `.env` (`grep ^API_TOKEN /root/rag-stack/.env`)
+4. Enregistrer : le modèle `rag-api` apparaît dans la liste.
 
-**Authentification LDAP (optionnel en lab, obligatoire en production) :**
+**Authentification par l'Active Directory** (facultative en lab, obligatoire en production) :
 
-1. Settings → Admin → Authentication → LDAP
-2. Activer LDAP
-3. Server Address : `<NOM-DC>.votre-domaine.ch`
-4. Port : `636`, TLS activé
-5. Attribute : `userPrincipalName`
+1. *Settings → Admin → Authentication → LDAP*, activer LDAP
+2. Server Address : `<NOM-DC>.votre-domaine.ch`, port `636`, TLS activé
+3. Attribute : `userPrincipalName`
+4. Base DN : `DC=votre-domaine,DC=ch`
+5. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`, Bind Password : le mot de passe de `svc-rag`
+6. Certificate Path : `/etc/ssl/certs/ad-chain.pem`
 
-> **`userPrincipalName` est obligatoire**, pas `sAMAccountName`. Open WebUI transmet l'email de l'utilisateur dans `X-OpenWebUI-User-Email`. `auth.py` cherche cet email dans le champ `userPrincipalName` de l'AD. Sans cet attribut, la résolution LDAP échoue et tout le monde reçoit un 403.
+> **`userPrincipalName` est obligatoire**, pas `sAMAccountName`. Open WebUI transmet l'adresse de l'utilisateur à la RAG API, qui la cherche dans ce champ de l'annuaire. Avec un autre attribut, la recherche échoue et tout le monde est refusé (403).
 
-6. Base DN : `DC=votre-domaine,DC=ch`
-7. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`
-8. Bind Password : mot de passe de `svc-rag`
-9. Certificate Path : `/etc/ssl/certs/ad-chain.pem`
-
-**Rendre le modèle accessible :**
-
-Settings → Admin → Models → `rag-api` → Make Public → Enregistrer.
+**Rendre le modèle accessible :** *Settings → Admin → Models → rag-api → Make Public*, puis enregistrer.
 
 ---
 
-## Étape 13 : configurer les workflows n8n
+## Étape 15 : configurer n8n
 
-Ouvrir `http://<IP-VM>:5678`.
+n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`.
 
-**Étape préalable : créer le credential SMTP**
-
-Les deux workflows envoient des emails. Créer le credential avant d'importer les workflows : **Settings → Credentials → Add credential → SMTP**. Renseigner le serveur, le port, l'utilisateur et le mot de passe de l'expéditeur.
-
-**Importer les deux workflows**
-
-Dans n8n : **Workflows → Import from file**. Importer les deux fichiers depuis `scripts/N8N/` du dépôt :
-
-- `n8n-sync-corpus.json` : synchronisation du corpus toutes les heures
-- `n8n-rappel-rotation-svc-rag.json` : rappel mensuel de rotation du mot de passe svc-rag
-
-Après chaque import, ouvrir le nœud email et sélectionner le credential SMTP créé ci-dessus. Remplacer `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` par les valeurs réelles.
-
-Vérifier la configuration du nœud "POST /admin/sync" dans le workflow de synchronisation :
-
-- URL : `http://rag-api:8080/admin/sync`
-- Method : POST
-- Header : `Authorization: Bearer <ADMIN_TOKEN>`
-
-Activer les deux workflows et lancer une exécution manuelle du workflow de synchronisation pour valider :
-
-```
-Workflows → RAG Stack - Synchronisation corpus → Execute workflow
-```
-
-Résultat attendu dans les logs :
+1. **Créer le compte d'envoi des courriels :** *Settings → Credentials → Add credential → SMTP* (serveur, port, utilisateur et mot de passe de l'expéditeur).
+2. **Importer les deux workflows** du dossier `scripts/N8N/` du dépôt (*Workflows → Import from file*) : `n8n-sync-corpus.json` et `n8n-rappel-rotation-svc-rag.json`.
+3. Dans chacun, ouvrir le nœud de courriel, choisir le compte SMTP, et remplacer `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` (la valeur de `ADMIN_TOKEN` du `.env`).
+4. Vérifier le nœud « POST /admin/sync » : URL `http://rag-api:8080/admin/sync`, méthode POST, en-tête `Authorization: Bearer <ADMIN_TOKEN>`.
+5. Activer les deux workflows, puis lancer une exécution manuelle de la synchronisation.
 
 ```bash
-docker logs rag-api 2>&1 | grep "sync\|indexer\|acl" | tail -10
+docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -10
 ```
+
+**Attendu :** `[SYNC] Terminé : success=True`.
+
+> **Une synchronisation occupe la stack et le serveur de modèles.** Tant qu'elle tourne, les réponses sont nettement plus lentes : dans le lab, trois à cinq fois plus lentes pendant une synchronisation lancée juste avant une série de questions (§10.3). Ne pas juger la vitesse de la stack à ce moment-là.
 
 ---
 
-## Étape 14 (facultative) : Partie 3, Microsoft 365
+## Étape 16 : contrôles finaux
 
-Cette étape connecte la stack à un tenant Microsoft 365 synchronisé avec l'AD par Entra Connect. Les trois modules sont indépendants, mais le premier est requis par les deux autres. Le `docker-compose.yml` du dépôt transmet déjà toutes les variables au conteneur : il suffit de les renseigner dans `.env`, puis de redémarrer `rag-api` :
+**Une question de test**, dans Open WebUI, sur un document que vous connaissez : la réponse doit le citer entre crochets.
+
+**Le test de cloisonnement**, qui prouve que chacun ne voit que ses documents. Il demande quelques comptes de test créés dans l'Active Directory, et un fichier qui décrit, pour quelques documents, qui doit y avoir accès : partir de `cas_cloisonnement.exemple.json`, l'adapter à vos documents et le copier en `/root/rag-pipeline/cas_cloisonnement.json` (format au §16.3). Puis :
 
 ```bash
-cd ~/rag-stack && docker compose up -d rag-api
+docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json
 ```
 
-Chaque application Microsoft 365 s'authentifie par **certificat**, jamais par secret. Les certificats sont générés sur la VM, dans `/etc/rag-certs` (droits 700), déjà monté dans le conteneur :
+**Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4).
+
+### Checklist
+
+| Contrôle | Commande ou action | Attendu |
+|---|---|---|
+| Serveur de modèles, depuis la stack | Étape 10 | `200` deux fois |
+| Collections Qdrant | `curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections` | `documents` et `documentation` |
+| Extraits indexés | Étape 12 | Plus de 0 dans les deux collections |
+| Droits recopiés | Étape 13 | `autorises` non vide |
+| Santé de la RAG API | `docker compose exec n8n wget -qO- http://rag-api:8080/health` | `"status":"ok"` |
+| Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
+| Accès autorisé | Question sur un document accessible | Réponse avec citation |
+| Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |
+| Test de cloisonnement | Étape 16 | Aucune `FUITE` |
+| Journal nLPD | `tail -1 /var/log/rag/rag-queries.jsonl` | Une entrée avec `user_id` et `ancree` |
+| Synchronisation horaire | n8n, dernière exécution | Réussie |
+| Garde-fou des droits | `SMB_PASSWORD=faux python acl_resolver.py ...` | Code 1, `[GARDE-FOU]`, Qdrant intact |
+| Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
+| Avec vLLM : la clé est exigée | Étape 3B, point 5 | `401` sans la clé |
+| Microsoft 365, si déployé | Checklists de §11.8, §12.9 et §13.9 | Tous les points validés |
+
+---
+
+## Étape 17 (facultative) : Microsoft 365
+
+Cette étape relie la stack à un tenant Microsoft 365 synchronisé avec l'Active Directory par Entra Connect. Les trois modules sont indépendants, mais le premier est requis par les deux autres. Le `docker-compose.yml` du dépôt transmet déjà toutes les variables : il suffit de les renseigner dans `.env`, puis de redémarrer la RAG API :
+
+```bash
+cd /root/rag-stack && docker compose up -d rag-api
+```
+
+Chaque application Microsoft 365 s'authentifie par **certificat**, jamais par secret. Les certificats sont créés sur la VM, dans `/etc/rag-certs` :
 
 ```bash
 cd /etc/rag-certs
-sudo openssl req -x509 -newkey rsa:2048 -nodes -keyout <nom>.key -out <nom>.crt -days 730 -subj "/CN=<Nom-Application>"
-sudo chmod 600 <nom>.key
+openssl req -x509 -newkey rsa:2048 -nodes -keyout <nom>.key -out <nom>.crt -days 730 -subj "/CN=<Nom-Application>"
+chmod 600 <nom>.key
 openssl x509 -in <nom>.crt -noout -fingerprint -sha1 | tr -d ':' | cut -d= -f2    # empreinte pour .env
 ```
 
-### 14.1 Groupes Entra ID (§11), prérequis des modules suivants
+### 17.1 Groupes Entra ID (§11), prérequis des modules suivants
 
 1. Certificat `rag-identity` ;
 2. App Registration `RAG-Identity-Resolver` : certificat chargé, autorisations **d'application** Microsoft Graph `User.Read.All` et `GroupMember.Read.All`, consentement administrateur ;
@@ -510,7 +684,7 @@ openssl x509 -in <nom>.crt -noout -fingerprint -sha1 | tr -d ':' | cut -d= -f2  
 
 Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
 
-### 14.2 Synthèse des réunions Teams (§12)
+### 17.2 Synthèse des réunions Teams (§12)
 
 1. Centre d'administration Teams : transcription active dans la stratégie de réunion, et **Transcript API access** activé avec l'attribution des intervenants (désactivé par défaut : sans lui, toute requête est refusée) ;
 2. Groupe d'adhésion `GRP-Teams-CompteRendu-IA`, de type sécurité à extension messagerie, créé en PowerShell Exchange Online, avec les organisateurs concernés ;
@@ -522,95 +696,93 @@ Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
 
 Détail : [§12 Synthèse des réunions Teams](section-12-teams.md).
 
-### 14.3 Connecteur SharePoint Online (§13)
+### 17.3 Connecteur SharePoint Online (§13)
 
 1. Inventaire des permissions avec les scripts de [`scripts/sharepoint/`](../../scripts/sharepoint/) : bibliothèques de conservation, membres atypiques, partages ;
 2. Certificat `rag-sharepoint` et App Registration `RAG-SharePoint-Indexer` : autorisations d'application `Sites.Selected` pour **Microsoft Graph et SharePoint**, consentement ;
 3. Lecture accordée site par site : `Accorder-SitesSelected.ps1` ;
 4. `.env` : `SP_CLIENT_ID`, `SP_CERT_THUMBPRINT`, `SP_SITES` (exactement les sites accordés) ;
 5. Simulation, rien n'est écrit : `docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.py --dry-run`, puis contrôle des `autorises[]` dans le rapport `/var/log/rag/rapport_sharepoint_*.json` ;
-6. Première synchronisation par `/admin/sync` (workflow n8n), qui enchaîne désormais SMB et SharePoint ;
-7. Validation : cloisonnement testé avec des comptes de test **créés dans l'AD** (Open WebUI authentifie en LDAP).
+6. Première synchronisation par `/admin/sync` (workflow n8n), qui enchaîne le partage de fichiers et SharePoint ;
+7. Validation : cloisonnement testé avec des comptes de test **créés dans l'Active Directory** (Open WebUI authentifie par LDAP).
 
-Détail : [§13 Connecteur SharePoint Online](section-13-sharepoint.md).
-
----
-
-## Checklist de validation finale
-
-| Test | Commande / action | Résultat attendu |
-|---|---|---|
-| Qdrant collections | `curl http://localhost:6333/collections` | `documents` et `documentation` présentes |
-| Chunks indexés | Voir étape 10 | Nombre > 0 dans les deux collections |
-| ACL propagées | Voir étape 11 | `autorises` non vide dans le payload |
-| RAG API santé | `docker compose exec n8n wget -qO- http://rag-api:8080/health` | `{"status":"ok"}` |
-| BM25 chargé | `docker logs rag-api \| grep BM25` | Nombre de chunks |
-| Cloisonnement positif | Question dans Open WebUI sur document accessible | Réponse avec citation et chemin UNC |
-| Cloisonnement négatif | Compte sans droits, question sur document restreint | "Cette information ne figure pas..." |
-| Cloisonnement DENY | Compte avec DENY explicite sur un fichier | Fichier absent de la réponse |
-| Journal nLPD | `tail -1 /var/log/rag/rag-queries.jsonl` | Entrée JSON avec `user_id` et `ancree` |
-| n8n sync horaire | Interface n8n → dernière exécution | Réussie, sans erreur |
-| Garde-fou ACL | `SMB_PASSWORD=faux python acl_resolver.py ...` | Code 1, `[GARDE-FOU]`, Qdrant intact |
-| Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
-| Partie 3 (si déployée) | Checklists de §11.8, §12.9 et §13.9 | Tous les points validés |
+Détail : [§13 Connecteur SharePoint Online](section-13-sharepoint.md). Pour les documents protégés par Purview : [§14](section-14-purview.md).
 
 ---
 
 ## En cas de problème
 
-**`rag-api` ne démarre pas :**
+**La RAG API redémarre en boucle**
 
 ```bash
 docker logs rag-api 2>&1 | tail -30
 ```
 
-Vérifier : variable manquante dans `.env`, `ad-chain.pem` absent sur l'hôte, Qdrant pas encore prêt.
+Le plus souvent : une variable manquante dans `.env`, le certificat `/etc/ssl/certs/ad-chain.pem` absent, ou Qdrant pas encore prêt (attendre 30 secondes, puis `docker compose restart rag-api`).
 
-**LDAP refuse la connexion (403 sur toutes les requêtes) :**
-
-```bash
-ldapwhoami -H ldaps://<NOM-DC>:636 \
-    -D "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" \
-    -w "<mot-de-passe>" 2>&1
-```
-
-Causes : mauvais mot de passe, compte verrouillé, certificat CA incorrect.
-
-**Montage SMB tombe après redémarrage :**
+**Tout le monde est refusé (403)**
 
 ```bash
-sudo mount -a
-mount | grep corpus-root
+LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem ldapwhoami -H ldaps://<NOM-DC>.votre-domaine.ch:636 \
+    -D "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" -w "<mot-de-passe>" 2>&1
 ```
 
-Vérifier que `/etc/smbcredentials/svc-rag` contient le bon mot de passe et que la ligne `/etc/fstab` est correcte.
+Causes : mot de passe de `svc-rag` erroné ou changé, compte verrouillé, certificat de l'autorité de certification incorrect, ou attribut LDAP d'Open WebUI autre que `userPrincipalName`.
 
-**BM25 vide au démarrage :**
+**La VM ne joint pas le serveur de modèles (étape 8)**
 
-Qdrant a démarré après `rag-api`. Attendre 30 secondes et relancer :
+- Avec Ollama : `OLLAMA_HOST` absent (Ollama n'écoute que sur sa propre machine) ou port 11434 fermé dans le pare-feu Windows (§2.3).
+- Avec vLLM dans WSL2 : la règle de pare-feu Hyper-V de l'étape 3B, ou un serveur arrêté (vérifier sur le serveur : `ss -ltn | grep -E ':800[01]'`, deux lignes attendues).
+
+**La VM joint le serveur de modèles, mais pas la stack (étape 10 : `No route to host`)**
+
+Constaté une fois dans le lab, sans cause établie : le réseau interne de Docker avait perdu son adresse IPv4. Le conteneur ne pouvait plus rien joindre hors de la VM, alors que la VM elle-même joignait le serveur. Vérifier :
+
+```bash
+ip -br addr show br-$(docker network inspect rag-stack_default --format '{{.Id}}' | cut -c1-12)
+```
+
+Si la ligne ne montre aucune adresse IPv4 (seulement une adresse qui commence par `fe80::`), redémarrer Docker, qui recrée l'adresse :
+
+```bash
+systemctl restart docker
+cd /root/rag-stack && docker compose up -d
+```
+
+Puis refaire le contrôle de l'étape 10.
+
+**Les questions échouent avec une erreur 503, journal : « Échec de la recherche documentaire »**
+
+Le serveur d'embedding ne répond pas : sans vecteur de la question, pas de recherche. Avec vLLM, le serveur du port 8001 est arrêté (son terminal a été fermé, par exemple) ; avec Ollama, le modèle `nomic-embed-text` manque.
+
+**vLLM refuse de démarrer**
+
+Les messages rencontrés en lab et leur solution sont au §2.4.9.
+
+**Les réponses sont soudain très lentes**
+
+Une synchronisation est peut-être en cours (`docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -3`). Si les lenteurs persistent au repos : la mémoire de la carte déborde (§10.2).
+
+**Le montage du partage tombe après un redémarrage**
+
+```bash
+mount -a && mount | grep corpus-root
+```
+
+Vérifier le mot de passe dans `/etc/smbcredentials/svc-rag` (rotation non reportée ?) et la ligne de `/etc/fstab`.
+
+**La recherche par mots-clés est vide au démarrage (BM25)**
+
+Qdrant a démarré après la RAG API. Attendre 30 secondes, puis :
 
 ```bash
 docker compose restart rag-api
 docker logs rag-api 2>&1 | grep BM25
 ```
 
-**Garde-fou ACL déclenché (code 1) :**
+**Le garde-fou des droits s'est déclenché (code 1)**
 
-Plus de 20% des fichiers sont illisibles. Vérifier :
-
-```bash
-# svc-rag verrouillé ?
-# Windows PowerShell :
-# Get-ADUser svc-rag -Properties LockedOut | Select LockedOut
-# Unlock-ADAccount -Identity svc-rag
-
-# Montage SMB présent ?
-ls /mnt/corpus-root/ | head -5
-
-# DC joignable ?
-ldapwhoami -H ldaps://<NOM-DC>:636 \
-    -D "CN=svc-rag,..." -w "<mot-de-passe>"
-```
+Plus de 20 % des fichiers étaient illisibles : le résolveur refuse alors de toucher à Qdrant. Vérifier que `svc-rag` n'est pas verrouillé (sur Windows : `Get-ADUser svc-rag -Properties LockedOut`, puis `Unlock-ADAccount -Identity svc-rag`), que le partage est monté (`ls /mnt/corpus-root`), et que le contrôleur de domaine répond (`ldapwhoami`, ci-dessus).
 
 ---
 
@@ -618,4 +790,6 @@ ldapwhoami -H ldaps://<NOM-DC>:636 \
 
 ---
 
-*Validé sur VM-RAG-LAB, Ubuntu 26.04 LTS, septembre 2026.*
+*Validé en lab sur VM-RAG-LAB (Ubuntu Server 26.04) et LABO-G9 (NVIDIA RTX 5060 Ti 16 Go), avec Ollama puis vLLM 0.31.0, octobre 2026.*
+
+ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

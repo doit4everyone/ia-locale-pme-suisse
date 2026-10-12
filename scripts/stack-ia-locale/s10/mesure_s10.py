@@ -42,6 +42,9 @@ import httpx
 API_URL = "http://localhost:8080/v1/chat/completions"
 API_TOKEN = os.environ.get("API_TOKEN", "")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
+# Avec vLLM (LLM_API=openai), les modèles restent chargés tant que le serveur
+# tourne : il n'y a rien à décharger, --decharger est sans objet.
+LLM_API = (os.environ.get("LLM_API", "") or "ollama").strip().lower()
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "qwen3:4b")
 LOG_FILE = os.environ.get("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
@@ -71,6 +74,9 @@ def attendre_api(delai: int = 60):
 
 
 def decharger():
+    if LLM_API == "openai":
+        print("  (vLLM : modèles résidents, déchargement sans objet)")
+        return
     for modele in (LLM_MODEL, JUDGE_MODEL):
         if not modele:
             continue
@@ -157,6 +163,8 @@ def main():
         "llm_model": LLM_MODEL,
         "judge_model": JUDGE_MODEL,
         "embed_model": os.environ.get("EMBED_MODEL", ""),
+        "llm_api": LLM_API,
+        "embed_api": os.environ.get("EMBED_API", "") or "ollama",
         "llm_seed": os.environ.get("LLM_SEED", ""),
         "judge_num_gpu": os.environ.get("JUDGE_NUM_GPU", ""),
         "embed_num_gpu": os.environ.get("EMBED_NUM_GPU", ""),

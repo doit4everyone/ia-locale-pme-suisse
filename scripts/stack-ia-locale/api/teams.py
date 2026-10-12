@@ -22,6 +22,11 @@ Variables d'environnement :
   SUMMARY_KEEP_ALIVE : maintien en mémoire du modèle de synthèse après usage (défaut : 2m)
   SUMMARY_NUM_CTX  : fenêtre de contexte demandée à Ollama (défaut : 16384)
   SUMMARY_TIMEOUT  : délai maximal de génération en secondes (défaut : 900)
+  LLM_API          : « ollama » (défaut) ou « openai » (vLLM, §2). Avec « openai »,
+                     la fenêtre est celle du serveur (--max-model-len) : SUMMARY_NUM_CTX
+                     ne sert plus qu'à découper le texte, et doit rester inférieure ou
+                     égale à --max-model-len. SUMMARY_KEEP_ALIVE n'a plus d'effet.
+  VLLM_API_KEY     : clé d'API du serveur vLLM (--api-key)
 """
 
 import json
@@ -34,6 +39,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 LLM_BASE_URL    = os.getenv("LLM_BASE_URL", "http://localhost:11434")
+LLM_API         = os.getenv("LLM_API", "").strip().lower() or "ollama"
+if LLM_API not in ("ollama", "openai"):
+    raise ValueError(f"LLM_API={LLM_API!r} : valeurs acceptées « ollama » ou « openai »")
+VLLM_API_KEY    = os.getenv("VLLM_API_KEY", "")
 SUMMARY_MODEL   = os.getenv("SUMMARY_MODEL", "") or os.getenv("LLM_MODEL", "qwen3:14b")
 # Durée pendant laquelle Ollama garde le modèle de synthèse en mémoire après
 # usage. Courte par défaut : quand la synthèse a son propre modèle, il ne doit
@@ -188,30 +197,53 @@ async def synthetiser(texte: str) -> dict:
     """Appelle Ollama et retourne le compte-rendu structuré."""
     prompt_user = f"{BALISE_DEBUT}\n{texte}\n{BALISE_FIN}"
     async with httpx.AsyncClient(timeout=SUMMARY_TIMEOUT) as client:
-        r = await client.post(
-            f"{LLM_BASE_URL}/api/chat",
-            json={
-                "model": SUMMARY_MODEL,
-                **({"keep_alive": SUMMARY_KEEP_ALIVE} if _MODELE_DEDIE else {}),
-                "stream": False,
-                "think": False,
-                "format": "json",
-                # num_ctx explicite : la valeur par défaut d'Ollama est trop
-                # petite pour une réunion de plus de quelques minutes.
-                "options": {"temperature": 0, "num_ctx": SUMMARY_NUM_CTX},
-                "messages": [
-                    {"role": "system", "content": PROMPT_SYSTEME},
-                    {"role": "user", "content": prompt_user},
-                ],
-            },
-        )
-        r.raise_for_status()
-        data = r.json()
-
-    # Tokens réellement consommés par le prompt : permet de vérifier
-    # après coup que rien n'a été tronqué.
-    tokens_prompt = data.get("prompt_eval_count")
-    contenu = data["message"]["content"]
+        if LLM_API == "openai":
+            r = await client.post(
+                f"{LLM_BASE_URL}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {},
+                json={
+                    "model": SUMMARY_MODEL,
+                    "stream": False,
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": PROMPT_SYSTEME},
+                        {"role": "user", "content": prompt_user},
+                    ],
+                },
+            )
+            if r.status_code >= 400:
+                # vLLM refuse (400) un prompt qui dépasse --max-model-len au lieu
+                # de le tronquer comme Ollama : le motif doit apparaître au journal.
+                logger.error(f"Synthèse : serveur de modèles HTTP {r.status_code} : {r.text[:300]}")
+            r.raise_for_status()
+            data = r.json()
+            tokens_prompt = (data.get("usage") or {}).get("prompt_tokens")
+            contenu = data["choices"][0]["message"]["content"]
+        else:
+            r = await client.post(
+                f"{LLM_BASE_URL}/api/chat",
+                json={
+                    "model": SUMMARY_MODEL,
+                    **({"keep_alive": SUMMARY_KEEP_ALIVE} if _MODELE_DEDIE else {}),
+                    "stream": False,
+                    "think": False,
+                    "format": "json",
+                    # num_ctx explicite : la valeur par défaut d'Ollama est trop
+                    # petite pour une réunion de plus de quelques minutes.
+                    "options": {"temperature": 0, "num_ctx": SUMMARY_NUM_CTX},
+                    "messages": [
+                        {"role": "system", "content": PROMPT_SYSTEME},
+                        {"role": "user", "content": prompt_user},
+                    ],
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+            # Tokens réellement consommés par le prompt : permet de vérifier
+            # après coup que rien n'a été tronqué.
+            tokens_prompt = data.get("prompt_eval_count")
+            contenu = data["message"]["content"]
     try:
         resultat = json.loads(contenu)
     except json.JSONDecodeError as e:

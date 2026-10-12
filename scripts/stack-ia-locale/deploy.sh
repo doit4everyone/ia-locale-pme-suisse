@@ -11,8 +11,10 @@
 #   - Docker et Docker Compose installés (voir §1.4 du guide)
 #   - Compte svc-rag créé dans l'AD avec les bons groupes (voir §5.2)
 #   - Certificat CA du DC exporté si disponible (voir §9.2)
-#   - Modèles Ollama présents sur l'hôte Windows :
-#     ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b
+#   - Serveur de modèles prêt et joignable depuis la VM (voir §2 du guide) :
+#     Ollama  : ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b
+#     vLLM    : serveurs de génération (port 8000) et d'embedding (port 8001)
+#               lancés, clé d'API VLLM_API_KEY à portée de main
 # =============================================================================
 
 set -euo pipefail
@@ -64,22 +66,65 @@ echo -e "${BLUE}-- Paramètres de l'organisation --${NC}"
 ask "Nom de l'organisation (ex: Axonix SA) :"
 read -r ORG_NAME
 
-ask "IP ou nom DNS du poste Windows hébergeant Ollama (ex: 192.168.1.10) :"
-read -r OLLAMA_HOST
+echo ""
+echo -e "${BLUE}-- Serveur de modèles (§2 du guide) --${NC}"
+echo "  1) Ollama : installation simple, une question à la fois (un à deux utilisateurs simultanés)"
+echo "  2) vLLM   : plusieurs questions en même temps (plusieurs utilisateurs simultanés)"
+ask "Moteur [1 ou 2] :"
+read -r MOTEUR_CHOIX
+[[ "$MOTEUR_CHOIX" == "1" || "$MOTEUR_CHOIX" == "2" ]] || error "Répondre 1 (Ollama) ou 2 (vLLM)."
 
-# Tester Ollama avant de continuer
-OLLAMA_BASE_URL="http://${OLLAMA_HOST}:11434"
-info "Test de connectivite Ollama sur ${OLLAMA_BASE_URL}..."
-TAGS=$(curl -s -m 10 "${OLLAMA_BASE_URL}/api/tags") \
-    || error "Ollama injoignable sur ${OLLAMA_BASE_URL}. Vérifier que OLLAMA_HOST=0.0.0.0 est defini sur l'hote Windows."
+ask "IP ou nom DNS de la machine qui porte la carte graphique (ex: 192.168.1.10) :"
+read -r MODELES_HOST
+[[ -n "$MODELES_HOST" ]] || error "L'adresse du serveur de modèles ne peut pas etre vide."
 
-for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b"; do
-    if echo "$TAGS" | grep -qE "\"${m}[\":]"; then
-        ok "Modele $m present"
-    else
-        warn "Modele $m absent : ollama pull ${m} (a faire sur l'hote Windows)"
-    fi
-done
+if [ "$MOTEUR_CHOIX" = "1" ]; then
+    MOTEUR="Ollama"
+    LLM_API=ollama
+    LLM_URL="http://${MODELES_HOST}:11434"
+    EMBED_URL="$LLM_URL"
+    JUDGE_MODEL=qwen3:4b
+    VLLM_API_KEY=""
+
+    # Tester Ollama avant de continuer
+    info "Test de connectivite Ollama sur ${LLM_URL}..."
+    TAGS=$(curl -s -m 10 "${LLM_URL}/api/tags") \
+        || error "Ollama injoignable sur ${LLM_URL}. Vérifier OLLAMA_HOST=0.0.0.0 et le pare-feu de la machine (§2.3)."
+
+    for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b"; do
+        if echo "$TAGS" | grep -qE "\"${m}[\":]"; then
+            ok "Modele $m present"
+        else
+            warn "Modele $m absent : ollama pull ${m} (sur la machine qui porte la carte)"
+        fi
+    done
+else
+    MOTEUR="vLLM"
+    LLM_API=openai
+    LLM_URL="http://${MODELES_HOST}:8000"
+    EMBED_URL="http://${MODELES_HOST}:8001"
+    JUDGE_MODEL=qwen3:14b
+
+    ask "Clé d'API vLLM (valeur de VLLM_API_KEY dans /etc/vllm/vllm.env, saisie masquée) :"
+    read -rs VLLM_API_KEY
+    echo ""
+    [[ -n "$VLLM_API_KEY" ]] || error "La clé d'API vLLM ne peut pas etre vide (§2.4.4)."
+
+    # Tester les deux serveurs vLLM : sans clé (refus attendu), puis avec la clé
+    for couple in "de génération|${LLM_URL}|qwen3:14b" "d'embedding|${EMBED_URL}|nomic-embed-text"; do
+        IFS='|' read -r ROLE URL MODELE <<< "$couple"
+        info "Test du serveur vLLM ${ROLE} sur ${URL}..."
+        CODE_SANS=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "${URL}/v1/models" || true)
+        [[ "$CODE_SANS" == "000" ]] && error "Serveur vLLM ${ROLE} injoignable sur ${URL}. Vérifier qu'il tourne et le pare-feu (§2.4)."
+        [[ "$CODE_SANS" == "401" ]] || warn "Le serveur ${ROLE} répond sans clé (code ${CODE_SANS}) : --api-key manquant ? (§2.4.5)"
+        MODELES=$(curl -s -m 10 -H "Authorization: Bearer ${VLLM_API_KEY}" "${URL}/v1/models" || true)
+        if echo "$MODELES" | grep -q "\"${MODELE}\""; then
+            ok "Serveur ${ROLE} : modèle ${MODELE} servi"
+        else
+            error "Serveur ${ROLE} : modèle ${MODELE} absent, ou clé refusée. Réponse : ${MODELES:0:200}"
+        fi
+    done
+fi
 
 echo ""
 echo -e "${BLUE}-- Paramètres réseau de la VM --${NC}"
@@ -158,7 +203,7 @@ echo "============================================================"
 echo "  Recapitulatif"
 echo "============================================================"
 echo "  Organisation    : $ORG_NAME"
-echo "  Ollama          : $OLLAMA_BASE_URL"
+echo "  Moteur          : $MOTEUR (génération : $LLM_URL ; embedding : $EMBED_URL)"
 echo "  VM IP           : $VM_IP"
 echo "  DC              : $DC_HOST"
 echo "  Domaine         : $DOMAIN_NETBIOS / $DOMAIN_DNS"
@@ -276,12 +321,17 @@ cat > /root/rag-stack/.env << ENVEOF
 # Organisation
 ORG_NAME='${ORG_NAME}'
 
-# Ollama : LLM et embeddings
-LLM_BASE_URL=${OLLAMA_BASE_URL}
-EMBED_BASE_URL=${OLLAMA_BASE_URL}
+# Serveur de modèles : ${MOTEUR} (§2 du guide)
+LLM_API=${LLM_API}
+EMBED_API=${LLM_API}
+LLM_BASE_URL=${LLM_URL}
+EMBED_BASE_URL=${EMBED_URL}
+JUDGE_BASE_URL=
 LLM_MODEL=qwen3:14b
 EMBED_MODEL=nomic-embed-text
-JUDGE_MODEL=qwen3:4b
+JUDGE_MODEL=${JUDGE_MODEL}
+VLLM_API_KEY=${VLLM_API_KEY}
+# Avec Ollama seulement
 JUDGE_KEEP_ALIVE=2h
 
 # Qdrant
@@ -319,8 +369,9 @@ SMB_PASSWORD='${SVC_RAG_PWD}'
 SMB_DOMAIN=${DOMAIN_NETBIOS}
 
 # Variables pour les lancements manuels d'indexer.py et acl_resolver.py
-# (indexer.py lit OLLAMA_URL et ORG_OWNER, pas LLM_BASE_URL ni ORG_NAME)
-OLLAMA_URL=${OLLAMA_BASE_URL}
+# (indexer.py lit OLLAMA_URL et ORG_OWNER, pas LLM_BASE_URL ni ORG_NAME ;
+# OLLAMA_URL désigne le serveur d'embedding, avec Ollama comme avec vLLM)
+OLLAMA_URL=${EMBED_URL}
 QDRANT_URL=http://localhost:6333
 ORG_OWNER='${ORG_NAME}'
 
@@ -372,9 +423,10 @@ SP_EXCLUDE_DRIVES=Preservation Hold Library
 SP_MAX_FILE_MB=50
 SYNC_TIMEOUT_SHAREPOINT=900
 
-# Fenêtres de contexte demandées à Ollama
+# Fenêtres de contexte demandées à Ollama (sans effet avec vLLM : --max-model-len)
+# La fenêtre du juge doit couvrir celle du modèle principal (§10.6)
 LLM_NUM_CTX=16384
-JUDGE_NUM_CTX=8192
+JUDGE_NUM_CTX=16384
 
 # Documents protégés par Purview (§14), inactif tant que COMPOSE_PROFILES et MIP_URL sont vides
 COMPOSE_PROFILES=
@@ -517,6 +569,23 @@ if echo "$HEALTH" | grep -q '"status":"ok"'; then
 else
     warn "RAG API ne répond pas encore. Vérifier : docker logs rag-api"
 fi
+
+# Le serveur de modèles doit être joint DEPUIS le conteneur, pas seulement depuis la VM
+for VAR_URL in LLM_BASE_URL EMBED_BASE_URL; do
+    CODE=$(docker exec rag-api python3 -c "
+import os, httpx
+api = os.environ.get('LLM_API', 'ollama')
+cle = os.environ.get('VLLM_API_KEY', '')
+h = {'Authorization': 'Bearer ' + cle} if cle else {}
+u = os.environ['${VAR_URL}'] + ('/v1/models' if api == 'openai' else '/api/tags')
+print(httpx.get(u, headers=h, timeout=10).status_code)
+" 2>/dev/null || echo "injoignable")
+    if [ "$CODE" = "200" ]; then
+        ok "Serveur de modèles joint depuis le conteneur (${VAR_URL})"
+    else
+        warn "Serveur de modèles non joint depuis le conteneur (${VAR_URL} : ${CODE}). Voir « En cas de problème » au §0."
+    fi
+done
 
 QDRANT=$(curl -s -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/collections 2>/dev/null || echo "")
 if echo "$QDRANT" | grep -q '"status":"ok"'; then

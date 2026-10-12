@@ -72,6 +72,8 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 57 | Réponses : balises du contexte et extraits recopiés, citations sans crochets, liens recopiés depuis un document, fausses absences. Nettoyage, normalisation des citations, règles de prompt (§10.9) | v2.18.0 | 2026-10-07 |
 | 58 | Réglages numériques transmis vides : la RAG API ne démarrait pas. Valeur vide traitée comme absente (19 lectures, RAG API, authentification, indexeur) ; réglages ajoutés au Compose avec leurs valeurs par défaut (§10.9) | v2.18.0 | 2026-10-07 |
 | 60 | Test de cloisonnement : erreur de lecture de Qdrant traitée comme une collection absente ; correspondance partielle du document, un cas pouvant évaluer deux documents. Erreurs explicites (503), correspondance exacte par défaut, cas ambigus refusés (§16) | v2.18.2 | 2026-10-07 |
+| 63 | `deploy.sh` et `env.example` : fenêtre du juge fixée à 8 192 tokens, plus petite que celle du modèle principal, contrairement à la règle du §10.6. Portée à 16 384 | v2.20.0 | 2026-10-12 |
+| 64 | §0 : contrôles de Qdrant (`curl`) sans la clé d'API obligatoire depuis la v2.16 (§15) ; `QDRANT_API_KEY`, `LOG_HMAC_KEY` et `MIP_TOKEN` absents des secrets à générer dans la procédure manuelle ; contrôle LDAP : option `-ZZ` (StartTLS) retirée d'une connexion déjà chiffrée en `ldaps://`, certificat de l'autorité indiqué explicitement (`LDAPTLS_CACERT`). Corrigé dans le §0 réécrit | v2.20.0 | 2026-10-12 |
 
 ---
 
@@ -88,7 +90,7 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 27 | `indexer.py` : un fichier chiffré par Purview sur le partage serait compté comme « vide », sans signalement explicite | Faible | Aucun fichier chiffré sur le partage du lab à ce jour. Détection prévue, comme dans `sp_indexer.py`. |
 | 28 | Aucune détection de secrets dans le corpus indexé | Faible | Un fichier nommé comme une clé TLS a été trouvé dans un dossier indexé du lab. À traiter par la gouvernance (inventaire, exclusion), pas par l'indexeur seul. |
 | 29 | Courriel de quarantaine sans statut par fichier | Faible | Le message présente les deux causes possibles (point 22), mais `main.py` ne transmet que les noms. Prévu avec la prochaine reconstruction (§10). |
-| doc.5 | `deploy.sh` jamais réexécuté sur une VM vierge depuis v2.12.0 | Moyenne | À tester sur une VM neuve en UEFI avec TPM et deux disques, avec le disque chiffré et les liens préparés avant le déploiement (§1.5, contrôle ajouté à `deploy.sh` en v2.17.0), et les scripts de simplification du déploiement. |
+| doc.5 | `deploy.sh` jamais réexécuté sur une VM vierge depuis v2.12.0 ; choix du moteur (Ollama ou vLLM) et contrôle depuis le conteneur ajoutés en v2.20.0, testés seulement sur des serveurs simulés | Moyenne | À tester sur une VM neuve en UEFI avec TPM et deux disques, avec le disque chiffré et les liens préparés avant le déploiement (§1.5, contrôle ajouté à `deploy.sh` en v2.17.0), avec chacun des deux moteurs, et les scripts de simplification du déploiement. |
 | 30 | Recherche par mots-clés sensible aux accents et découpée sur les seules espaces (« règlement » ≠ « reglement ») | Moyenne | Constatée en §14.7.3. Normalisation des accents et de la ponctuation prévue dans `main.py` (§10). |
 | 31 | Open WebUI envoie ses tâches d'arrière-plan (titres, suggestions) à `rag-api` : deux recherches complètes par question, une entrée de plus au journal nLPD | Moyenne | Réglage d'Open WebUI documenté en §14.8.2. |
 | 32 | Cache des décisions Purview sans verrou : deux recherches simultanées interrogent Purview deux fois | Faible | Sans effet sur la sécurité. Verrou par clé prévu. |
@@ -100,6 +102,11 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 59 | Questions d'inventaire et entités mal retrouvées : limites qui relèvent du corpus (document d'index, page de synthèse) ; résumé d'un document entier à construire (§10.10) | Moyenne | Corpus et traitement dédié. |
 | 61 | Recherche : une collection illisible est traitée comme absente, la réponse est construite sur des résultats partiels sans avertissement (constaté au redémarrage de Qdrant) | Moyenne | Même traitement que le test de cloisonnement : erreur explicite. |
 | 62 | Clé de fusion des classements par empreinte du texte : deux extraits identiques de deux documents sont fusionnés. Identité par position mesurée et écartée (§10.6) ; à reconsidérer si le corpus ne contient plus de copies | Faible | Décision documentée. |
+| 65 | Réseau Docker de la VM sans adresse IPv4 : les conteneurs ne joignaient plus rien hors de la VM (`No route to host`), alors que la VM joignait le serveur de modèles. Cause non établie | Moyenne | Contournement documenté (§0, « En cas de problème ») : redémarrer Docker. Piste : un rechargement de la configuration réseau de la VM (systemd-networkd gère aussi les interfaces de Docker). À rechercher dans le journal système si le cas se reproduit. |
+| 66 | vLLM : démarrage automatique par systemd (§2.4.7) non validé ; démarrage de WSL2 sans session Windows ouverte non vérifié | Moyenne | Tant que ce n'est pas validé, les serveurs se lancent à la main et s'arrêtent avec leur terminal. |
+| 67 | Synthèse du guide du helpdesk : 14 s mesurées au §10.9, 49 à 53 s en octobre, avec Ollama comme avec vLLM | Faible | Écart non expliqué : comparer la longueur des réponses et le contexte envoyé. |
+| 68 | Juge `qwen3:4b` d'Ollama : l'étiquette désigne la variante *Thinking-2507*, qui raisonne toujours ; la réponse du juge est contrainte au format JSON, mais l'effet de cette variante sur la qualité du jugement n'a pas été mesuré (§10.12) | Faible | Mesurer une variante sans raisonnement. |
+| 69 | Ollama réglé sur plusieurs questions simultanées (`OLLAMA_NUM_PARALLEL` supérieur à 1) non mesuré : la comparaison du §10.12 vaut pour la configuration du guide | Faible | À mesurer pour compléter la recommandation du §2.2. |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API | Faible en lab | Open WebUI peut transmettre un jeton signé (`ENABLE_FORWARD_USER_INFO_HEADERS`, `FORWARD_USER_INFO_HEADER_JWT_SECRET`). Passage en production. |
 
 ---
@@ -192,6 +199,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §16, §10.6 | Correspondance exacte et erreurs explicites du test de cloisonnement ; clé de fusion mesurée | v2.18.2 |
 | §16.8, §16.9 | Mise à jour d'Open WebUI revalidée, perte d'accès signalée | v2.17.1 |
 
+
+## Corrections documentaires v2.20.0 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §0 | Réécrit : démarrage rapide avec Ollama ou vLLM, conventions pour les lecteurs non spécialistes, scripts récupérés par `git clone`, secrets générés automatiquement, contrôle de l'accès au serveur de modèles depuis le conteneur, dépannage du réseau Docker | v2.20.0 |
+| §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
+| §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
+| Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
 ---
 
-*Dernière mise à jour : 7 octobre 2026.*
+*Dernière mise à jour : 12 octobre 2026.*
