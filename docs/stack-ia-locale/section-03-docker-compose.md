@@ -58,7 +58,7 @@ EMBED_API=ollama
 LLM_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
 EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
 LLM_MODEL=qwen3:14b
-JUDGE_MODEL=qwen3:4b
+JUDGE_MODEL=qwen3:4b-instruct
 EMBED_MODEL=nomic-embed-text
 # Le modèle d'embedding doit rester celui qui a servi à indexer :
 # en cas de changement de modèle, réindexer avec indexer.py --reset

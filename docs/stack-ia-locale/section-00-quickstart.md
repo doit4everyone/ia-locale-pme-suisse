@@ -186,7 +186,7 @@ Puis quitter Ollama depuis la zone de notification et le relancer : les réglage
 
 ```powershell
 ollama pull qwen3:14b
-ollama pull qwen3:4b
+ollama pull qwen3:4b-instruct
 ollama pull nomic-embed-text
 ollama list
 ```
@@ -456,7 +456,7 @@ grep -nE "^[A-Z_]+=.*<" .env
 curl -s http://<IP-SERVEUR-MODELES>:11434/api/tags | python3 -m json.tool | grep '"name"'
 ```
 
-**Attendu :** `qwen3:14b`, `qwen3:4b` et `nomic-embed-text`. Sans réponse : le réglage `OLLAMA_HOST` (étape 3A) ou le pare-feu Windows (§2.3).
+**Attendu :** `qwen3:14b`, `qwen3:4b-instruct` et `nomic-embed-text`. Sans réponse : le réglage `OLLAMA_HOST` (étape 3A) ou le pare-feu Windows (§2.3).
 
 **Avec vLLM :**
 

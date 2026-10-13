@@ -102,7 +102,7 @@ Fonctionnalités :
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
 - Prompt système : citation du nom exact du fichier entre crochets, jamais `[Document X]`
 - Quatre contrôles d'ancrage déterministes (chunks vides, sources inexistantes, réponse sans citation, réponse longue sans citation)
-- Juge LLM post-génération (`qwen3:4b` avec Ollama, le modèle principal avec vLLM)
+- Juge LLM post-génération (`qwen3:4b-instruct` avec Ollama, le modèle principal avec vLLM)
 - Deux protocoles de serveur de modèles (`LLM_API`, `EMBED_API`) : l'API native d'Ollama (défaut) ou l'API compatible OpenAI de vLLM (§2). Avec vLLM, les vecteurs d'embedding sont ramenés à une longueur de 1, comme avec Ollama, et un refus du serveur (fenêtre dépassée, HTTP 400) est écrit au journal
 - Journalisation nLPD par utilisateur avec hash de la question
 - Verrou `asyncio.Lock` contre les synchronisations simultanées
@@ -118,7 +118,7 @@ EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:11434  # vLLM : port 8001
 JUDGE_BASE_URL=          # vide : même serveur que LLM_BASE_URL
 VLLM_API_KEY=            # avec vLLM : la clé --api-key des serveurs
 LLM_MODEL=qwen3:14b
-JUDGE_MODEL=qwen3:4b     # qwen3:14b avec vLLM
+JUDGE_MODEL=qwen3:4b-instruct     # qwen3:14b avec vLLM
 JUDGE_KEEP_ALIVE=2h       # Ollama seulement : rétention du juge en mémoire après chaque appel.
                           # Format : "5m", "2h", "-1" (indéfiniment).
                           # Passer à -1 une fois le GPU installé.

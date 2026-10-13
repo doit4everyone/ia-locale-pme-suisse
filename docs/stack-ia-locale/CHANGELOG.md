@@ -4,6 +4,22 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.20.2] : Octobre 2026
+
+Juge d'Ollama remplacé après mesure, et mesures d'Ollama avec plusieurs questions simultanées.
+
+### Scripts
+
+- `env.example`, `deploy.sh`, `api/anon_main.py`, `s10/mesure_s10.py`, `index.md` : juge par défaut `qwen3:4b-instruct` avec Ollama (l'étiquette `qwen3:4b` raisonne toujours). `deploy.sh` vérifie et demande ce modèle.
+
+### Documentation
+
+- `section-10-gpu.md` : §10.12, trois juges mesurés (26 sur 30 en 4,8 min avec `qwen3:4b-instruct`, contre 24 sur 30 en 5,4 min et 26 sur 30 en 6,8 min), `OLLAMA_NUM_PARALLEL=2` écarté sur 16 Go, deux séries simultanées avec Ollama (8,1 à 8,2 min contre 4,8 min seule) comparées à vLLM ; §10.2 et §10.11 alignés.
+- `section-00-quickstart.md`, `section-02-vllm.md`, `section-03-docker-compose.md` : téléchargement et réglage du juge `qwen3:4b-instruct`, réserve du §2.2 appuyée par les chiffres.
+- `suivi-corrections.md` : points 68 et 69 corrigés, point 74 ouvert (I1 sous charge).
+
+---
+
 ## [2.20.1] : Octobre 2026
 
 Corrections après relecture du dépôt : un contrôle de sécurité de `deploy.sh` et des extraits du §3 qui ne correspondaient plus aux fichiers.

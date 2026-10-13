@@ -46,7 +46,7 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
 # tourne : il n'y a rien à décharger, --decharger est sans objet.
 LLM_API = (os.environ.get("LLM_API", "") or "ollama").strip().lower()
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
-JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "qwen3:4b")
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "qwen3:4b-instruct")
 LOG_FILE = os.environ.get("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
 REFUS = "ne figure pas dans les documents disponibles"
 AVERTISSEMENT = "le contrôle automatique n'a pas pu rattacher"

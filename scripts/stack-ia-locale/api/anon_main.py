@@ -110,7 +110,7 @@ def normaliser_vecteur(v: list[float]) -> list[float]:
     return [x / norme for x in v] if norme > 0 else v
 
 
-JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b")
+JUDGE_MODEL  = os.getenv("JUDGE_MODEL", "qwen3:4b-instruct")
 JUDGE_KEEP_ALIVE = os.getenv("JUDGE_KEEP_ALIVE", "2h")
 # Fenêtres de contexte demandées explicitement à Ollama, modèle par modèle.
 # Sans valeur explicite, Ollama applique sa valeur par défaut (souvent 4096),

@@ -74,6 +74,8 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 60 | Test de cloisonnement : erreur de lecture de Qdrant traitée comme une collection absente ; correspondance partielle du document, un cas pouvant évaluer deux documents. Erreurs explicites (503), correspondance exacte par défaut, cas ambigus refusés (§16) | v2.18.2 | 2026-10-07 |
 | 63 | `deploy.sh` et `env.example` : fenêtre du juge fixée à 8 192 tokens, plus petite que celle du modèle principal, contrairement à la règle du §10.6. Portée à 16 384 | v2.20.0 | 2026-10-12 |
 | 64 | §0 : contrôles de Qdrant (`curl`) sans la clé d'API obligatoire depuis la v2.16 (§15) ; `QDRANT_API_KEY`, `LOG_HMAC_KEY` et `MIP_TOKEN` absents des secrets à générer dans la procédure manuelle ; contrôle LDAP : option `-ZZ` (StartTLS) retirée d'une connexion déjà chiffrée en `ldaps://`, certificat de l'autorité indiqué explicitement (`LDAPTLS_CACERT`). Corrigé dans le §0 réécrit | v2.20.0 | 2026-10-12 |
+| 68 | Juge d'Ollama : l'étiquette `qwen3:4b` raisonne toujours. Trois juges mesurés (4B raisonnant, 14B, `qwen3:4b-instruct`) ; `qwen3:4b-instruct` retenu (26 sur 30, 4,8 min contre 5,4 et 6,8 min). Étiquette, `env.example`, `deploy.sh`, valeurs par défaut du code et §2, §3, §10 alignés | v2.20.2 | 2026-10-12 |
+| 69 | `OLLAMA_NUM_PARALLEL` mesuré : 2 ne tient pas sur 16 Go avec trois modèles (contexte réservé deux fois, modèles évincés et rechargés) ; avec 1, deux séries simultanées en 8,1 à 8,2 min contre 4,8 min seule. Recommandation du §2.2 appuyée par ces chiffres (§10.12). Au-delà de deux utilisateurs : non mesuré | v2.20.2 | 2026-10-12 |
 | 70 | `deploy.sh` : un serveur vLLM qui répondait sans clé (code autre que 401) n'arrêtait pas le déploiement, il émettait un simple avertissement. Test rendu bloquant | v2.20.1 | 2026-10-12 |
 | 71 | §3 : extraits du `.env` et du Compose sans `QDRANT_API_KEY` ; contrôles de la §3.6 (Qdrant, `/stats`), commandes de snapshot et de restauration sans la clé ni le jeton obligatoires ; exemples avec `changeme-api-token`. Alignés sur les fichiers du dépôt, valeurs lues dans le `.env` | v2.20.1 | 2026-10-12 |
 
@@ -107,10 +109,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 65 | Réseau Docker de la VM sans adresse IPv4 : les conteneurs ne joignaient plus rien hors de la VM (`No route to host`), alors que la VM joignait le serveur de modèles. Cause non établie | Moyenne | Contournement documenté (§0, « En cas de problème ») : redémarrer Docker. Piste : un rechargement de la configuration réseau de la VM (systemd-networkd gère aussi les interfaces de Docker). À rechercher dans le journal système si le cas se reproduit. |
 | 66 | WSL2 : arrêt à la fermeture du dernier terminal (constaté) ; démarrage au lancement de Windows et maintien en vie sans terminal non testés. Services systemd validés le 12 octobre 2026 | Faible | Hors WSL2, les services du §2.4.7 suffisent. Dans WSL2, garder un terminal Ubuntu ouvert, ou prévoir un serveur Linux dédié. |
 | 67 | Synthèse du guide du helpdesk : 14 s mesurées au §10.9, 49 à 53 s en octobre, avec Ollama comme avec vLLM | Faible | Écart non expliqué : comparer la longueur des réponses et le contexte envoyé. |
-| 68 | Juge `qwen3:4b` d'Ollama : l'étiquette désigne la variante *Thinking-2507*, qui raisonne toujours ; la réponse du juge est contrainte au format JSON, mais l'effet de cette variante sur la qualité du jugement n'a pas été mesuré (§10.12) | Faible | Mesurer une variante sans raisonnement. |
-| 69 | Ollama réglé sur plusieurs questions simultanées (`OLLAMA_NUM_PARALLEL` supérieur à 1) non mesuré : la comparaison du §10.12 vaut pour la configuration du guide | Faible | À mesurer pour compléter la recommandation du §2.2. |
 | 72 | vLLM : échanges de la VM avec les serveurs de modèles en HTTP (clé d'API et questions en clair sur le réseau), modèles désignés par leur nom de dépôt, sans révision figée, code distant du modèle d'embedding exécuté (`--trust-remote-code`) | Moyenne pour la production | Documenté au §2.4.10. Réseau restreint ou chiffré, révisions figées et copie locale validée : non testés en lab. |
 | 73 | Charge de vLLM : seules deux séries simultanées mesurées. Quatre questions simultanées, durées maximales (P95) et mémoire de la carte sous charge non mesurées | Faible | À mesurer avant d'annoncer une capacité (§2.4.10). |
+| 74 | Ollama, deux séries simultanées : pour la question d'inventaire des règles YAML (I1), chaque série place un autre document en tête (`10-integrations-agents.md` pour l'une, `14_Registre_Personnel_2026.docx` pour l'autre) au lieu de `11-correlations-yaml.md` ; cause non établie (§10.12) | Faible | Comparer le contexte envoyé dans les deux séries. |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API | Faible en lab | Open WebUI peut transmettre un jeton signé (`ENABLE_FORWARD_USER_INFO_HEADERS`, `FORWARD_USER_INFO_HEADER_JWT_SECRET`). Passage en production. |
 
 ---
@@ -212,6 +213,15 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.20.2 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §10.12 | Trois juges d'Ollama mesurés, `OLLAMA_NUM_PARALLEL` 1 et 2, deux séries simultanées avec Ollama comparées à vLLM ; les tableaux de la comparaison de départ précisent qu'ils ont été relevés avec le juge `qwen3:4b` | v2.20.2 |
+| §0, §2, §3, §10.2, §10.11 | Juge `qwen3:4b-instruct` pour Ollama | v2.20.2 |
 
 ---
 

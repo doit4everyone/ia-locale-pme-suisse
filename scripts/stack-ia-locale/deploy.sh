@@ -12,7 +12,7 @@
 #   - Compte svc-rag créé dans l'AD avec les bons groupes (voir §5.2)
 #   - Certificat CA du DC exporté si disponible (voir §9.2)
 #   - Serveur de modèles prêt et joignable depuis la VM (voir §2 du guide) :
-#     Ollama  : ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b
+#     Ollama  : ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b-instruct
 #     vLLM    : serveurs de génération (port 8000) et d'embedding (port 8001)
 #               lancés, clé d'API VLLM_API_KEY à portée de main
 # =============================================================================
@@ -83,7 +83,7 @@ if [ "$MOTEUR_CHOIX" = "1" ]; then
     LLM_API=ollama
     LLM_URL="http://${MODELES_HOST}:11434"
     EMBED_URL="$LLM_URL"
-    JUDGE_MODEL=qwen3:4b
+    JUDGE_MODEL=qwen3:4b-instruct
     VLLM_API_KEY=""
 
     # Tester Ollama avant de continuer
@@ -91,7 +91,7 @@ if [ "$MOTEUR_CHOIX" = "1" ]; then
     TAGS=$(curl -s -m 10 "${LLM_URL}/api/tags") \
         || error "Ollama injoignable sur ${LLM_URL}. Vérifier OLLAMA_HOST=0.0.0.0 et le pare-feu de la machine (§2.3)."
 
-    for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b"; do
+    for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b-instruct"; do
         if echo "$TAGS" | grep -qE "\"${m}[\":]"; then
             ok "Modele $m present"
         else

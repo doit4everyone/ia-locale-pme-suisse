@@ -94,7 +94,7 @@ La carte retombe à 52 °C quelques secondes après la charge. Elle commencerait
 | Modèle | Rôle | Mémoire occupée | Contexte |
 |---|---|---|---|
 | `qwen3:14b` | Modèle principal | 10 Go (12 Go sur CPU : le cache sur 8 bits fait la différence) | 16 384 |
-| `qwen3:4b` | Juge d'ancrage | 3,9 Go | 16 384 (voir §10.6) |
+| `qwen3:4b-instruct` | Juge d'ancrage | environ 4 Go (3,9 Go relevés avec l'étiquette `qwen3:4b`) | 16 384 (voir §10.6) |
 | `nomic-embed-text` | Embedding | 0,3 Go | 2 048 |
 | **Total**, avec l'affichage | | **environ 15,3 Go sur 16,3** | |
 
@@ -416,7 +416,7 @@ Une cinquième limite relève d'un traitement à venir : **résumer un long docu
 |---|---|---|
 | Modèle principal | `qwen3:14b`, sur la carte | `LLM_MODEL=qwen3:14b`, `LLM_NUM_CTX=16384` |
 | Moteur | Ollama pour un à deux utilisateurs simultanés, vLLM au-delà | §2 et §10.12 |
-| Juge | `qwen3:4b`, sur la carte ; avec vLLM, le modèle principal | `JUDGE_NUM_GPU` vide ; avec vLLM, `JUDGE_MODEL=qwen3:14b` |
+| Juge | `qwen3:4b-instruct`, sur la carte ; avec vLLM, le modèle principal | `JUDGE_NUM_GPU` vide ; avec vLLM, `JUDGE_MODEL=qwen3:14b` |
 | Embedding | `nomic-embed-text`, sur la carte | `EMBED_NUM_GPU` vide |
 | Synthèse Teams | Le modèle principal | `SUMMARY_MODEL` vide |
 | Reranker | Désactivé | `RERANKER_URL` vide ; le service reste disponible en option |
@@ -474,12 +474,12 @@ Le §2 documente deux moteurs pour le serveur de modèles. Ils ont été compar�
 | | Ollama 0.40.3 | vLLM 0.31.0 |
 |---|---|---|
 | Rédaction | `qwen3:14b`, compression sur 4 bits | `Qwen/Qwen3-14B-AWQ`, compression sur 4 bits |
-| Juge | `qwen3:4b` | Le modèle de rédaction, sur le même serveur |
+| Juge | `qwen3:4b` (variante qui raisonne, voir plus bas) | Le modèle de rédaction, sur le même serveur |
 | Embedding | `nomic-embed-text` | `nomic-ai/nomic-embed-text-v1.5` |
 | Fenêtre de contexte | 16 384 tokens | 16 384 tokens |
 | Questions traitées ensemble | Une (`OLLAMA_NUM_PARALLEL=1`) | Jusqu'à quatre |
 
-Le juge diffère par contrainte, pas par choix : vLLM réserve la mémoire de la carte au démarrage, et 16 Go ne tiennent que le modèle de rédaction et l'embedding. Le modèle de rédaction sert donc aussi de juge.
+**Les tableaux de cette comparaison ont été relevés avec le juge `qwen3:4b` d'Ollama, avant le changement de juge décrit plus bas** (`qwen3:4b-instruct`, retenu ensuite). Le juge diffère par contrainte, pas par choix : vLLM réserve la mémoire de la carte au démarrage, et 16 Go ne tiennent que le modèle de rédaction et l'embedding. Le modèle de rédaction sert donc aussi de juge.
 
 ### L'index reste valable
 
@@ -515,7 +515,7 @@ Deux campagnes de 30 questions (deux passages), lancées au même moment dans de
 | Question précise | 8,7 s | 8,9 s |
 | Score de chaque campagne | 13 sur 15 par passage | Identique, mêmes échecs |
 
-Le journal de vLLM affichait `Running: 2 reqs`, avec un cache occupé à 38 % : les deux questions étaient traitées ensemble, sans éviction. **La carte sert presque deux fois plus de questions dans le même temps, et chacune ne prend que 6 % de plus.** Avec Ollama réglé sur une question à la fois, la seconde attendrait la fin de la première ; ce cas n'a pas été mesuré, pas plus qu'Ollama réglé sur plusieurs questions à la fois.
+Le journal de vLLM affichait `Running: 2 reqs`, avec un cache occupé à 38 % : les deux questions étaient traitées ensemble, sans éviction. **La carte sert presque deux fois plus de questions dans le même temps, et chacune ne prend que 6 % de plus.** Le même essai avec Ollama est décrit plus bas.
 
 ### La vitesse brute
 
@@ -528,9 +528,34 @@ Le journal de vLLM affichait `Running: 2 reqs`, avec un cache occupé à 38 % : 
 
 La lecture du contexte pèse lourd : la rédaction comme le juge relisent tous les extraits, soit 4 000 à 11 000 tokens chacun. Le cache sur 8 bits, qui économise la mémoire, n'a rien apporté en vitesse et impose des composants qui exigent le compilateur CUDA (§2.4.9) : il n'est pas retenu. La production de texte avec vLLM a été mesurée avec ce cache ; elle n'a pas été remesurée seule avec la configuration finale, dont les durées de questions sont celles des tableaux ci-dessus.
 
-### Le juge `qwen3:4b` d'Ollama
+### Le juge d'Ollama : trois variantes mesurées
 
-Dans la bibliothèque d'Ollama, l'étiquette `qwen3:4b` désigne la variante *Qwen3-4B-Thinking-2507*, qui raisonne toujours. Interrogée sans contrainte de format, avec la consigne de ne pas réfléchir, elle a écrit 143 tokens de raisonnement pour répondre « OK », là où le 14B servi par vLLM répond en 2 tokens. Dans la stack, la réponse du juge est contrainte au format JSON dès le premier mot, ce qui la rend utilisable. Ses résultats sont ceux du tableau ci-dessus ; l'effet de cette variante sur la qualité du jugement n'a pas été mesuré séparément.
+Dans la bibliothèque d'Ollama, l'étiquette `qwen3:4b` désigne une variante qui raisonne toujours (*Thinking*). Interrogée avec la consigne de ne pas réfléchir, elle écrit son raisonnement avant de répondre : 101 à 143 tokens pour répondre « OK », là où `qwen3:4b-instruct` répond en 2 tokens (même question, même serveur). Dans la stack, la réponse du juge est contrainte au format JSON, ce qui rendait la variante utilisable, mais elle coûtait du temps. Trois juges ont été essayés sur le même jeu (15 questions, deux passages, une campagne à la fois, `OLLAMA_NUM_PARALLEL=1`) :
+
+| Juge | Réponses conformes | Durée de la campagne |
+|---|---|---|
+| `qwen3:4b` (raisonne) | 24 sur 30 | 5,4 min |
+| `qwen3:14b` (le modèle de rédaction) | 26 sur 30 | 6,8 min |
+| **`qwen3:4b-instruct`** | **26 sur 30** | **4,8 min** |
+
+`qwen3:4b-instruct` est le plus rapide et ne perd aucune réponse conforme par rapport au 14B. Avec le juge retenu, les deux échecs restants (un avertissement d'ancrage sur une question large, l'inventaire des règles YAML) relèvent du corpus (§10.10). C'est le juge retenu pour Ollama. Chaque essai n'a été fait qu'une fois : un écart de quelques dixièmes de minute n'est pas significatif. `ollama show` n'indique pas la version amont de ce modèle (architecture Qwen3, 4,0 milliards de paramètres, compression Q4_K_M) : le guide cite l'étiquette telle qu'elle a été mesurée.
+
+### Ollama avec plusieurs questions à la fois
+
+**`OLLAMA_NUM_PARALLEL=2` ne convient pas à une carte de 16 Go avec trois modèles.** Ollama réserve la fenêtre de contexte pour chaque question en cours : pour le 14B, 2 × 16 384 tokens, soit 13,6 Go prévus. Avec le juge de 4 Go et l'embedding, le total dépasse la carte : le journal d'Ollama montre des modèles évincés puis rechargés en boucle, et les durées s'allongent fortement. Si le juge est le modèle de rédaction lui-même, l'ensemble tient (24 et 27 réponses conformes sur 30 pour les deux séries), mais le gros juge coûte du temps (6,8 min contre 4,8 min, tableau ci-dessus).
+
+**Avec `OLLAMA_NUM_PARALLEL=1`, la seconde question attend la première**, et deux utilisateurs sont servis quand même. Deux campagnes de 30 questions lancées au même moment :
+
+| Juge | Une campagne seule | Deux campagnes ensemble | Durée si enchaînées | Temps gagné |
+|---|---|---|---|---|
+| `qwen3:4b` (raisonne) | 5,4 min | 7,8 et 7,7 min | 10,8 min | environ 28 % |
+| `qwen3:4b-instruct` | 4,8 min | 8,2 et 8,1 min | 9,6 min | environ 15 % |
+
+Chaque campagne prend environ 1,7 fois plus de temps que seule avec le juge retenu. Les deux campagnes obtiennent 26 sur 30, sans élément interdit. Le gain du parallèle est plus faible avec le juge rapide, parce que la campagne seule est déjà plus courte : l'écart entre 7,8 et 8,2 minutes, mesuré une fois, n'est pas significatif. Les durées se répartissent de façon inégale entre les deux campagnes (la synthèse du guide du helpdesk prend 62 s dans l'une, 94 s dans l'autre), mais leur somme est proche.
+
+Une observation reste sans explication : sur la question d'inventaire des règles YAML, les deux campagnes simultanées placent chacune un autre document en tête (`10-integrations-agents.md` pour l'une, `14_Registre_Personnel_2026.docx` pour l'autre), alors que le même document est attendu. Elle est consignée au suivi.
+
+**Pour comparer avec vLLM** (juge 14B, 30 questions) : 6,5 min seul, 6,9 min à deux. Ollama avec le juge retenu est plus rapide pour une personne seule (4,8 min), vLLM l'est pour deux personnes simultanées (6,9 min contre 8,2 min). Au-delà de deux utilisateurs, rien n'a été mesuré avec Ollama, ni avec vLLM (quatre questions simultanées).
 
 ### Ce que coûte vLLM
 
@@ -540,7 +565,7 @@ Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son
 
 | Situation | Moteur |
 |---|---|
-| Un essai, un poste unique, un à deux utilisateurs simultanés | **Ollama** : plus simple, et plus rapide sur une question seule grâce à son petit juge |
+| Un essai, un poste unique, un à deux utilisateurs simultanés | **Ollama** : plus simple, et plus rapide sur une question seule grâce à son petit juge. À deux utilisateurs, chaque campagne prend environ 1,7 fois plus de temps |
 | Plusieurs utilisateurs simultanés, une PME en service | **vLLM** : presque deux fois plus de questions servies dans le même temps, pour des réponses à peine plus longues (+6 %) |
 
 ---

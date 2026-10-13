@@ -54,14 +54,14 @@ Une question prend de 2 secondes (une question précise) à près d'une minute (
 | Pour qui | Un à deux utilisateurs simultanés, un essai, un poste unique | Plusieurs utilisateurs simultanés : une PME en service |
 | Système | Windows ou Linux | Linux seulement ; sous Windows, dans WSL2, le Linux intégré à Windows (lab et essai, pas la production) |
 | Installation | Quelques minutes, plus le téléchargement des modèles | Une à deux heures, plus le téléchargement des modèles |
-| Mémoire de la carte | Chargée et libérée à la demande : trois modèles sur 16 Go (rédaction, juge `qwen3:4b`, embedding) | Réservée au démarrage : deux modèles sur 16 Go, le modèle de rédaction sert aussi de juge |
+| Mémoire de la carte | Chargée et libérée à la demande : trois modèles sur 16 Go (rédaction, juge `qwen3:4b-instruct`, embedding) | Réservée au démarrage : deux modèles sur 16 Go, le modèle de rédaction sert aussi de juge |
 | Score sur le jeu de questions du lab (15 questions, 5 passages) | 61 sur 75 | 65 sur 75 (§10.12) |
 | Durée d'une question précise, posée seule | 1 à 6 s | 2 à 9 s : le juge plus grand coûte quelques secondes |
 | Cloisonnement (§16) | 44 sur 44 | 44 sur 44 |
 
 > **Recommandation :** dès que plusieurs personnes utilisent l'assistant en même temps, ce qui est le cas d'une PME en service, choisir **vLLM**. Pour un essai, un poste unique, ou un à deux utilisateurs, **Ollama** est nettement plus simple à installer et à exploiter. Le choix n'est pas définitif : passer de l'un à l'autre ne demande ni réindexation ni nouvelle installation de la stack (§2.5).
 
-> **Une réserve honnête.** Ollama sait aussi traiter plusieurs questions à la fois (variable `OLLAMA_NUM_PARALLEL`), à condition que la carte ait la mémoire nécessaire pour chaque question en cours. Le lab l'a réglé à 1 pour faire tenir trois modèles sur 16 Go, et n'a pas mesuré ce mode. La comparaison ci-dessus vaut pour la configuration du guide.
+> **Une réserve honnête.** Ollama sait aussi traiter plusieurs questions à la fois (variable `OLLAMA_NUM_PARALLEL`), à condition que la carte ait la mémoire nécessaire pour chaque question en cours. Le lab l'a réglé à 1 : avec 2, la fenêtre de contexte est réservée deux fois, et les trois modèles ne tiennent plus ensemble sur 16 Go (§10.12). Avec la valeur 1, deux utilisateurs simultanés sont servis, une campagne de questions prenant environ 1,7 fois plus de temps que seule ; au-delà de deux, rien n'a été mesuré.
 
 ---
 
@@ -99,7 +99,7 @@ Quitter ensuite Ollama depuis la zone de notification (clic droit sur l'icône, 
 
 ```powershell
 ollama pull qwen3:14b
-ollama pull qwen3:4b
+ollama pull qwen3:4b-instruct
 ollama pull nomic-embed-text
 ollama list
 ```
@@ -135,7 +135,7 @@ systemctl show ollama --property=Environment --no-pager | tr ' ' '\n'
 
 **Attendu :** les six variables. Télécharger ensuite les trois modèles par `ollama pull`, comme sous Windows. Dans WSL2, la préparation de §2.4.2 s'applique aussi ; si la VM ne joint pas Ollama, ajouter le port 11434 à la règle de pare-feu. **Une seule installation d'Ollama à la fois** : en mode `mirrored`, une instance Windows et une instance WSL2 se disputeraient le même port.
 
-> **À savoir sur le juge `qwen3:4b`.** Dans la bibliothèque d'Ollama, l'étiquette `qwen3:4b` désigne aujourd'hui la variante *Qwen3-4B-Thinking-2507*, qui raisonne toujours : sans contrainte de format, elle ignore la consigne de ne pas réfléchir et écrit son raisonnement avant sa réponse (143 tokens pour répondre « OK » dans un test du lab). Dans la stack, la réponse du juge est contrainte au format JSON dès le premier mot, ce qui la rend utilisable. Voir §10.12.
+> **À savoir sur le juge d'Ollama.** Dans la bibliothèque d'Ollama, l'étiquette `qwen3:4b` désigne aujourd'hui une variante qui raisonne toujours (*Thinking*) : elle ignore la consigne de ne pas réfléchir et écrit son raisonnement avant sa réponse (101 à 143 tokens pour répondre « OK » dans les essais du lab). Le guide utilise donc l'étiquette `qwen3:4b-instruct`, qui répond en 2 tokens et a donné le meilleur résultat des trois juges essayés (§10.12). Le nom de l'étiquette est cité tel qu'il a été mesuré : Ollama n'indique pas la version amont du modèle.
 
 ---
 
@@ -152,7 +152,7 @@ vLLM est un moteur conçu pour servir plusieurs requêtes en même temps. Ce qu'
 | Rôle | Avec Ollama | Avec vLLM (dépôt Hugging Face) |
 |---|---|---|
 | Rédaction | `qwen3:14b` | `Qwen/Qwen3-14B-AWQ`, la version officielle de Qwen, servie sous le nom `qwen3:14b` |
-| Juge | `qwen3:4b` | Le même `Qwen3-14B-AWQ` |
+| Juge | `qwen3:4b-instruct` | Le même `Qwen3-14B-AWQ` |
 | Embedding | `nomic-embed-text` | `nomic-ai/nomic-embed-text-v1.5`, servi sous le nom `nomic-embed-text` |
 
 ### §2.4.1 Où l'installer
