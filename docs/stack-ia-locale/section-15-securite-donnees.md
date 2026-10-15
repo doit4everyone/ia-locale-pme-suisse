@@ -118,11 +118,13 @@ mkdir -p /srv/rag-donnees && mount /dev/mapper/rag-donnees /srv/rag-donnees
 ```bash
 UUID=$(cryptsetup luksUUID /dev/<disque>)
 systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 /dev/disk/by-uuid/$UUID   # demande la phrase
-cryptsetup luksDump /dev/disk/by-uuid/$UUID | grep -A3 -E "^Keyslots|^Tokens"  # 2 emplacements, jeton systemd-tpm2
+cryptsetup luksDump /dev/disk/by-uuid/$UUID | grep -E "^  [0-9]+: (luks2|systemd-tpm2)"  # 2 x luks2, 1 x systemd-tpm2
 
 echo "rag-donnees UUID=$UUID none luks,discard,tpm2-device=auto,nofail" >> /etc/crypttab
 echo "/dev/mapper/rag-donnees /srv/rag-donnees ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2" >> /etc/fstab
 ```
+
+**Attendu** pour la ligne de contrôle : deux lignes `luks2` (les emplacements 0, la phrase, et 1, le TPM) et une ligne `systemd-tpm2` (le jeton). Avec l'ancien filtre `grep -A3`, seul le premier emplacement s'affichait, ce qui laissait croire que l'inscription du TPM avait échoué. `systemd-cryptenroll` confirme de lui-même : « New TPM2 token enrolled as key slot 1 ».
 
 `--tpm2-pcrs=7` lie la clé à l'état du démarrage sécurisé : c'est le choix le plus stable, qui ne casse pas à chaque mise à jour du noyau. `nofail` garantit que le démarrage ne se bloque jamais si le disque ne s'ouvre pas.
 
@@ -202,7 +204,7 @@ df -h /srv/rag-donnees /var/log/rag            # montés, depuis /dev/mapper/rag
 docker compose -f /root/rag-stack/docker-compose.yml ps   # tous les conteneurs démarrés
 ```
 
-Dans le lab, la configuration a aussi passé un **arrêt brutal de l'hôte** : au redémarrage, le TPM a déverrouillé le disque, la stack est repartie seule, et aucune erreur de système de fichiers n'a été signalée.
+Sur une VM neuve (octobre 2026), un simple `reboot` a suffi : disque ouvert par le TPM sans saisie, monté sur `/srv/rag-donnees`, Docker actif. Dans le lab, la configuration a aussi passé un **arrêt brutal de l'hôte** : au redémarrage, le TPM a déverrouillé le disque, la stack est repartie seule, et aucune erreur de système de fichiers n'a été signalée.
 
 ### §15.3.6 Secrets et clés privées
 
@@ -257,17 +259,66 @@ Le même inventaire vaut côté Entra : une application d'un pilote abandonné g
 
 ## §15.5 Sauvegardes chiffrées
 
-> **Non validées en lab.** La nLPD n'impose pas nommément le chiffrement des sauvegardes, mais son devoir de sécurité exige des mesures appropriées au risque. Une sauvegarde contient les mêmes données que le disque chiffré : la laisser en clair annule la protection, d'autant qu'elle est souvent stockée hors du serveur.
+> **Non validées en lab.** La nLPD n'impose pas nommément le chiffrement des sauvegardes, mais son devoir de sécurité exige des mesures appropriées au risque. Une sauvegarde contient les mêmes données que le disque chiffré : la laisser en clair annule la protection, d'autant qu'elle est souvent stockée hors du serveur. La procédure ci-dessous décrit l'approche retenue ; **elle n'a pas été rejouée en lab**, et le test de restauration de la fin de cette section est à faire avant de la déclarer validée.
 
-Ce qu'une sauvegarde doit contenir, et ce qu'elle implique :
+### L'approche retenue : la sauvegarde de la VM entière
 
-| Élément | Remarque |
-|---|---|
-| Instantanés Qdrant (`POST /collections/<nom>/snapshots`, avec la clé d'API) | Texte des chunks : sensibilité maximale |
-| `openwebui_data`, `n8n_data` | Historique des conversations, identifiants |
-| `.env` et `/etc/rag-certs` | **Secrets** : à sauvegarder à part, ou à régénérer plutôt qu'à copier |
+La plupart des entreprises disposent déjà d'un outil de sauvegarde de machines virtuelles (par exemple Veeam), avec chiffrement des fichiers de sauvegarde. Ce guide s'appuie sur lui plutôt que sur une procédure propre à la stack : la VM est sauvegardée et restaurée d'un bloc, avec le disque chiffré de §15.3. Cette approche est courante, à condition de traiter les quatre points ci-dessous, qui tiennent à la façon dont la stack est construite.
 
-Les sauvegardes doivent être chiffrées avant de quitter le serveur, avec une clé conservée hors du serveur, et leur restauration testée. Le choix de l'outil (par exemple `restic`, qui chiffre nativement) sera documenté après validation en lab.
+### Ce que la sauvegarde contient, et ce qui se reconstruit
+
+| Élément | Où | Reconstructible ? |
+|---|---|---|
+| Index Qdrant (texte des chunks, permissions) | `qdrant_data`, sur le disque chiffré | **Oui, à partir des sources** : le serveur de fichiers et SharePoint font foi. Il suffit de relancer l'indexation et la synchronisation des droits (§0, étapes 12 et 13). Le temps nécessaire dépend du corpus et n'a pas été mesuré pour une restauration |
+| Index BM25 | En mémoire de la RAG API | Oui : reconstruit à chaque démarrage et après chaque synchronisation |
+| Open WebUI (comptes, historique des conversations) | `openwebui_data` | **Non** |
+| n8n (workflows, identifiants) | `n8n_data` | **Non** (les workflows sont aussi dans le dépôt, les identifiants non) |
+| `.env`, `/etc/rag-certs` (clés des applications Entra) | Disque chiffré | Non pour le `.env` ; les certificats se régénèrent mais exigent de les réinscrire dans les App Registrations |
+| Phrase secrète du disque (§15.3) | **Hors de la VM** | Non : sans elle, la restauration ne sert à rien |
+
+Seuls Open WebUI, n8n et les secrets déterminent donc la perte tolérable. L'index, lui, se reconstruit.
+
+### Quatre points propres à la stack
+
+**1. La cohérence de la sauvegarde.** Une sauvegarde de VM prise pendant que la stack tourne est « crash-consistent » : équivalente à l'état après une coupure de courant. Qdrant s'y rétablit normalement grâce à son journal d'écriture, mais Open WebUI et n8n utilisent par défaut des bases locales (SQLite) qui peuvent être copiées en cours d'écriture. Deux précautions possibles, selon l'outil et l'hyperviseur (à vérifier dans leur documentation) :
+
+- le traitement tenant compte des applications, ou des scripts de pré-gel et de post-dégel de l'outil de sauvegarde, qui arrêtent brièvement les conteneurs (`docker compose stop` avant, `docker compose start` après) ;
+- ou une fenêtre de sauvegarde qui évite la synchronisation horaire du corpus (workflow n8n) et les heures d'usage.
+
+**2. Le disque chiffré à la restauration.** Le déverrouillage automatique repose sur le TPM virtuel de la VM (§15.3). Sur une VM restaurée, en particulier sur un autre hôte, le TPM peut être différent : le déverrouillage automatique échoue, et il faut la phrase secrète. La procédure de restauration doit donc prévoir : phrase conservée dans un coffre hors de la VM, déverrouillage par `rag-deverrouiller` (§15.3) lancé seul en SSH, puis ré-inscription du TPM (`systemd-cryptenroll`) si l'on veut retrouver le démarrage sans intervention. Ce comportement dépend de l'hyperviseur et **n'a pas été testé**.
+
+**3. Ce qui n'est pas dans la VM.** La sauvegarde de la VM ne contient pas :
+
+- la configuration du serveur de modèles : variables d'Ollama, services et fichier de clé d'API de vLLM (`/etc/vllm/vllm.env`, §2.4.4), les modèles eux-mêmes (retéléchargeables) ;
+- le compte `svc-rag`, ses groupes et le certificat de l'autorité de l'AD ;
+- les App Registrations Entra et leurs certificats si la Partie 3 est utilisée.
+
+Ces éléments appartiennent aux systèmes qui les portent et se sauvegardent avec eux. Dresser la liste de ce qu'il faut pouvoir recréer fait partie du dossier d'exploitation.
+
+**4. Le chiffrement et la durée de conservation.** Le fichier de sauvegarde contient le texte extrait de tous les documents indexés, y compris ceux dont l'accès est cloisonné. Il doit donc être chiffré par l'outil de sauvegarde, avec un mot de passe ou une clé conservés **hors** de la sauvegarde elle-même. Sa durée de conservation doit être décidée : une suppression à la source ne retire pas un document des sauvegardes déjà prises (§17.5).
+
+### Le test de restauration, à rejouer
+
+Une sauvegarde n'est validée qu'une fois restaurée. Dans le lab :
+
+1. Relever les compteurs avant la sauvegarde :
+
+```bash
+for c in documents documentation; do
+  echo -n "$c : "
+  curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/$c | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['points_count'])"
+done
+```
+
+2. Sauvegarder la VM avec l'outil de l'organisation, chiffrement activé.
+3. Restaurer la VM sous un autre nom, réseau isolé de la production.
+4. Si le disque ne se déverrouille pas seul : lancer `rag-deverrouiller` seul, en SSH, avec la phrase secrète.
+5. Vérifier que les conteneurs sont démarrés (`docker compose ps`), refaire les compteurs du point 1, puis poser une question dans Open WebUI avec un compte de test.
+6. Noter la durée totale et tout ce qui a demandé une intervention.
+
+**Attendu :** mêmes compteurs qu'avant la sauvegarde, comptes et historique d'Open WebUI présents, workflows n8n présents, réponse correcte à la question. Si les compteurs diffèrent, relancer la synchronisation (§0, étape 13) et relever les compteurs de nouveau.
+
+> **Après une restauration :** relancer `acl_resolver.py` pour vérifier que les droits sont cohérents avec les permissions actuelles du serveur de fichiers. Une sauvegarde peut dater de plusieurs heures, et des permissions modifiées entre-temps ne seraient pas reflétées (§3.6).
 
 ---
 
@@ -284,7 +335,7 @@ Les sauvegardes doivent être chiffrées avant de quitter le serveur, avec une c
 | Secrets et clés | `ls -l /root/rag-stack/.env /etc/rag-certs` | Liens vers le disque chiffré, `.env` en `600`, clés en `600` |
 | Démarrage | Redémarrage sans intervention | Disque monté, conteneurs démarrés |
 | Anciennes données | `ls /root/rag-stack`, `docker volume ls` | Plus de copie en clair, aucun reste de composant abandonné |
-| Sauvegardes | Procédure de l'organisation | Chiffrées, restauration testée |
+| Sauvegardes | Sauvegarde de la VM chiffrée (§15.5), phrase du disque hors de la VM | Restauration testée : compteurs identiques, disque déverrouillé, réponse correcte |
 
 ---
 

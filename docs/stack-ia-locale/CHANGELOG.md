@@ -4,6 +4,33 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.20.3] : Octobre 2026
+
+Rejeu complet du §0 sur une VM Ubuntu 26.04 neuve : corrections de `deploy.sh`, du Compose et du guide ; section sur les sauvegardes réécrite ; lecture paginée de l'index BM25 ; points de suivi ouverts.
+
+### Scripts
+
+- `deploy.sh` : confirmation par « o » ou « oui » avec message en cas de réponse non reconnue ; `chown` de `n8n_data` sur le vrai dossier (n8n tourne sous l'utilisateur 1000) ; dossier de documentation par défaut aligné sur l'indexeur ; `SP_EXCLUDE_DRIVES` entre apostrophes ; liste complète des paquets Python ; contrôles de fin de déploiement (RAG API joignable depuis son conteneur, quatre conteneurs en `running` sans redémarrage), liste des problèmes et sortie en erreur au lieu de « Déploiement terminé » ; résumé final décrivant les attributs LDAP et les tâches d'Open WebUI.
+- `docker-compose.yml` : tâches d'arrière-plan d'Open WebUI (titre, étiquettes, questions de suivi, autocomplétion) désactivées par variables d'environnement, état initial d'une base neuve.
+- `docker-compose.yml`, `env.example` : variable `N8N_WEBHOOK_URL` (adresse annoncée par n8n) ; valeur de `SP_EXCLUDE_DRIVES` entre apostrophes. `index.md` : exemple aligné.
+- `s10/charge_s10.py` (nouveau) : mesure de la charge, 1, 2, 4 puis 8 questions posées en même temps à la RAG API, avec durées médiane, P95 et maximale, erreurs et écarts de réponse par palier. Essayé contre un serveur simulé ; pas encore lancé sur la stack.
+- `api/anon_main.py` : index BM25 vide avant la première indexation signalé par un message clair au lieu de « division by zero ».
+- `api/anon_main.py` : le chargement des chunks pour l'index BM25 se fait par pages jusqu'à épuisement. Auparavant, un seul appel plafonnait la lecture à 100 000 chunks par collection, sans avertissement. Sans effet sur les corpus actuels.
+
+### Documentation
+
+- `section-00-quickstart.md` : statut du rejeu sur VM neuve ; étape 2 (certificats listés, exportés par empreinte, PKI à deux niveaux) ; étape 4 (fichier de chaîne, contrôle `s_client`) ; étape 6 (`chown` de `n8n_data`, encadré `deploy.sh`) ; étape 7 (`.env` derrière un lien, `up -d` et non `restart`, apostrophes, `N8N_WEBHOOK_URL`) ; étape 11 (`smbclient -W`) ; étape 14 (section « API compatibles OpenAI », attributs LDAP, tâches d'arrière-plan, contrôle du journal) ; étape 16 ; dépannage (n8n, `source .env`, santé de la RAG API, `smbclient`, index vide).
+- `section-01-prerequis.md` : §1.4 versions relevées sur VM neuve ; §1.5 statut et deux conséquences du `.env` en lien.
+- `section-03-docker-compose.md` : `WEBHOOK_URL=${N8N_WEBHOOK_URL}` ; `chown` sur le vrai dossier.
+- `section-14-purview.md` : §14.8.2 quatre appels par question avant réglage, appel résiduel.
+- `section-15-securite-donnees.md` : §15.3.3 contrôle `luksDump` qui affiche les deux emplacements et le jeton ; §15.3.5 redémarrage validé sur VM neuve.
+- `section-16-cloisonnement.md` : §16.3 rejeu sur déploiement neuf (72 verdicts, 0 fuite) ; §16.8 tâches d'arrière-plan.
+- `section-10-gpu.md` : §10.1, note sur la mémoire de la carte et le processeur graphique qui rend le bureau, avec la commande de mesure de base.
+- `section-15-securite-donnees.md` : §15.5 réécrite autour de la sauvegarde de la VM entière par l'outil de l'organisation (par exemple Veeam), avec chiffrement : ce qui se reconstruit (index Qdrant, index BM25) et ce qui ne se reconstruit pas (Open WebUI, n8n, secrets, phrase du disque), quatre points propres à la stack (cohérence de la sauvegarde, disque chiffré et TPM à la restauration, éléments hors de la VM, chiffrement et rétention), test de restauration à rejouer. Statut inchangé : non validé en lab. Checklist §15.6 alignée.
+- `suivi-corrections.md` : points 77 à 88 corrigés ; point 34 précisé ; points 75 (échelle de l'index), 76 (erreur d'Ollama sans message lisible), 89 (appel résiduel d'Open WebUI), 90 (refus non déterministe), 91 (rotation du mot de passe à valider) et 92 ouverts ; doc.5 mis à jour.
+
+---
+
 ## [2.20.2] : Octobre 2026
 
 Juge d'Ollama remplacé après mesure, et mesures d'Ollama avec plusieurs questions simultanées.

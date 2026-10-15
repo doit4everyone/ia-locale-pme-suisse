@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). Le script `deploy.sh`, qui automatise une partie des étapes, n'a pas encore été rejoué sur une VM neuve (encadré de l'étape 6).
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, test de cloisonnement). Ce rejeu a fait corriger le script et ce guide ; le script corrigé n'a pas encore été rejoué (encadré de l'étape 6).
 
 ---
 
@@ -145,19 +145,27 @@ Get-ADPrincipalGroupMembership -Identity "svc-rag" | Select Name
 
 La VM vérifie l'identité du contrôleur de domaine avant de lui envoyer le mot de passe de `svc-rag` (connexion LDAP chiffrée). Pour cela, elle a besoin du certificat de l'autorité de certification du domaine. Sans lui, tout le monde est refusé (erreur 403).
 
-```powershell
-# Ou par l'interface : certlm.msc → Autorités de certification racines de confiance
-# → Certificats → clic droit sur le certificat racine → Toutes les tâches → Exporter
-$cert = Get-ChildItem -Path Cert:\LocalMachine\Root |
-    Where-Object { $_.Subject -like "*votre-domaine*" } |
-    Select-Object -First 1
+Commencer par **lister** les certificats, sans rien exporter, pour choisir le bon en connaissance de cause :
 
-Export-Certificate -Cert $cert -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
+```powershell
+# Autorités racines, puis autorités intermédiaires
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*votre-domaine*" } |
+    Format-List Subject, Issuer, Thumbprint, NotAfter
+Get-ChildItem Cert:\LocalMachine\CA | Where-Object { $_.Subject -like "*votre-domaine*" } |
+    Format-List Subject, Issuer, Thumbprint, NotAfter
+```
+
+Une autorité **racine** a un `Issuer` identique à son `Subject`. Une autorité **intermédiaire** (émettrice) a pour `Issuer` la racine. Exporter ensuite chaque certificat par son empreinte (`Thumbprint`), jamais par « le premier de la liste » : la racine peut apparaître à plusieurs endroits des magasins de certificats, et un filtre sur le nom ne désigne alors pas un certificat unique.
+
+```powershell
+# Ou par l'interface : certlm.msc → clic droit sur le certificat → Toutes les tâches → Exporter
+$racine = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq "<EMPREINTE-RACINE>" }
+Export-Certificate -Cert $racine -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
 ```
 
 Copier `ad-root-ca.cer` sur la VM, dans `/tmp` (par `scp` ou par un partage). Il sera converti à l'étape 4.
 
-> **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter aussi le certificat intermédiaire. Les deux seront réunis dans le même fichier à l'étape 4.
+> **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter de la même façon le certificat de l'autorité intermédiaire (`C:\Temp\ad-sub-ca.cer`, magasin `Cert:\LocalMachine\CA`). Les deux seront réunis dans le même fichier à l'étape 4. Le lab compte deux niveaux : le certificat du contrôleur de domaine y est délivré directement par la racine, et le fichier de chaîne contient la racine et l'autorité intermédiaire.
 
 ---
 
@@ -318,7 +326,24 @@ openssl x509 -inform DER -in /tmp/ad-root-ca.cer -out /etc/ssl/certs/ad-chain.pe
 openssl x509 -in /etc/ssl/certs/ad-chain.pem -noout -subject -dates
 ```
 
-**Attendu :** le nom de l'autorité de certification et ses dates de validité. Avec une PKI à deux niveaux, convertir aussi le certificat intermédiaire, puis réunir les deux : `cat ca-root.pem ca-intermediate.pem > /etc/ssl/certs/ad-chain.pem`.
+**Attendu :** le nom de l'autorité de certification et ses dates de validité.
+
+Avec une **PKI à deux niveaux**, convertir aussi le certificat intermédiaire, puis réunir les deux dans le fichier de chaîne :
+
+```bash
+openssl x509 -inform DER -in /tmp/ad-root-ca.cer -out /tmp/ca-root.pem
+openssl x509 -inform DER -in /tmp/ad-sub-ca.cer  -out /tmp/ca-sub.pem
+cat /tmp/ca-root.pem /tmp/ca-sub.pem > /etc/ssl/certs/ad-chain.pem
+grep -c "BEGIN CERTIFICATE" /etc/ssl/certs/ad-chain.pem
+```
+
+**Attendu :** `2`. Contrôler ensuite que le contrôleur de domaine présente un certificat que cette chaîne valide :
+
+```bash
+openssl s_client -connect <NOM-DC>.votre-domaine.ch:636 -CAfile /etc/ssl/certs/ad-chain.pem </dev/null 2>/dev/null | grep -E "Verify return code|Verification"
+```
+
+**Attendu :** `Verify return code: 0 (ok)`. Une autre valeur indique un certificat manquant dans la chaîne, ou un nom de contrôleur qui ne correspond pas à celui du certificat.
 
 ---
 
@@ -348,7 +373,7 @@ mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
 ls /mnt/corpus-root/
 ```
 
-**Attendu :** les dossiers du partage. Rendre ensuite le montage permanent :
+**Attendu :** les dossiers du partage. Le domaine est donné par la ligne `domain=` du fichier d'identifiants : sans elle, le montage échoue sur un domaine Active Directory. Rendre ensuite le montage permanent :
 
 ```bash
 cat >> /etc/fstab << 'FSTAB'
@@ -374,6 +399,10 @@ cd ia-locale-pme-suisse/scripts/stack-ia-locale
 mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data} /root/rag-pipeline /var/log/rag
 mkdir -p /etc/rag-certs && chmod 700 /etc/rag-certs
 
+# n8n tourne sous l'utilisateur « node » (uid 1000) : sans ce droit, il redémarre en boucle (EACCES).
+# readlink -f : suivre le lien du §1.5 jusqu'au vrai dossier, sinon chown change le lien et pas le dossier.
+chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
+
 # La stack : Compose, configuration d'exemple, RAG API, service Purview
 cp docker-compose.yml env.example /root/rag-stack/
 mkdir -p /root/rag-stack/api /root/rag-stack/mip-service
@@ -392,7 +421,7 @@ ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 
 **Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py` et `test_cloisonnement.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie aussi que la stack joint le serveur de modèles. **Statut :** adapté aux deux moteurs dans cette version, mais pas encore rejoué de bout en bout sur une VM neuve. Pour un premier déploiement, la procédure manuelle reste la référence. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier.
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie aussi que la stack joint le serveur de modèles. Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les quatre conteneurs tournent sans redémarrage et que la RAG API répond ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». **Statut :** rejoué une fois sur une VM neuve, ce qui a fait corriger une dizaine de points (consignés dans le suivi des corrections) ; la version corrigée n'a pas encore été rejouée. Pour un premier déploiement, la procédure manuelle reste la référence. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier.
 
 ---
 
@@ -404,16 +433,21 @@ Le fichier `.env` réunit tous les réglages et secrets de la stack. Il ne doit 
 
 ```bash
 cd /root/rag-stack
-cp env.example .env
-chmod 600 .env
+# Avec le disque chiffré du §1.5, .env est un lien : on travaille sur le vrai fichier.
+# (sed -i remplace le fichier : appliqué au lien, il le détruirait et laisserait le .env en clair sur le disque système.)
+ENVF=$(readlink -f /root/rag-stack/.env)
+cp env.example "$ENVF"
+chmod 600 "$ENVF"
 for v in API_TOKEN ADMIN_TOKEN WEBUI_SECRET_KEY QDRANT_API_KEY LOG_HMAC_KEY MIP_TOKEN; do
-    sed -i "s|^${v}=.*|${v}=$(openssl rand -hex 32)|" .env
+    sed -i "s|^${v}=.*|${v}=$(openssl rand -hex 32)|" "$ENVF"
 done
-sed -i "s|^N8N_BASIC_AUTH_PASSWORD=.*|N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)|" .env
-grep -c changeme .env
+sed -i "s|^N8N_BASIC_AUTH_PASSWORD=.*|N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)|" "$ENVF"
+grep -c changeme "$ENVF"
 ```
 
-**Attendu :** `0` : plus aucune valeur d'exemple pour les secrets.
+**Attendu :** `0` : plus aucune valeur d'exemple pour les secrets. Sans disque chiffré, `readlink -f` rend simplement le chemin de `.env` : la suite est identique.
+
+Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`, ou `nano /srv/rag-donnees/secrets/.env`), puis **`docker compose up -d <service>`**, jamais `docker compose restart` : `restart` ne relit pas le `.env` et garde l'ancienne valeur, sans erreur.
 
 **2. Compléter le reste à la main** avec `nano .env` :
 
@@ -427,7 +461,10 @@ grep -c changeme .env
 | `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5 | |
 | `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTREDOMAINE` |
 | `SMB_SHARE` | Le partage à indexer | `//FILESERVER/FileService` |
-| `DOCUMENTATION_PATHS` | Le dossier de documentation technique à la racine du partage, s'il existe (§3.2) | `DOCUMENTATION` |
+| `DOCUMENTATION_PATHS` | Le dossier de documentation technique à la racine du partage, s'il existe (§3.2) ; plusieurs dossiers séparés par des virgules | `DOCUMENTATION` |
+| `N8N_WEBHOOK_URL` | L'adresse de la VM, avec le port de n8n, comme n8n l'annonce à ses utilisateurs | `http://<IP-VM>:5678` |
+
+Les valeurs qui contiennent un espace sont **entre apostrophes** dans `env.example` (par exemple `SP_EXCLUDE_DRIVES='Preservation Hold Library'`). Les conserver : sans elles, `source .env` échoue avec « command not found » sur le mot qui suit l'espace.
 
 **3. Le bloc du serveur de modèles**, en haut du fichier. Il contient deux blocs : **A pour Ollama**, actif par défaut, et **B pour vLLM**, désactivé (chaque ligne commence par `#`). **Un seul bloc doit être actif.**
 
@@ -515,6 +552,8 @@ pip install qdrant-client python-docx pdfplumber python-pptx httpx \
     ldap3 impacket rank-bm25 smbprotocol
 ```
 
+Les neuf paquets sont tous nécessaires : sans `smbprotocol` ou `rank-bm25`, par exemple, la synchronisation ou l'indexation échoue au premier import.
+
 Tester ensuite les deux accès de `svc-rag`, à l'annuaire et au partage :
 
 ```bash
@@ -522,10 +561,10 @@ set -a && source /root/rag-stack/.env && set +a
 
 LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem \
     ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} -D "${LDAP_BIND_DN}" -w "${LDAP_BIND_PWD}" 2>&1
-smbclient //<NOM-FILESERVER>/FileService -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
+smbclient //<NOM-FILESERVER>/FileService -W "${SMB_DOMAIN}" -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
 ```
 
-**Attendu :** `dn:CN=svc-rag,...`, puis la liste des dossiers du partage.
+**Attendu :** `dn:CN=svc-rag,...`, puis la liste des dossiers du partage. Sur un domaine Active Directory, `smbclient` exige `-W <DOMAINE>` : sans lui, l'erreur est `NT_STATUS_LOGON_FAILURE` alors que le mot de passe est correct.
 
 ---
 
@@ -584,29 +623,45 @@ Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau. Le premier compte cré�
 
 **Raccorder la RAG API :**
 
-1. *Settings → Admin → Connections → API compatibles OpenAI → +*
+1. *Settings → Admin → Connections*, section **API compatibles OpenAI** (et non la section Ollama, même si le moteur est Ollama : la RAG API parle le protocole OpenAI) → *+*
 2. URL : `http://rag-api:8080/v1`
 3. Clé API : la valeur de `API_TOKEN` du `.env` (`grep ^API_TOKEN /root/rag-stack/.env`)
-4. Enregistrer : le modèle `rag-api` apparaît dans la liste.
+4. Enregistrer : le modèle `rag-api` apparaît dans la liste. Une erreur de connexion à cette étape vient presque toujours d'une adresse ou d'une clé erronée, ou d'une connexion créée dans la mauvaise section.
 
 **Authentification par l'Active Directory** (facultative en lab, obligatoire en production) :
 
 1. *Settings → Admin → Authentication → LDAP*, activer LDAP
 2. Server Address : `<NOM-DC>.votre-domaine.ch`, port `636`, TLS activé
-3. Attribute : `userPrincipalName`
-4. Base DN : `DC=votre-domaine,DC=ch`
-5. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`, Bind Password : le mot de passe de `svc-rag`
-6. Certificate Path : `/etc/ssl/certs/ad-chain.pem`
+3. **Attribut pour le courriel** : `userPrincipalName`
+4. **Attribut pour le nom d'utilisateur** : `sAMAccountName`
+5. Base DN : `DC=votre-domaine,DC=ch`
+6. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`, Bind Password : le mot de passe de `svc-rag`
+7. Certificate Path : `/etc/ssl/certs/ad-chain.pem`
 
-> **`userPrincipalName` est obligatoire**, pas `sAMAccountName`. Open WebUI transmet l'adresse de l'utilisateur à la RAG API, qui la cherche dans ce champ de l'annuaire. Avec un autre attribut, la recherche échoue et tout le monde est refusé (403).
+> **L'attribut du courriel doit être `userPrincipalName`.** Open WebUI transmet l'adresse de l'utilisateur à la RAG API, qui la cherche dans ce champ de l'annuaire. Avec un autre attribut, la recherche échoue et tout le monde est refusé (403). L'attribut du **nom d'utilisateur** est celui que la personne tape pour se connecter : `sAMAccountName` permet de saisir `blaise` plutôt que `blaise@votre-domaine.ch`.
 
 **Rendre le modèle accessible :** *Settings → Admin → Models → rag-api → Make Public*, puis enregistrer.
+
+**Les tâches automatiques d'Open WebUI** (titres, étiquettes, questions de suivi) interrogent le modèle de la conversation, donc `rag-api` : une seule question de l'utilisateur déclenchait quatre appels dans le lab (un pour le titre, trois pour les suggestions), chacun avec sa recherche complète et son entrée dans le journal nLPD (§14.8.2). Le `docker-compose.yml` du dépôt les désactive (`ENABLE_TITLE_GENERATION`, `ENABLE_TAGS_GENERATION`, `ENABLE_FOLLOW_UP_GENERATION` à `false`). Ces variables ne fixent que l'**état initial** : Open WebUI les recopie dans sa base au premier démarrage, puis la base décide. Si la base existe déjà (Open WebUI démarré avant ce réglage), le faire une fois dans l'interface : *Settings → Admin → Interface*, désactiver les trois générations, et **enregistrer**.
+
+**Contrôle de la base :**
+
+```bash
+docker exec -i open-webui python3 - <<'PYEOF'
+import sqlite3
+c = sqlite3.connect('/app/backend/data/webui.db')
+for k, v, _ in c.execute("select * from config where key in ('task.title.enable','task.tags.enable','task.follow_up.enable','task.autocomplete.enable')"):
+    print(k, v)
+PYEOF
+```
+
+**Attendu :** `false` aux quatre lignes. Puis poser une question et comparer `wc -l /var/log/rag/rag-queries.jsonl` avant et après : une seule ligne ajoutée par question.
 
 ---
 
 ## Étape 15 : configurer n8n
 
-n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`.
+n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 (étape 6) : corriger par `chown -R 1000:1000 /srv/rag-donnees/n8n_data` puis `docker compose up -d n8n`.
 
 1. **Créer le compte d'envoi des courriels :** *Settings → Credentials → Add credential → SMTP* (serveur, port, utilisateur et mot de passe de l'expéditeur).
 2. **Importer les deux workflows** du dossier `scripts/N8N/` du dépôt (*Workflows → Import from file*) : `n8n-sync-corpus.json` et `n8n-rappel-rotation-svc-rag.json`.
@@ -634,7 +689,7 @@ docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -10
 docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json
 ```
 
-**Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4).
+**Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4). Ce test vérifie les **droits** (le filtre sur les groupes, les refus nominatifs, Purview), pas la réponse du modèle : il dure quelques secondes. Dans le lab, sur le déploiement neuf : 72 verdicts, 70 `OK`, 2 `INFO`, 0 `FUITE` (§16.3).
 
 ### Checklist
 
@@ -763,6 +818,35 @@ Les messages rencontrés en lab et leur solution sont au §2.4.9.
 
 Une synchronisation est peut-être en cours (`docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -3`). Si les lenteurs persistent au repos : la mémoire de la carte déborde (§10.2).
 
+**n8n redémarre en boucle (`EACCES: permission denied`)**
+
+Le dossier `n8n_data` n'appartient pas à l'utilisateur 1000, sous lequel tourne n8n. Avec le disque chiffré, c'est le dossier réel qu'il faut corriger, pas le lien :
+
+```bash
+chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
+cd /root/rag-stack && docker compose up -d n8n
+```
+
+**`source .env` répond « command not found »**
+
+Une valeur du `.env` contient un espace sans apostrophes (`SP_EXCLUDE_DRIVES` le plus souvent). Mettre la valeur entre apostrophes, comme dans `env.example`.
+
+**Une modification du `.env` n'est pas prise en compte**
+
+`docker compose restart` ne relit pas le `.env`. Utiliser `docker compose up -d <service>`, qui recrée le conteneur.
+
+**La RAG API ne répond pas aux contrôles de santé depuis la VM**
+
+Son port 8080 n'est pas publié sur le réseau : tester depuis l'intérieur de Docker.
+
+```bash
+docker exec rag-api python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health', timeout=5).read().decode())"
+```
+
+**`smbclient` : `NT_STATUS_LOGON_FAILURE` avec un mot de passe correct**
+
+Ajouter le domaine : `smbclient //<NOM-FILESERVER>/FileService -W <DOMAINE> -U "svc-rag%<mot-de-passe>"`.
+
 **Le montage du partage tombe après un redémarrage**
 
 ```bash
@@ -773,7 +857,7 @@ Vérifier le mot de passe dans `/etc/smbcredentials/svc-rag` (rotation non repor
 
 **La recherche par mots-clés est vide au démarrage (BM25)**
 
-Qdrant a démarré après la RAG API. Attendre 30 secondes, puis :
+Avant la première indexation, l'index est vide : le journal dit « Aucun chunk dans Qdrant : index vide », ce qui est normal. Il se remplit à la première synchronisation (`/admin/sync`). Si l'index reste vide alors que Qdrant contient des extraits, Qdrant a démarré après la RAG API. Attendre 30 secondes, puis :
 
 ```bash
 docker compose restart rag-api

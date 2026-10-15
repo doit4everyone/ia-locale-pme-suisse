@@ -202,7 +202,8 @@ logger = logging.getLogger(__name__)
 # Index BM25 : chargé au démarrage depuis Qdrant
 # ─────────────────────────────────────────
 # L'index BM25 tient en RAM : ~1 Mo pour 1 000 chunks,
-# ~200 Mo pour 50 000 chunks. Au-delà de 200 000 chunks,
+# ~200 Mo pour 50 000 chunks (estimations, non mesurées au-delà de quelques
+# milliers de chunks). Au-delà de 200 000 chunks,
 # préférer Qdrant BM42 (sparse vectors, index sur disque).
 _bm25_index: BM25Okapi | None = None
 _bm25_chunks: list[dict] = []
@@ -277,11 +278,20 @@ def get_collection_for_source(source_name: str) -> str:
 def _load_collection_chunks(collection_name: str) -> list[dict]:
     """Charge les chunks d'une collection Qdrant pour l'index BM25."""
     try:
-        points, _ = qdrant.scroll(
-            collection_name=collection_name,
-            limit=100_000,
-            with_payload=True,
-        )
+        # Lecture par pages jusqu'à épuisement : un seul appel plafonnait la lecture
+        # à 100 000 chunks par collection, sans avertissement.
+        points = []
+        offset = None
+        while True:
+            page, offset = qdrant.scroll(
+                collection_name=collection_name,
+                limit=2_000,
+                offset=offset,
+                with_payload=True,
+            )
+            points.extend(page)
+            if offset is None:
+                break
         return [
             {
                 # Empreinte du texte (chunk_key) : clé de fusion des classements et
@@ -315,6 +325,12 @@ def build_bm25_index() -> None:
         docs     = _load_collection_chunks(COLLECTION)
         docutech = _load_collection_chunks(DOCUMENTATION_COLLECTION)
         _bm25_chunks = docs + docutech
+        if not _bm25_chunks:
+            # Corpus vide (avant la première indexation) : pas d'index, pas d'erreur.
+            logger.info("[BM25] Aucun chunk dans Qdrant : index vide, "
+                        "recherche vectorielle seule jusqu'à la première indexation.")
+            _bm25_index = None
+            return
         tokenized = [c["text"].lower().split() for c in _bm25_chunks]
         _bm25_index = BM25Okapi(tokenized)
         logger.info(

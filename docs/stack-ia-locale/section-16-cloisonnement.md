@@ -80,6 +80,8 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 
 Les cas du lab reprennent les matrices de §9 (DENY nominatif), §13 (quatre modes de partage SharePoint, site ouvert à tous) et §14 (trois étiquettes chiffrées), plus le cas de §16.5. Résultat : **40 sur 40**, puis **44 sur 44** avec le cas ajouté en v2.18.2, et la colonne « après ACL » montre, par exemple, le document Finances chiffré passer la première condition pour le comptable (il a accès au site), puis être retiré par Purview seul.
 
+**Rejeu sur un déploiement neuf (octobre 2026).** Le test a été rejoué, en mode accès, sur la VM déployée à partir de zéro pour valider le §0 : 70 documents indexés (1692 extraits), droits résolus, `/admin/sync`, puis 9 comptes de test sur 8 cas. Résultat : **72 verdicts, dont 70 `OK`, 2 `INFO` et 0 `FUITE`**. Les deux `INFO` sont deux cas dont l'attendu avait été laissé à « ? » faute de savoir le résultat juste : le test les a tranchés (refus pour un compte de la comptabilité sur un budget, accès pour un compte client sur un contrat). Ce rejeu ne porte pas sur le mode complet, qui interroge le modèle et dure 20 à 30 minutes.
+
 Le mode complet garde un intérêt : il mesure la qualité de la recherche. Ses cas « manqués » (document autorisé absent des sources) ne sont pas un sujet de sécurité, mais un indicateur pour le §10.
 
 ## §16.4 Le contrôle après chaque synchronisation
@@ -151,7 +153,7 @@ En figeant les versions (§3.4), le lab est passé d'une construction de dévelo
 | Constat | Cause | Correction |
 |---|---|---|
 | Plus aucune réponse affichée, alors que la RAG API répondait (code 200) | La version publiée demande la réponse **en flux** et n'affiche rien si elle reçoit un objet JSON simple ; la RAG API ignorait la demande | La RAG API respecte désormais la demande de flux. La réponse est calculée en entier, contrôles compris, puis envoyée en un seul fragment : un vrai flux mot par mot enverrait le texte avant le contrôle d'ancrage |
-| Deux requêtes par question | Tâches d'arrière-plan d'Open WebUI (titres, suggestions) adressées au modèle de la conversation | Désactivables dans **Interface** (§14.8.2) ; elles doublent le calcul sans fausser les réponses |
+| Plusieurs requêtes par question | Tâches d'arrière-plan d'Open WebUI (titres, étiquettes, questions de suivi) adressées au modèle de la conversation : quatre appels par question dans le lab | Désactivées par le Compose du dépôt pour un déploiement neuf, ou dans **Interface** pour une base existante (§14.8.2, §0 étape 14) ; elles multiplient le calcul et polluent le journal nLPD, sans fausser les réponses |
 
 La leçon tient en une règle : **une mise à jour d'Open WebUI, de n8n ou de Qdrant ne s'installe pas sur une invitation à mettre à jour**. Elle se fait sur décision, puis se revalide : connexions d'Open WebUI, transmission de l'identité (`[AUTH] /v1` dans les journaux), test de cloisonnement, synchronisation.
 

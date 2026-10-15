@@ -33,6 +33,9 @@ ok()    { echo -e "${GREEN}[OK]${NC}   $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERREUR]${NC} $*"; exit 1; }
 ask()   { echo -e "${YELLOW}[?]${NC} $*"; }
+# Une réponse affirmative : la lettre o, « oui » ou y (majuscules acceptées).
+# Le chiffre zéro, voisin de la lettre o sur le clavier, n'est pas reconnu.
+est_oui() { [[ "$1" =~ ^([oO]|[oO][uU][iI]|[yY]|[yY][eE][sS])$ ]]; }
 
 # ─────────────────────────────────────────
 # Vérifications préalables (avant toute modification du système)
@@ -193,10 +196,10 @@ MIP_TOKEN="$(openssl rand -hex 32)"
 echo ""
 echo -e "${BLUE}-- Documentation technique --${NC}"
 
-ask "Dossier de documentation technique a la racine du partage (ex: DOIT4EVERYONE, laisser vide = DOCUMENTATION) :"
+ask "Dossier de documentation technique a la racine du partage (ex: DOIT4EVERYONE, laisser vide = DOIT4EVERYONE) :"
 read -r DOC_PATHS_INPUT
-DOCUMENTATION_PATHS="${DOC_PATHS_INPUT:-DOCUMENTATION}"
-[ -z "$DOC_PATHS_INPUT" ] && warn "DOCUMENTATION_PATHS fixe a DOCUMENTATION. Adapter si aucun dossier de ce nom n'existe sur le partage."
+DOCUMENTATION_PATHS="${DOC_PATHS_INPUT:-DOIT4EVERYONE}"
+[ -z "$DOC_PATHS_INPUT" ] && warn "DOCUMENTATION_PATHS fixe a DOIT4EVERYONE. Adapter si aucun dossier de ce nom n'existe sur le partage : la collection documentation resterait vide."
 
 echo ""
 echo "============================================================"
@@ -213,9 +216,15 @@ echo "  Documentation   : $DOCUMENTATION_PATHS"
 echo "  Tokens          : générés (consulter /root/rag-stack/.env apres le deploiement)"
 echo "============================================================"
 echo ""
-ask "Confirmer le deploiement ? [o/N]"
+ask "Confirmer le deploiement ? [o/N] (la lettre o pour oui)"
 read -r CONFIRM
-[[ "$CONFIRM" =~ ^[oO]$ ]] || { info "Annulé."; exit 0; }
+if ! est_oui "$CONFIRM"; then
+    case "$CONFIRM" in
+        ""|[nN]|[nN][oO]|[nN][oO][nN]) info "Annulé." ;;
+        *) warn "Réponse « $CONFIRM » non reconnue (la lettre o confirme). Déploiement annulé." ;;
+    esac
+    exit 0
+fi
 
 # ─────────────────────────────────────────
 # Étape 1 : renommer les fichiers anon_*
@@ -252,14 +261,18 @@ info "Étape 2 : creation des répertoires..."
 if ! mountpoint -q /srv/rag-donnees 2>/dev/null || [ ! -L /root/rag-stack/.env ]; then
     warn "Disque de données chiffré non préparé (/srv/rag-donnees non monté, ou liens de §1.5 absents)."
     warn "Les secrets et les données seraient écrits en clair sur le disque système."
-    printf "Continuer quand même ? (o/N) : "
+    printf "Continuer quand même ? (o/N, la lettre o pour oui) : "
     read -r CONTINUER_SANS_CHIFFREMENT
-    [[ "$CONTINUER_SANS_CHIFFREMENT" =~ ^[oO]$ ]] || error "Déploiement interrompu : préparer d'abord le disque chiffré (§1.5)."
+    est_oui "$CONTINUER_SANS_CHIFFREMENT" || error "Déploiement interrompu : préparer d'abord le disque chiffré (§1.5)."
 else
     ok "Disque de données chiffré monté, liens en place"
 fi
 
 mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
+# n8n tourne sous l'utilisateur node (uid 1000) : sans ce chown, le dossier reste
+# la propriété de root et n8n redémarre en boucle (EACCES sur /home/node/.n8n).
+# On vise la cible réelle (disque chiffré du §1.5) : n8n_data est un lien.
+chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
 mkdir -p /etc/smbcredentials
@@ -419,7 +432,7 @@ SP_CLIENT_ID=
 SP_CERT_THUMBPRINT=
 SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
 SP_SITES=
-SP_EXCLUDE_DRIVES=Preservation Hold Library
+SP_EXCLUDE_DRIVES='Preservation Hold Library'
 SP_MAX_FILE_MB=50
 SYNC_TIMEOUT_SHAREPOINT=900
 
@@ -480,7 +493,7 @@ else
     echo ""
     ask "Continuer sans certificat (lab : connexion LDAPS sans validation) ? [o/N]"
     read -r SKIP_CERT
-    if [[ "$SKIP_CERT" =~ ^[oO]$ ]]; then
+    if est_oui "$SKIP_CERT"; then
         touch /etc/ssl/certs/ad-chain.pem
         warn "Fichier vide créé. auth.py passera en CERT_NONE : connexion LDAPS active, certificat non verifie (lab uniquement)."
     else
@@ -548,10 +561,11 @@ cd /root/rag-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Dependances de indexer.py et acl_resolver.py uniquement.
-# ldap3, rank-bm25, httpx sont dans l'image rag-api, inutiles sur l'hote.
-# httpx est importé directement par indexer.py (non garanti comme dépendance transitive)
-pip install -q qdrant-client python-docx pdfplumber python-pptx httpx
+# Dépendances de indexer.py et acl_resolver.py, lancés aussi depuis l'hôte (§0, étapes 12 et 13).
+# Même liste que l'étape 11 du §0 : sans ldap3, impacket et smbprotocol, acl_resolver.py échoue.
+# httpx est importé directement par indexer.py (non garanti comme dépendance transitive).
+pip install -q qdrant-client python-docx pdfplumber python-pptx httpx \
+    ldap3 impacket rank-bm25 smbprotocol
 
 ok "Environnement Python prêt"
 
@@ -560,15 +574,36 @@ ok "Environnement Python prêt"
 # ─────────────────────────────────────────
 info "Étape 10 : validation..."
 
-sleep 5
-HEALTH=$(docker compose -f /root/rag-stack/docker-compose.yml exec -T n8n \
-    wget -qO- http://rag-api:8080/health 2>/dev/null || echo "")
+PROBLEMES=""
+
+# La RAG API met quelques dizaines de secondes à démarrer : on attend sa réponse
+# jusqu'à 120 secondes, depuis son propre conteneur (le contrôle ne doit pas
+# dépendre de n8n, qui peut lui-même être en panne).
+HEALTH=""
+for i in $(seq 1 24); do
+    HEALTH=$(docker exec rag-api python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8080/health', timeout=5).read().decode())" 2>/dev/null || echo "")
+    echo "$HEALTH" | grep -q '"status":"ok"' && break
+    sleep 5
+done
 
 if echo "$HEALTH" | grep -q '"status":"ok"'; then
     ok "RAG API répond : $HEALTH"
 else
-    warn "RAG API ne répond pas encore. Vérifier : docker logs rag-api"
+    PROBLEMES="${PROBLEMES}  - RAG API sans réponse après 120 s (docker logs rag-api --tail 30)\n"
 fi
+
+# Les quatre conteneurs doivent tourner, sans redémarrage. Un conteneur qui plante
+# au démarrage (n8n sans droits sur son dossier, par exemple) redémarre en boucle
+# sans que « docker compose up -d » le signale.
+sleep 20
+for C in qdrant rag-api open-webui n8n; do
+    ETAT=$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$C" 2>/dev/null || echo "absent 0")
+    if [ "$ETAT" = "running 0" ]; then
+        ok "Conteneur $C démarré"
+    else
+        PROBLEMES="${PROBLEMES}  - conteneur $C : état « ${ETAT} » (état et nombre de redémarrages ; docker logs $C --tail 30)\n"
+    fi
+done
 
 # Le serveur de modèles doit être joint DEPUIS le conteneur, pas seulement depuis la VM
 for VAR_URL in LLM_BASE_URL EMBED_BASE_URL; do
@@ -591,7 +626,16 @@ QDRANT=$(curl -s -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/collectio
 if echo "$QDRANT" | grep -q '"status":"ok"'; then
     ok "Qdrant accessible"
 else
-    warn "Qdrant ne répond pas encore."
+    PROBLEMES="${PROBLEMES}  - Qdrant ne répond pas (docker logs qdrant --tail 30)\n"
+fi
+
+# Un déploiement incomplet ne doit pas se terminer par « Déploiement terminé »
+if [ -n "$PROBLEMES" ]; then
+    echo ""
+    echo -e "${RED}[ERREUR]${NC} Déploiement incomplet :"
+    printf "%b" "$PROBLEMES"
+    echo "  Corriger la cause, puis relancer : cd /root/rag-stack && docker compose up -d"
+    exit 1
 fi
 
 # ─────────────────────────────────────────
@@ -612,8 +656,12 @@ echo "    Extension Entra ID     : ENTRA_* dans le .env, voir §11 du guide"
 echo "    Synthèse Teams         : TEAMS_* dans le .env, voir §12 du guide"
 echo ""
 echo "  Etapes suivantes :"
-echo "  1. Configurer l'authentification LDAP dans Open WebUI (§0 du guide)"
-echo "     Attribut email : userPrincipalName"
+echo "  1. Configurer Open WebUI (§0, étape 14) : connexion à la RAG API dans la section"
+echo "     API compatibles OpenAI, authentification LDAP (attribut pour le courriel :"
+echo "     userPrincipalName ; attribut pour le nom d'utilisateur : sAMAccountName), puis"
+echo "     puis vérifier que la génération de titre, d'étiquettes et de questions de suivi"
+echo "     est désactivée (le Compose le fait au premier démarrage ; sinon : Settings >"
+echo "     Admin > Interface, et enregistrer). Sans cela, chaque question en déclenche d'autres"
 echo "  2. Lancer la premiere indexation :"
 echo "     cd /root/rag-pipeline && source .venv/bin/activate"
 echo "     set -a && source /root/rag-stack/.env && set +a"

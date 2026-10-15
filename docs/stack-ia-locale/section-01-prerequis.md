@@ -116,13 +116,13 @@ usermod -aG docker $USER
 docker --version && docker compose version
 ```
 
-Versions validées sur cette configuration : **Docker 29.7.2**, **Docker Compose 5.5.0**.
+Les commandes se lancent en root (`sudo -i`). Versions validées : **Docker 29.7.2** et **Compose 5.5.0** sur la première installation du lab, puis **Docker 29.9.0** et **Compose 5.6.0** sur une VM neuve, où le dépôt de Docker pour Ubuntu 26.04 (`resolute`) a fourni les versions les plus récentes sans autre manipulation.
 
 ---
 
 ## §1.5 Disque de données chiffré, avant le déploiement
 
-**Statut :** principe et procédure de chiffrement validés en lab (§15.3) ; préparation **avant** le premier déploiement à valider sur une VM neuve.
+**Statut :** principe et procédure de chiffrement validés en lab (§15.3), et préparation **avant** le premier déploiement validée sur une VM neuve (octobre 2026) : disque ajouté, chiffré, TPM inscrit, redémarrage avec déverrouillage automatique, Docker démarré sur le disque monté. Le redémarrage avec la stack complète en service n'a pas été rejoué sur cette VM.
 
 La stack stocke des extraits de tous les documents indexés, l'historique des conversations, des identifiants et les clés privées des applications Entra. Tout cela doit être sur un disque chiffré **dès sa création** : un chiffrement ajouté après coup laisse des copies en clair sur le disque système, que la suppression n'efface pas (§15.3.4). Le disque chiffré se prépare donc **ici**, avant `deploy.sh`, avant que le `.env` et les clés n'existent.
 
@@ -143,13 +143,15 @@ mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/r
 chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs
 mkdir -p /root/rag-stack
 for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
-ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env
+ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env     # lien vers un fichier qui n'existe pas encore : normal
 ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
 ln -s /srv/rag-donnees/log-rag           /var/log/rag
 ls -l /root/rag-stack /etc/rag-certs /var/log/rag
 ```
 
 `deploy.sh` écrit ensuite le `.env`, les données et les journaux **à travers ces liens**, directement sur le disque chiffré. Les certificats des applications Entra, créés aux sections §11 à §14, iront de même dans `/etc/rag-certs`. Docker ne démarrant qu'avec le disque monté (§15.3.3), un lien sans sa cible ne peut pas se produire en fonctionnement normal.
+
+**Deux conséquences à connaître.** Le `.env` est un lien vers un fichier qui n'existe pas encore : `cp` refuse d'y écrire tant qu'on le désigne par le lien, et `sed -i` **remplace** le lien par un vrai fichier, sur le disque système, en clair. On désigne donc toujours le vrai chemin (`/srv/rag-donnees/secrets/.env`, ou `$(readlink -f /root/rag-stack/.env)`), comme à l'étape 7 du §0. De même, le dossier `n8n_data` doit appartenir à l'utilisateur 1000 : `chown -R 1000:1000 /srv/rag-donnees/n8n_data` (sur le vrai dossier, pas sur le lien).
 
 > **Le groupe `docker` équivaut à root** : un compte qui en est membre peut lire toutes les variables des conteneurs (`docker inspect`) et monter n'importe quel fichier de la VM. N'y ajouter aucun compte ordinaire. La commande `usermod -aG docker $USER` de §1.4, exécutée en root, ne concerne que root.
 

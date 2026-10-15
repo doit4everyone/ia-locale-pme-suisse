@@ -265,7 +265,7 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - N8N_HOST=0.0.0.0
-      - WEBHOOK_URL=http://<IP-VM>:5678
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - N8N_SECURE_COOKIE=false
     volumes:
       - ./n8n_data:/home/node/.n8n
@@ -396,7 +396,8 @@ sudo chmod 750 /var/log/rag
 [ -f /etc/ssl/certs/ad-chain.pem ] || sudo touch /etc/ssl/certs/ad-chain.pem
 
 # Corriger les permissions n8n avant le premier lancement
-sudo chown -R 1000:1000 ~/rag-stack/n8n_data
+# (readlink -f : si n8n_data est un lien vers le disque chiffré du §1.5, corriger le vrai dossier)
+sudo chown -R 1000:1000 "$(readlink -f ~/rag-stack/n8n_data)"
 
 cd ~/rag-stack
 
@@ -419,7 +420,7 @@ docker compose logs -f
 docker compose down
 ```
 
-> **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`.
+> **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`. Si `n8n_data` est un lien (§1.5), `chown -R` appliqué au lien ne change pas le dossier : d'où `readlink -f`. L'adresse annoncée par n8n vient de `N8N_WEBHOOK_URL` dans le `.env`.
 >
 > **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.2) avant toute connexion LDAP.
 

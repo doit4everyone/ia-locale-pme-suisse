@@ -100,6 +100,8 @@ La carte retombe à 52 °C quelques secondes après la charge. Elle commencerait
 
 `ollama ps` doit afficher `100% GPU` pour chaque modèle placé sur la carte. Un partage du type `20%/80% CPU/GPU` signifie que le modèle déborde : la première mesure à prendre est alors de réduire la fenêtre de contexte (`LLM_NUM_CTX=12288` couvre largement les questions, qui envoient 4 000 à 6 000 tokens).
 
+> **La mémoire de l'affichage dépend de la configuration de Windows.** Les chiffres de ce chapitre ont été relevés avec le bureau sur la carte : Edge et les autres programmes graphiques y occupaient environ 150 Mo, et la mémoire disponible était de 14,8 Go. Après une mise à jour de Windows en octobre 2026, ces processus graphiques sont passés sur le processeur graphique intégré : sans aucun modèle chargé, `nvidia-smi` affiche alors 37 Mio utilisés et aucun processus, soit environ 16,2 Go libres. Cette marge supplémentaire d'environ 1,4 Go n'a pas été remesurée avec les modèles. Pour connaître la valeur de base de votre machine, arrêter les modèles (`ollama stop`, un par un) puis lancer `nvidia-smi --query-gpu=memory.used,memory.total --format=csv`.
+
 ### Une décision révisée par la mesure
 
 Le placement prévu laissait le juge et l'embedding sur le CPU, pour réserver la carte au modèle principal. La RAG API le permet par deux réglages, sans effet tant qu'aucune carte n'est présente :

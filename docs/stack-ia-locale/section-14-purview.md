@@ -379,9 +379,9 @@ Q3 est volontairement écrite **sans accents** : voir §14.8.1.
 
 ### §14.8.2 Tâches d'arrière-plan d'Open WebUI
 
-Open WebUI génère automatiquement titres et suggestions en interrogeant le modèle de la conversation, c'est-à-dire `rag-api`. Chaque question déclenche alors **deux** recherches complètes (recherche, Purview, génération, juge), deux entrées dans le journal des requêtes, et deux décisions Purview simultanées, avant que le cache ne soit rempli.
+Open WebUI génère automatiquement titres, étiquettes et suggestions en interrogeant le modèle de la conversation, c'est-à-dire `rag-api`. Chaque question déclenche alors plusieurs recherches complètes (recherche, Purview, génération, juge), autant d'entrées dans le journal des requêtes, et des décisions Purview simultanées, avant que le cache ne soit rempli. Au déploiement d'une VM neuve, le lab en comptait **quatre par question** : un appel pour le titre, trois pour les questions de suivi.
 
-Correction : dans **Réglages d'administration** → **Interface**, désactiver la génération automatique des titres et des suggestions, ou choisir un modèle de tâche Ollama direct.
+Correction : le `docker-compose.yml` du dépôt désactive ces tâches par variables d'environnement (`ENABLE_TITLE_GENERATION`, `ENABLE_TAGS_GENERATION`, `ENABLE_FOLLOW_UP_GENERATION`, `ENABLE_AUTOCOMPLETE_GENERATION`). Dans la version `v0.11.3`, ces variables ne fixent que l'état initial : Open WebUI les recopie dans sa table `config` à la création de la base, puis lit la base. Sur une base existante, la désactivation se fait dans **Réglages d'administration** → **Interface** (ou en choisissant un modèle de tâche Ollama direct), et se contrôle dans la table `config` (§0, étape 14). Sur une VM neuve du lab, la base montrait ces réglages encore actifs (`true`) : les variables n'avaient pas été posées avant le premier démarrage.
 
 ### §14.8.3 Constats de gouvernance
 

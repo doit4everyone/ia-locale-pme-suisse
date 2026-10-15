@@ -285,7 +285,7 @@ SP_CLIENT_ID=<ID-APPLICATION-SHAREPOINT>
 SP_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT-SHAREPOINT>
 SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
 SP_SITES=<URL des sites, séparées par des virgules>
-SP_EXCLUDE_DRIVES=Preservation Hold Library
+SP_EXCLUDE_DRIVES='Preservation Hold Library'
 SP_MAX_FILE_MB=50
 ```
 

@@ -40,7 +40,7 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - N8N_HOST=0.0.0.0
-      - N8N_WEBHOOK_URL=http://<IP-VM>:5678
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - N8N_SECURE_COOKIE=false
     volumes:
       - ./n8n_data:/home/node/.n8n
@@ -217,6 +217,14 @@ services:
       - ENABLE_OLLAMA_API=false
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      # Tâches d'arrière-plan (titre, étiquettes, questions de suivi) : chacune adresse un
+      # appel complet à rag-api (recherche, Purview, génération, juge) et une entrée au
+      # journal nLPD. Désactivées ici. Comme ENABLE_OLLAMA_API, ces variables ne fixent que
+      # l'état initial : une base Open WebUI existante garde ses réglages (Admin > Interface).
+      - ENABLE_TITLE_GENERATION=false
+      - ENABLE_TAGS_GENERATION=false
+      - ENABLE_FOLLOW_UP_GENERATION=false
+      - ENABLE_AUTOCOMPLETE_GENERATION=false
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
     volumes:
       - ./openwebui_data:/app/backend/data
