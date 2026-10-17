@@ -70,6 +70,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `Set-AccesIndexationRAG.ps1` | Lecture seule du compte d'indexation sur les dossiers du partage, par un groupe dédié, héritage coupé compris ; affiche et contrôle les permissions du partage | Sur le serveur de fichiers, voir §5.2.4 et §16.5 du guide |
 | [`tests-apres-modification.md`](tests-apres-modification.md) | Procédure de tests après toute modification : démarrage, identité, qualité, refus, cloisonnement, synchronisation | Sur la VM, voir §8.9 et §16 |
 | `test_cloisonnement.py` | Test de non-divulgation : mode accès (filtres, quelques secondes) ou complet (questions) | Dans le conteneur `rag-api`, voir §16 |
+| `test_citations.py` | Tests unitaires du contrôle des citations (accents, ambiguïté, source inventée), sans modèle ni Qdrant | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py`, voir §0 étape 16 |
 | [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
 | [`s10/jeu_questions_s10.json`](s10/jeu_questions_s10.json) | Jeu de 17 questions du corpus de démonstration, avec leurs critères ; à adapter à votre corpus | Lu par `mesure_s10.py` |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
@@ -126,7 +127,7 @@ EMBED_MODEL=nomic-embed-text
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
 DOCUMENTATION_COLLECTION=documentation  # Collection pour la documentation technique
-DOCUMENTATION_PATHS=DOIT4EVERYONE       # Dossiers racine routés vers DOCUMENTATION_COLLECTION
+DOCUMENTATION_PATHS=                    # Dossiers racine routés vers DOCUMENTATION_COLLECTION (vide = aucun ; lab : DOIT4EVERYONE)
 ORG_NAME=<Nom de l'organisation>
 API_TOKEN=<token fort>
 ADMIN_TOKEN=<token fort distinct>
@@ -224,7 +225,7 @@ CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8         # Seuil minimal en mots pour conserver un chunk (8 préserve les sections courtes des .md)
 DOCUMENTATION_COLLECTION=documentation
-DOCUMENTATION_PATHS=DOIT4EVERYONE
+DOCUMENTATION_PATHS=                      # même valeur que dans le .env de la stack
 ```
 
 ---

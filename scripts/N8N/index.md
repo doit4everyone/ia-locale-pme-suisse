@@ -24,7 +24,9 @@ description: "Workflows n8n importables du guide de déploiement stack IA locale
 
 Avant l'import, créer dans n8n l'identifiant **Header Auth** `RAG API - ADMIN_TOKEN` (*Name* `Authorization`, *Value* `Bearer <ADMIN_TOKEN>`, domaine autorisé `rag-api`) : les nœuds HTTP l'utilisent, et le jeton n'est écrit dans aucun workflow (§16.7).
 
-Importer ensuite par **Import from File**, puis sélectionner dans chaque nœud l'identifiant Header Auth et l'identifiant SMTP, et renseigner les adresses (`<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>`). Les workflows sont importés désactivés : les activer une fois vérifiés.
+Créer aussi l'identifiant **SMTP** de la boîte d'envoi (avec Exchange Online : `smtp.office365.com`, port 587, *SSL/TLS* désactivé, *Disable STARTTLS* désactivé, *Client Host Name* vide).
+
+Importer ensuite par **Import from File**, puis sélectionner **dans chaque nœud** l'identifiant Header Auth et l'identifiant SMTP : ceux référencés dans les fichiers n'existent pas chez vous (*Credentials not found*). Renseigner les adresses : `<EMAIL_EXPEDITEUR>` exactement égal à la boîte authentifiée par SMTP (Exchange Online refuse une autre adresse : `SendAsDenied`), `<EMAIL_DESTINATAIRE>` une boîte interne. Les workflows sont importés désactivés : les publier une fois vérifiés. Le Compose du dépôt règle n8n sur le fuseau `Europe/Zurich` : les déclenchements planifiés suivent l'heure suisse. Procédure complète : §0, étape 15.
 
 Pour remplacer un workflow existant sans en créer un second : ouvrir l'existant, sélectionner tous les nœuds, les supprimer, puis coller le contenu du fichier sur le canevas.
 

@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta
+# Version : beta (2.20.4)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -11,6 +11,7 @@
 #   - Docker et Docker Compose installés (voir §1.4 du guide)
 #   - Compte svc-rag créé dans l'AD avec les bons groupes (voir §5.2)
 #   - Certificat CA du DC exporté si disponible (voir §9.2)
+#   - DNS de la VM : uniquement les serveurs DNS du domaine (§0, étape 4)
 #   - Serveur de modèles prêt et joignable depuis la VM (voir §2 du guide) :
 #     Ollama  : ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b-instruct
 #     vLLM    : serveurs de génération (port 8000) et d'embedding (port 8001)
@@ -36,6 +37,19 @@ ask()   { echo -e "${YELLOW}[?]${NC} $*"; }
 # Une réponse affirmative : la lettre o, « oui » ou y (majuscules acceptées).
 # Le chiffre zéro, voisin de la lettre o sur le clavier, n'est pas reconnu.
 est_oui() { [[ "$1" =~ ^([oO]|[oO][uU][iI]|[yY]|[yY][eE][sS])$ ]]; }
+
+# Un nom du domaine (contrôleur, serveur de fichiers) doit se résoudre par le DNS
+# du domaine. Sans cela, LDAP et la lecture des droits échouent plus tard avec
+# des messages trompeurs (« invalid server address », NT_STATUS_INVALID_PARAMETER).
+verifier_nom() {
+    local nom="$1" role="$2" adresse
+    adresse=$(getent hosts "$nom" 2>/dev/null | awk '{print $1; exit}' || true)
+    if [[ -n "$adresse" ]]; then
+        ok "$role : $nom → $adresse"
+    else
+        error "$role : « $nom » ne se résout pas. La VM doit interroger le DNS du domaine (§0, étape 4 ; contrôle : resolvectl status)."
+    fi
+}
 
 # ─────────────────────────────────────────
 # Vérifications préalables (avant toute modification du système)
@@ -150,6 +164,24 @@ read -r DOMAIN_NETBIOS
 ask "Suffixe DNS du domaine (ex: votre-domaine.ch) :"
 read -r DOMAIN_DNS
 
+verifier_nom "$DC_HOST" "Contrôleur de domaine"
+
+# Un DNS public (8.8.8.8, 1.1.1.1...) à côté du DNS du domaine provoque des pannes
+# AU HASARD DES REDÉMARRAGES : systemd-resolved bascule sur le serveur public dès
+# que celui du domaine tarde une fois, et n'en revient pas. Les noms du domaine
+# deviennent alors introuvables (cas vécu en lab, §0 « En cas de problème »).
+DNS_PUBLICS=$(resolvectl dns 2>/dev/null \
+    | grep -oE '(^|[[:space:]])(8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1|1\.0\.0\.1|9\.9\.9\.9|149\.112\.112\.112|208\.67\.222\.222|208\.67\.220\.220)([[:space:]]|$)' \
+    | tr -d ' ' | sort -u | tr '\n' ' ' || true)
+if [[ -n "$DNS_PUBLICS" ]]; then
+    warn "DNS public configuré sur la VM : ${DNS_PUBLICS}"
+    warn "Seuls les DNS du domaine doivent figurer dans la configuration réseau (netplan, §0 étape 4)."
+    warn "Sinon, LDAP et la lecture des droits tombent en panne au hasard d'un redémarrage."
+    ask "Continuer quand même ? [o/N] (corriger d'abord est recommandé)"
+    read -r CONTINUER_DNS
+    est_oui "$CONTINUER_DNS" || error "Déploiement interrompu : retirer le DNS public de /etc/netplan/*.yaml, puis netplan apply."
+fi
+
 ask "DN complet de l'OU du compte svc-rag (ex: OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch) :"
 read -r SVC_RAG_OU
 
@@ -165,6 +197,7 @@ echo -e "${BLUE}-- File server (partage SMB) --${NC}"
 ask "Nom du file server (ex: FILESERVER, sans espaces) :"
 read -r FILESERVER
 [[ "$FILESERVER" == *" "* ]] && error "Le nom du file server ne doit pas contenir d'espaces."
+verifier_nom "$FILESERVER" "Serveur de fichiers"
 
 ask "Nom du partage SMB (ex: FileService, sans espaces) :"
 read -r SMB_SHARE_NAME
@@ -194,12 +227,21 @@ LOG_HMAC_KEY="$(openssl rand -hex 32)"
 MIP_TOKEN="$(openssl rand -hex 32)"
 
 echo ""
-echo -e "${BLUE}-- Documentation technique --${NC}"
-
-ask "Dossier de documentation technique a la racine du partage (ex: DOIT4EVERYONE, laisser vide = DOIT4EVERYONE) :"
+echo -e "${BLUE}-- Documentation technique (facultatif) --${NC}"
+echo "  La stack range les documents dans deux collections de l'index :"
+echo "    documents     : le corpus de l'entreprise (tout le partage, par défaut) ;"
+echo "    documentation : la documentation technique (guides, procédures, manuels de"
+echo "                    logiciels), si elle est rangée dans un dossier dédié À LA"
+echo "                    RACINE du partage."
+echo "  Les droits NTFS s'appliquent de la même façon aux deux collections. Changer ce"
+echo "  choix plus tard demande une réindexation complète (§5.9)."
+ask "Dossier(s) de documentation à la racine du partage, séparés par des virgules (vide = aucun) :"
 read -r DOC_PATHS_INPUT
-DOCUMENTATION_PATHS="${DOC_PATHS_INPUT:-DOIT4EVERYONE}"
-[ -z "$DOC_PATHS_INPUT" ] && warn "DOCUMENTATION_PATHS fixe a DOIT4EVERYONE. Adapter si aucun dossier de ce nom n'existe sur le partage : la collection documentation resterait vide."
+# Espaces autour des virgules retirés ; un chemin avec / ou \ n'est pas à la racine
+DOCUMENTATION_PATHS=$(echo "$DOC_PATHS_INPUT" | sed 's/[[:space:]]*,[[:space:]]*/,/g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+[[ "$DOCUMENTATION_PATHS" == *"/"* || "$DOCUMENTATION_PATHS" == *"\\"* ]] \
+    && error "Un dossier de documentation doit être à la racine du partage : indiquer son nom seul, sans / ni \\."
+[[ "$DOCUMENTATION_PATHS" == *"'"* ]] && error "Le nom du dossier ne doit pas contenir d'apostrophe (limitation du .env)."
 
 echo ""
 echo "============================================================"
@@ -212,7 +254,7 @@ echo "  DC              : $DC_HOST"
 echo "  Domaine         : $DOMAIN_NETBIOS / $DOMAIN_DNS"
 echo "  svc-rag OU      : $SVC_RAG_OU"
 echo "  Partage SMB     : $SMB_SHARE -> $SMB_MOUNT"
-echo "  Documentation   : $DOCUMENTATION_PATHS"
+echo "  Documentation   : ${DOCUMENTATION_PATHS:-(aucun dossier : tout le partage va dans documents)}"
 echo "  Tokens          : générés (consulter /root/rag-stack/.env apres le deploiement)"
 echo "============================================================"
 echo ""
@@ -310,6 +352,8 @@ if [ -f "test_cloisonnement.py" ]; then
     cp test_cloisonnement.py /root/rag-pipeline/test_cloisonnement.py
     [ -f cas_cloisonnement.exemple.json ] && cp cas_cloisonnement.exemple.json /root/rag-pipeline/
 fi
+# Tests unitaires du contrôle des citations (lancés à l'étape 10)
+[ -f "test_citations.py" ] && cp test_citations.py /root/rag-pipeline/test_citations.py
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
 if [ -d "mip-service" ]; then
     mkdir -p /root/rag-stack/mip-service
@@ -354,7 +398,7 @@ QDRANT_API_KEY=${QDRANT_API_KEY}
 LOG_HMAC_KEY=${LOG_HMAC_KEY}
 CAS_CLOISONNEMENT=/rag-pipeline/cas_cloisonnement.json
 DOCUMENTATION_COLLECTION=documentation
-DOCUMENTATION_PATHS=${DOCUMENTATION_PATHS}
+DOCUMENTATION_PATHS='${DOCUMENTATION_PATHS}'
 
 # Tokens d'authentification
 API_TOKEN=${API_TOKEN}
@@ -524,6 +568,25 @@ else
     fi
 fi
 
+# Le corpus n'est jamais écrit par la stack : lecture seule (ro). Un montage déjà
+# fait à la main en écriture (rw) fonctionne, mais donne plus de droits que nécessaire.
+if findmnt -no OPTIONS "$SMB_MOUNT" 2>/dev/null | grep -qE '(^|,)rw(,|$)'; then
+    warn "$SMB_MOUNT est monté en écriture (rw). La stack n'écrit jamais sur le partage :"
+    warn "passer l'option rw en ro dans /etc/fstab, puis umount $SMB_MOUNT && mount $SMB_MOUNT."
+fi
+
+# Dossiers de documentation : présents à la racine du partage ?
+if [[ -n "$DOCUMENTATION_PATHS" ]] && mountpoint -q "$SMB_MOUNT"; then
+    IFS=',' read -ra DOSSIERS_DOC <<< "$DOCUMENTATION_PATHS"
+    for d in "${DOSSIERS_DOC[@]}"; do
+        if [ -d "$SMB_MOUNT/$d" ]; then
+            ok "Dossier de documentation présent : $d"
+        else
+            warn "Dossier de documentation « $d » absent de la racine du partage : la collection documentation restera vide."
+        fi
+    done
+fi
+
 # fstab en ro : le corpus n'est jamais ecrit par la stack
 if ! grep -q "$SMB_MOUNT" /etc/fstab; then
     {
@@ -564,8 +627,11 @@ source .venv/bin/activate
 # Dépendances de indexer.py et acl_resolver.py, lancés aussi depuis l'hôte (§0, étapes 12 et 13).
 # Même liste que l'étape 11 du §0 : sans ldap3, impacket et smbprotocol, acl_resolver.py échoue.
 # httpx est importé directement par indexer.py (non garanti comme dépendance transitive).
-pip install -q qdrant-client python-docx pdfplumber python-pptx httpx \
-    ldap3 impacket rank-bm25 smbprotocol
+# --retries et --timeout : une coupure passagère vers pypi.org faisait échouer le
+# déploiement (rejeu en lab). Le script reste relançable après une erreur.
+pip install -q --retries 10 --timeout 60 qdrant-client python-docx pdfplumber python-pptx httpx \
+    ldap3 impacket rank-bm25 smbprotocol \
+    || error "Installation des paquets Python échouée (réseau vers pypi.org ?). Relancer deploy.sh : il reprend sans dommage. Ne pas ajouter de DNS public pour contourner (§0, « En cas de problème »)."
 
 ok "Environnement Python prêt"
 
@@ -622,6 +688,15 @@ print(httpx.get(u, headers=h, timeout=10).status_code)
     fi
 done
 
+# Contrôle des citations : tests unitaires, sans modèle ni Qdrant
+if [ -f /root/rag-pipeline/test_citations.py ]; then
+    if docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py >/dev/null 2>&1; then
+        ok "Contrôle des citations : tests unitaires OK"
+    else
+        warn "Contrôle des citations : tests en échec (docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py)"
+    fi
+fi
+
 QDRANT=$(curl -s -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/collections 2>/dev/null || echo "")
 if echo "$QDRANT" | grep -q '"status":"ok"'; then
     ok "Qdrant accessible"
@@ -636,6 +711,46 @@ if [ -n "$PROBLEMES" ]; then
     printf "%b" "$PROBLEMES"
     echo "  Corriger la cause, puis relancer : cd /root/rag-stack && docker compose up -d"
     exit 1
+fi
+
+# ─────────────────────────────────────────
+# Étape 11 (facultative) : première indexation et droits d'accès
+# ─────────────────────────────────────────
+# Facultative : un échec ici ne remet pas en cause le déploiement, qui est
+# terminé. Les commandes manuelles restent au §0 (étapes 12 et 13).
+INDEXATION_FAITE=non
+echo ""
+ask "Lancer maintenant la première indexation et la résolution des droits ? [o/N]"
+echo "    (de quelques minutes à plus d'une heure selon le volume du partage)"
+read -r LANCER_INDEXATION
+if est_oui "$LANCER_INDEXATION"; then
+    if ! mountpoint -q "$SMB_MOUNT"; then
+        warn "Partage non monté sur $SMB_MOUNT : indexation non lancée (§0, étape 5)."
+    else
+        HORODATAGE=$(date '+%Y%m%d_%H%M%S')
+        JOURNAL="/var/log/rag/deploy_indexation_${HORODATAGE}.log"
+        info "Indexation en cours, journal : ${JOURNAL}"
+        if ( cd /root/rag-pipeline && source .venv/bin/activate \
+             && set -a && source /root/rag-stack/.env && set +a \
+             && python indexer.py --corpus "$SMB_MOUNT" \
+                    --rapport "/var/log/rag/rapport_indexation_initial_${HORODATAGE}.json" ) >>"$JOURNAL" 2>&1; then
+            ok "Indexation terminée"
+            info "Résolution des droits d'accès..."
+            if ( cd /root/rag-pipeline && source .venv/bin/activate \
+                 && set -a && source /root/rag-stack/.env && set +a \
+                 && python acl_resolver.py --share "$SMB_SHARE" --mount "$SMB_MOUNT" \
+                        --rapport "/var/log/rag/rapport_acl_initial_${HORODATAGE}.json" ) >>"$JOURNAL" 2>&1; then
+                ok "Droits d'accès recopiés dans l'index"
+                INDEXATION_FAITE=oui
+            else
+                warn "Résolution des droits en échec : voir ${JOURNAL} (fin du fichier)."
+                warn "Tant qu'elle n'a pas réussi, les documents restent invisibles pour tous (refus par défaut)."
+            fi
+        else
+            warn "Indexation en échec : voir ${JOURNAL} (fin du fichier). Le déploiement lui-même est terminé."
+        fi
+        chmod 640 "$JOURNAL" 2>/dev/null || true
+    fi
 fi
 
 # ─────────────────────────────────────────
@@ -655,27 +770,40 @@ echo "  Partie 3 (Microsoft 365) : inactive par défaut."
 echo "    Extension Entra ID     : ENTRA_* dans le .env, voir §11 du guide"
 echo "    Synthèse Teams         : TEAMS_* dans le .env, voir §12 du guide"
 echo ""
-echo "  Etapes suivantes :"
+echo "  Étapes suivantes :"
 echo "  1. Configurer Open WebUI (§0, étape 14) : connexion à la RAG API dans la section"
-echo "     API compatibles OpenAI, authentification LDAP (attribut pour le courriel :"
-echo "     userPrincipalName ; attribut pour le nom d'utilisateur : sAMAccountName), puis"
+echo "     API compatibles OpenAI, authentification LDAP (« Attribut pour l'e-mail » :"
+echo "     userPrincipalName ; « Attribut pour le nom d'utilisateur » : sAMAccountName),"
 echo "     puis vérifier que la génération de titre, d'étiquettes et de questions de suivi"
-echo "     est désactivée (le Compose le fait au premier démarrage ; sinon : Settings >"
-echo "     Admin > Interface, et enregistrer). Sans cela, chaque question en déclenche d'autres"
-echo "  2. Lancer la premiere indexation :"
-echo "     cd /root/rag-pipeline && source .venv/bin/activate"
-echo "     set -a && source /root/rag-stack/.env && set +a"
-echo "     python indexer.py --corpus ${SMB_MOUNT}"
-echo "  3. Lancer la resolution des ACL :"
-echo "     python acl_resolver.py --share ${SMB_SHARE} --mount ${SMB_MOUNT}"
-echo "  4. Prendre un snapshot Qdrant (voir §3.7)"
-echo "  5. Configurer les workflows n8n (http://${VM_IP}:5678) :"
-echo "     a. Creer le credential SMTP : Settings > Credentials > Add > SMTP"
-echo "     b. Importer scripts/N8N/n8n-sync-corpus.json"
-echo "     c. Importer scripts/N8N/n8n-rappel-rotation-svc-rag.json"
-echo "     d. Rattacher le credential SMTP sur chaque noeud email"
-echo "     e. Activer les deux workflows et executer une validation manuelle"
-echo "     f. Optionnel, apres la configuration de la §12 : importer scripts/N8N/n8n-teams-sync.json"
+echo "     est désactivée (le Compose le fait au premier démarrage ; sinon : réglages"
+echo "     d'administration, Interface, et enregistrer). Sans cela, chaque question en"
+echo "     déclenche d'autres."
+if [ "$INDEXATION_FAITE" = "oui" ]; then
+    echo "  2. Indexation et droits : faits (journal : ${JOURNAL})."
+    echo "     Contrôler les extraits indexés : §0, étape 12."
+    N=3
+else
+    echo "  2. Lancer la première indexation (§0, étape 12) :"
+    echo "     cd /root/rag-pipeline && source .venv/bin/activate"
+    echo "     set -a && source /root/rag-stack/.env && set +a"
+    echo "     python indexer.py --corpus ${SMB_MOUNT}"
+    echo "  3. Lancer la résolution des droits (§0, étape 13) :"
+    echo "     python acl_resolver.py --share ${SMB_SHARE} --mount ${SMB_MOUNT}"
+    N=4
+fi
+echo "  ${N}. Configurer n8n (§0, étape 15, http://${VM_IP}:5678) :"
+echo "     a. Créer l'identifiant Header Auth « RAG API - ADMIN_TOKEN »"
+echo "        (Name : Authorization ; Value : Bearer <ADMIN_TOKEN du .env> ;"
+echo "        domaine autorisé : rag-api), puis l'identifiant SMTP."
+echo "     b. Importer scripts/N8N/n8n-sync-corpus.json et n8n-rappel-rotation-svc-rag.json."
+echo "     c. Dans CHAQUE nœud HTTP et courriel, sélectionner à nouveau l'identifiant :"
+echo "        ceux du fichier importé ne correspondent à rien chez vous."
+echo "     d. Renseigner les adresses : expéditeur = la boîte authentifiée par SMTP,"
+echo "        destinataire = une boîte interne."
+echo "     e. Publier les deux workflows, puis lancer une exécution manuelle."
+echo "     f. Facultatif, après le §12 : importer scripts/N8N/n8n-teams-sync.json."
+echo "  $((N + 1)). Contrôles finaux (§0, étape 16), puis snapshot de la VM arrêtée et snapshot"
+echo "     Qdrant (§3.7)."
 echo ""
-echo "  Consultez /root/rag-stack/.env pour les tokens générés."
+echo "  Consulter /root/rag-stack/.env pour les tokens générés."
 echo "============================================================"

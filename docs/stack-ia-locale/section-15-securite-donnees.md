@@ -202,7 +202,10 @@ reboot
 # puis, en SSH, sans rien lancer :
 df -h /srv/rag-donnees /var/log/rag            # montés, depuis /dev/mapper/rag-donnees
 docker compose -f /root/rag-stack/docker-compose.yml ps   # tous les conteneurs démarrés
+getent hosts <NOM-DC>.votre-domaine.ch <NOM-FILESERVER>   # les noms du domaine se résolvent
 ```
+
+`rag-api` et `open-webui` apparaissent en `Up (healthy)`, `qdrant` et `n8n` en `Up` : seuls les deux premiers déclarent un contrôle de santé. Le contrôle des noms n'est pas superflu : dans le rejeu d'octobre 2026, un DNS public ajouté à la configuration de la VM a fait échouer LDAP et la lecture des droits au deuxième redémarrage, alors que le premier s'était bien passé (§0, « En cas de problème »).
 
 Sur une VM neuve (octobre 2026), un simple `reboot` a suffi : disque ouvert par le TPM sans saisie, monté sur `/srv/rag-donnees`, Docker actif. Dans le lab, la configuration a aussi passé un **arrêt brutal de l'hôte** : au redémarrage, le TPM a déverrouillé le disque, la stack est repartie seule, et aucune erreur de système de fichiers n'a été signalée.
 

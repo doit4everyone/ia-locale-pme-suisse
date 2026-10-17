@@ -28,6 +28,10 @@ services:
     environment:
       # Clé d'API obligatoire pour tout accès à Qdrant (section 15)
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+      # Snapshots dans le volume (§3.7) : sans ce réglage, Qdrant les écrit dans
+      # /qdrant/snapshots, À L'INTÉRIEUR du conteneur. Ils disparaissent alors à
+      # la recréation du conteneur, et le chemin de restauration ne les trouve pas.
+      - QDRANT__STORAGE__SNAPSHOTS_PATH=/qdrant/storage/snapshots
     restart: unless-stopped
 
   n8n:
@@ -40,8 +44,12 @@ services:
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - N8N_HOST=0.0.0.0
-      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - N8N_SECURE_COOKIE=false
+      # Fuseau horaire des déclencheurs planifiés et des dates affichées.
+      # Sans lui, n8n compte en America/New_York.
+      - GENERIC_TIMEZONE=Europe/Zurich
+      - TZ=Europe/Zurich
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -176,6 +184,14 @@ services:
       - /etc/rag-certs:/etc/rag-certs:ro
     depends_on:
       - qdrant
+    # État de santé visible dans docker ps : « Up (healthy) ». Qdrant et n8n
+    # n'en ont pas : leurs images ne garantissent pas d'outil pour l'appeler.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   # Service de déchiffrement Purview (§14). Ne démarre qu'avec le profil « purview » :

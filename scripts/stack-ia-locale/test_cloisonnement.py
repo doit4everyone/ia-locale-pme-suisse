@@ -42,6 +42,10 @@ from datetime import datetime
 
 import httpx
 
+# Journaux et rapports (noms de fichiers, groupes, identifiants) : créés en 640,
+# lisibles par root et son groupe seulement (2.20.4).
+os.umask(0o027)
+
 URL = os.getenv("RAG_URL", "http://localhost:8080")
 TOKEN = os.getenv("API_TOKEN", "")
 ADMIN = os.getenv("ADMIN_TOKEN", "")

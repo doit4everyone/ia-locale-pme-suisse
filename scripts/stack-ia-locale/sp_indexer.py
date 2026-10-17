@@ -76,6 +76,10 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import quote, urlparse
 
+# Journaux et rapports (noms de fichiers, groupes, identifiants) : créés en 640,
+# lisibles par root et son groupe seulement (2.20.4).
+os.umask(0o027)
+
 # indexer.py lit sa configuration à l'import : on lui transmet celle du
 # conteneur rag-api (mêmes noms que main.py) avant de l'importer.
 if os.getenv("EMBED_BASE_URL") and not os.getenv("OLLAMA_URL"):

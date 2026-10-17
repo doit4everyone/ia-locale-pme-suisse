@@ -39,7 +39,9 @@
         "subject": "={{ $json.sujet }}",
         "emailFormat": "text",
         "text": "={{ $json.corps }}",
-        "options": {}
+        "options": {
+          "appendAttribution": false
+        }
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,

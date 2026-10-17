@@ -35,12 +35,23 @@ v4 (Partie 3, compatible v3) :
   - Suppression des orphelins par filtre (FilterSelector) au lieu d'un scroll
     limité à 500 points : un fichier de plus de 500 chunks était supprimé
     partiellement.
+
+v5 (2.20.4) :
+  - Arrêt au premier refus d'authentification (mot de passe refusé, compte
+    verrouillé, désactivé ou expiré) : poursuivre sur les autres fichiers
+    verrouillerait le compte svc-rag dans l'Active Directory, et avec lui
+    la connexion de tous les utilisateurs.
+  - Contrôle préalable de la résolution DNS du serveur de fichiers.
+  - En-tête : les deux collections ; fin : liste des fichiers dont une
+    entrée ALLOWED a été ignorée (sans droit de lecture).
+  - Rapports créés en 640 (umask 027).
 """
 
 import argparse
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -65,9 +76,30 @@ COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
 DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
 DOCUMENTATION_PATHS = [
     p.strip() for p in
-    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    os.getenv("DOCUMENTATION_PATHS", "").split(",")
     if p.strip()
 ]
+
+# Les rapports contiennent des noms de fichiers et de groupes : lisibles par root
+# et son groupe seulement.
+os.umask(0o027)
+
+# Refus d'authentification : inutile, et dangereux, de continuer sur les autres
+# fichiers. Chaque essai compte dans le seuil de verrouillage de l'Active Directory.
+STATUTS_AUTH = (
+    "NT_STATUS_LOGON_FAILURE",
+    "NT_STATUS_ACCOUNT_LOCKED_OUT",
+    "NT_STATUS_ACCOUNT_DISABLED",
+    "NT_STATUS_ACCOUNT_EXPIRED",
+    "NT_STATUS_PASSWORD_EXPIRED",
+    "NT_STATUS_PASSWORD_MUST_CHANGE",
+    "NT_STATUS_ACCOUNT_RESTRICTION",
+)
+
+
+class ErreurAuthentification(Exception):
+    """Le serveur de fichiers refuse le compte svc-rag."""
+
 
 # Groupes à exclure des autorisés[] : comptes système, pas des utilisateurs métier
 GROUPES_EXCLUS = {
@@ -105,7 +137,11 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
             timeout=30
         )
         if result.returncode != 0:
-            print(f"  Erreur smbcacls sur '{chemin_relatif}' : {result.stderr.strip()}")
+            message = (result.stderr.strip() or result.stdout.strip())
+            for statut in STATUTS_AUTH:
+                if statut in message:
+                    raise ErreurAuthentification(statut)
+            print(f"  Erreur smbcacls sur '{chemin_relatif}' : {message}")
             return [], []
 
         autorisés = []
@@ -129,6 +165,7 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
                     autorisés.append(identite)
                 else:
                     STATS_MASQUE["allowed_sans_lecture"] += 1
+                    STATS_MASQUE["fichiers"].add(chemin_relatif)
             else:
                 # Règles DENIED : toutes conservées, quel que soit le masque.
                 # Choix prudent : un refus partiel (écriture seule) rend le fichier
@@ -137,6 +174,8 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
 
         return autorisés, interdits
 
+    except ErreurAuthentification:
+        raise
     except subprocess.TimeoutExpired:
         print(f"  Timeout smbcacls sur '{chemin_relatif}'")
         return [], []
@@ -149,7 +188,7 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
 FILE_READ_DATA = 0x00000001
 GENERIC_READ   = 0x80000000
 GENERIC_ALL    = 0x10000000
-STATS_MASQUE = {"allowed_sans_lecture": 0}
+STATS_MASQUE = {"allowed_sans_lecture": 0, "fichiers": set()}
 
 
 def masque_accorde_lecture(masque: str) -> bool:
@@ -326,11 +365,27 @@ def resoudre_acl(
     print(f"Partage SMB  : {share}")
     print(f"Point montage: {mount_point}")
     print(f"Qdrant       : {QDRANT_URL}")
-    print(f"Collection   : {COLLECTION}")
+    print(f"Collections  : {COLLECTION} (corpus), {DOCUMENTATION_COLLECTION} (documentation technique)")
+    print(f"Documentation: {', '.join(DOCUMENTATION_PATHS) if DOCUMENTATION_PATHS else '(aucun dossier)'}")
     print(f"Compte SMB   : {SMB_DOMAIN}\\{SMB_USER}")
     if dry_run:
         print("Mode         : DRY-RUN (aucune écriture Qdrant)")
     print()
+
+    # Le serveur de fichiers doit être résolu par le DNS du domaine. Sinon,
+    # smbcacls échoue sur chaque fichier avec un message peu parlant
+    # (NT_STATUS_INVALID_PARAMETER), alors que le montage, établi au démarrage,
+    # paraît fonctionner.
+    serveur = share.replace("\\", "/").lstrip("/").split("/")[0]
+    try:
+        socket.getaddrinfo(serveur, 445)
+    except socket.gaierror:
+        msg = (f"[GARDE-FOU] Le nom du serveur de fichiers « {serveur} » ne se résout pas. "
+               "Vérifier le DNS de la VM : seuls les DNS du domaine doivent y figurer "
+               "(resolvectl status). Abandon sans modification de Qdrant.")
+        print(msg)
+        print(msg, file=sys.stderr)
+        sys.exit(1)
 
     # Connexion Qdrant
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
@@ -363,7 +418,24 @@ def resoudre_acl(
     for i, (chemin_smb, chemin_local) in enumerate(fichiers, 1):
         source_name = os.path.relpath(chemin_local, mount_point).replace('\\', '/')
         print(f"  [{i}/{len(fichiers)}] {chemin_smb}")
-        autorises_f, interdits_f = lire_acl_fichier(share, chemin_smb)
+        try:
+            autorises_f, interdits_f = lire_acl_fichier(share, chemin_smb)
+        except ErreurAuthentification as e:
+            msg = (f"[GARDE-FOU] Authentification refusée par le serveur de fichiers ({e}). "
+                   "Arrêt immédiat pour ne pas verrouiller le compte dans l'Active Directory. "
+                   "Abandon sans modification de Qdrant. Vérifier le mot de passe de "
+                   f"{SMB_USER} dans le .env, et l'état du compte (verrouillé, désactivé, expiré).")
+            print(f"\n{msg}")
+            print(msg, file=sys.stderr)
+            if rapport_path:
+                with open(rapport_path, "w", encoding="utf-8") as rf:
+                    json.dump({
+                        "statut": "abandon_authentification",
+                        "fichiers_examines": i,
+                        "statut_smb": str(e),
+                        "message": "Authentification refusée, arrêt au premier refus, aucune modification",
+                    }, rf, ensure_ascii=False, indent=2)
+            sys.exit(1)
         illisible = not autorises_f and not interdits_f
         if illisible:
             print("  Aucune ACL lisible.")
@@ -382,6 +454,7 @@ def resoudre_acl(
         print(f"\n[GARDE-FOU] {len(fichiers_sans_acl)}/{len(fichiers)} fichiers en ACL illisible ({pct}% > seuil 20%).")
         print("[GARDE-FOU] Abandon sans modification de Qdrant.")
         print("[GARDE-FOU] Verifier : svc-rag actif, DC joignable, montage SMB present.")
+        print(f"[GARDE-FOU] {len(fichiers_sans_acl)}/{len(fichiers)} fichiers en ACL illisible, abandon sans modification.", file=sys.stderr)
         rapport_data = {
             "statut": "abandon_garde_fou",
             "fichiers_examines": len(fichiers),
@@ -550,10 +623,13 @@ def resoudre_acl(
                 "sources_orphelines": len(orphelins),
                 "entrees_allowed_sans_lecture": STATS_MASQUE["allowed_sans_lecture"],
             },
+            "fichiers_avec_entree_allowed_ignoree": sorted(STATS_MASQUE["fichiers"]),
             "documents": rapport,
             "orphelins": sorted(orphelins),
         }, f, ensure_ascii=False, indent=2)
     print(f"Entrées ALLOWED ignorées (sans droit de lecture) : {STATS_MASQUE['allowed_sans_lecture']}")
+    for f_ignore in sorted(STATS_MASQUE["fichiers"]):
+        print(f"  {f_ignore}")
     print(f"\nRapport sauvegardé : {rapport_path}")
 
 

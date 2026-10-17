@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, test de cloisonnement). Ce rejeu a fait corriger le script et ce guide ; le script corrigé n'a pas encore été rejoué (encadré de l'étape 6).
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4) ; cette version corrigée n'a pas encore été rejouée (encadré de l'étape 6).
 
 ---
 
@@ -159,7 +159,8 @@ Une autorité **racine** a un `Issuer` identique à son `Subject`. Une autorité
 
 ```powershell
 # Ou par l'interface : certlm.msc → clic droit sur le certificat → Toutes les tâches → Exporter
-$racine = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq "<EMPREINTE-RACINE>" }
+$racine = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq "<EMPREINTE-RACINE>" } |
+    Select-Object -First 1
 Export-Certificate -Cert $racine -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
 ```
 
@@ -303,21 +304,30 @@ apt update && apt install -y \
     python3 python3-pip python3-venv
 ```
 
-**Le DNS du domaine**, pour que la VM trouve le contrôleur de domaine et le serveur de fichiers par leur nom. Dans `/etc/systemd/resolved.conf` (avec `nano`), section `[Resolve]` :
+**Le DNS du domaine**, pour que la VM trouve le contrôleur de domaine et le serveur de fichiers par leur nom. Commencer par contrôler l'existant :
+
+```bash
+getent hosts <NOM-DC>.votre-domaine.ch
+getent hosts <NOM-FILESERVER>
+resolvectl status | grep -E "DNS Servers|DNS Domain"
+```
+
+**Attendu :** une adresse pour chaque nom, et **uniquement les DNS du domaine** dans `DNS Servers` (l'adresse IP de votre contrôleur de domaine, par exemple). Si c'est le cas, ne rien modifier.
+
+**Jamais de DNS public** (8.8.8.8, 1.1.1.1...) à côté de celui du domaine. `systemd-resolved` bascule sur le serveur public dès que celui du domaine tarde une seule fois, au démarrage par exemple, et n'en revient pas : les noms du domaine deviennent introuvables, et la connexion LDAP comme la lecture des droits tombent en panne au hasard d'un redémarrage. Cas vécu dans le lab : un DNS public ajouté pour contourner une lenteur de téléchargement a provoqué la panne au deuxième redémarrage suivant. Si `resolvectl` en affiche un, le retirer de la configuration réseau, en général `/etc/netplan/*.yaml` (liste `nameservers: addresses:`), puis :
+
+```bash
+netplan generate && netplan apply
+resolvectl status | grep -E "DNS Servers"
+```
+
+Si les noms ne se résolvent pas du tout (aucun DNS du domaine configuré), l'ajouter dans `/etc/systemd/resolved.conf` (avec `nano`), section `[Resolve]`, puis `systemctl restart systemd-resolved` et refaire les deux `getent` :
 
 ```ini
 [Resolve]
 DNS=<IP-DC>
 Domains=votre-domaine.ch
 ```
-
-```bash
-systemctl restart systemd-resolved
-nslookup <NOM-FILESERVER>
-nslookup <NOM-DC>
-```
-
-**Attendu :** les deux noms donnent une adresse IP.
 
 **Le certificat de l'étape 2**, converti au format attendu par Linux :
 
@@ -369,19 +379,19 @@ chmod 600 /etc/smbcredentials/svc-rag
 
 mkdir -p /mnt/corpus-root
 mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
-    -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000
+    -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro
 ls /mnt/corpus-root/
 ```
 
-**Attendu :** les dossiers du partage. Le domaine est donné par la ligne `domain=` du fichier d'identifiants : sans elle, le montage échoue sur un domaine Active Directory. Rendre ensuite le montage permanent :
+**Attendu :** les dossiers du partage. Le domaine est donné par la ligne `domain=` du fichier d'identifiants : sans elle, le montage échoue sur un domaine Active Directory. Le montage est en **lecture seule** (`ro`) : la stack ne modifie jamais le partage. Rendre ensuite le montage permanent :
 
 ```bash
 cat >> /etc/fstab << 'FSTAB'
 
 # Partage du corpus RAG (monté avec svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail 0 0
 FSTAB
-mount -a && mount | grep corpus-root
+mount -a && findmnt /mnt/corpus-root
 ```
 
 ---
@@ -414,14 +424,14 @@ cp -r mip-service/. /root/rag-stack/mip-service/
 # Les scripts d'indexation, des droits et de contrôle
 cp anon_indexer.py /root/rag-pipeline/indexer.py
 cp anon_acl_resolver.py /root/rag-pipeline/acl_resolver.py
-cp sp_indexer.py test_cloisonnement.py cas_cloisonnement.exemple.json /root/rag-pipeline/
+cp sp_indexer.py test_cloisonnement.py test_citations.py cas_cloisonnement.exemple.json /root/rag-pipeline/
 
 ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 ```
 
-**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py` et `test_cloisonnement.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
+**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py` et `test_citations.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie aussi que la stack joint le serveur de modèles. Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les quatre conteneurs tournent sans redémarrage et que la RAG API répond ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». **Statut :** rejoué une fois sur une VM neuve, ce qui a fait corriger une dizaine de points (consignés dans le suivi des corrections) ; la version corrigée n'a pas encore été rejouée. Pour un premier déploiement, la procédure manuelle reste la référence. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier.
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les quatre conteneurs tournent sans redémarrage et que la RAG API répond ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple) : il reprend sans dommage. **Statut :** rejoué deux fois sur une VM neuve ; le second rejeu a fait corriger le script (version 2.20.4, consignée dans le suivi des corrections), et cette version n'a pas encore été rejouée. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier, en root.
 
 ---
 
@@ -461,7 +471,7 @@ Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`
 | `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5 | |
 | `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTREDOMAINE` |
 | `SMB_SHARE` | Le partage à indexer | `//FILESERVER/FileService` |
-| `DOCUMENTATION_PATHS` | Le dossier de documentation technique à la racine du partage, s'il existe (§3.2) ; plusieurs dossiers séparés par des virgules | `DOCUMENTATION` |
+| `DOCUMENTATION_PATHS` | Facultatif. Le ou les dossiers de documentation technique (guides, procédures, manuels), **à la racine** du partage, séparés par des virgules. Leur contenu va dans la collection `documentation`, tout le reste dans `documents` ; les droits NTFS s'appliquent de la même façon aux deux. **Vide** : tout le partage va dans `documents`. Changer ce réglage après l'indexation exige une réindexation complète (§5.9) | `DOCUMENTATION` (lab : `DOIT4EVERYONE`) |
 | `N8N_WEBHOOK_URL` | L'adresse de la VM, avec le port de n8n, comme n8n l'annonce à ses utilisateurs | `http://<IP-VM>:5678` |
 
 Les valeurs qui contiennent un espace sont **entre apostrophes** dans `env.example` (par exemple `SP_EXCLUDE_DRIVES='Preservation Hold Library'`). Les conserver : sans elles, `source .env` échoue avec « command not found » sur le mot qui suit l'espace.
@@ -516,7 +526,7 @@ docker compose up -d
 docker compose ps
 ```
 
-**Attendu :** `qdrant`, `n8n`, `rag-api` en `Up`, et `open-webui` en `Up (healthy)` après une minute environ. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent une variable manquante dans `.env`, ou le certificat de l'étape 4 absent).
+**Attendu :** `qdrant` et `n8n` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les deux autres. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent une variable manquante dans `.env`, ou le certificat de l'étape 4 absent).
 
 ---
 
@@ -548,7 +558,7 @@ L'indexation et la synchronisation des droits se lancent depuis la VM, dans un e
 cd /root/rag-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
-pip install qdrant-client python-docx pdfplumber python-pptx httpx \
+pip install --retries 10 --timeout 60 qdrant-client python-docx pdfplumber python-pptx httpx \
     ldap3 impacket rank-bm25 smbprotocol
 ```
 
@@ -628,21 +638,29 @@ Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau. Le premier compte cré�
 3. Clé API : la valeur de `API_TOKEN` du `.env` (`grep ^API_TOKEN /root/rag-stack/.env`)
 4. Enregistrer : le modèle `rag-api` apparaît dans la liste. Une erreur de connexion à cette étape vient presque toujours d'une adresse ou d'une clé erronée, ou d'une connexion créée dans la mauvaise section.
 
-**Authentification par l'Active Directory** (facultative en lab, obligatoire en production) :
+**Authentification par l'Active Directory** (facultative en lab, obligatoire en production) : *Settings → Admin → Authentication → LDAP*, activer LDAP, puis remplir les champs. Open WebUI affiche leurs libellés dans la langue de l'interface ; la deuxième colonne donne ceux de l'interface en français (fichier de traduction de la version 0.11.3).
 
-1. *Settings → Admin → Authentication → LDAP*, activer LDAP
-2. Server Address : `<NOM-DC>.votre-domaine.ch`, port `636`, TLS activé
-3. **Attribut pour le courriel** : `userPrincipalName`
-4. **Attribut pour le nom d'utilisateur** : `sAMAccountName`
-5. Base DN : `DC=votre-domaine,DC=ch`
-6. Bind DN : `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch`, Bind Password : le mot de passe de `svc-rag`
-7. Certificate Path : `/etc/ssl/certs/ad-chain.pem`
+| Champ (interface en anglais) | Libellé en français | Valeur |
+|---|---|---|
+| Label | Étiquette | Un nom libre, par exemple `Active Directory` |
+| Host | Hôte | `<NOM-DC>.votre-domaine.ch`, port `636`, TLS activé |
+| Attribute for Mail | Attribut pour l'e-mail | `userPrincipalName` |
+| Attribute for Username | Attribut pour le nom d'utilisateur | `sAMAccountName` |
+| Application DN | DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
+| Application DN Password | Mot de passe DN de l'application | Le mot de passe de `svc-rag` |
+| Search Base | Base de recherche | `DC=votre-domaine,DC=ch` |
+| Search Filters | Filtres de recherche | `(objectClass=user)` |
+| Certificate Path | Chemin du certificat | `/etc/ssl/certs/ad-chain.pem` |
+| Validate Certificate | Validate Certificate (non traduit) | Activé : la chaîne de l'étape 4 permet la validation (le §5.6.2 décrit le cas d'un lab sans certificat) |
+| Ciphers | Chiffres | Valeur par défaut |
 
 > **L'attribut du courriel doit être `userPrincipalName`.** Open WebUI transmet l'adresse de l'utilisateur à la RAG API, qui la cherche dans ce champ de l'annuaire. Avec un autre attribut, la recherche échoue et tout le monde est refusé (403). L'attribut du **nom d'utilisateur** est celui que la personne tape pour se connecter : `sAMAccountName` permet de saisir `blaise` plutôt que `blaise@votre-domaine.ch`.
 
 **Rendre le modèle accessible :** *Settings → Admin → Models → rag-api → Make Public*, puis enregistrer.
 
 **Les tâches automatiques d'Open WebUI** (titres, étiquettes, questions de suivi) interrogent le modèle de la conversation, donc `rag-api` : une seule question de l'utilisateur déclenchait quatre appels dans le lab (un pour le titre, trois pour les suggestions), chacun avec sa recherche complète et son entrée dans le journal nLPD (§14.8.2). Le `docker-compose.yml` du dépôt les désactive (`ENABLE_TITLE_GENERATION`, `ENABLE_TAGS_GENERATION`, `ENABLE_FOLLOW_UP_GENERATION` à `false`). Ces variables ne fixent que l'**état initial** : Open WebUI les recopie dans sa base au premier démarrage, puis la base décide. Si la base existe déjà (Open WebUI démarré avant ce réglage), le faire une fois dans l'interface : *Settings → Admin → Interface*, désactiver les trois générations, et **enregistrer**.
+
+> **Réglages d'administration et réglages personnels sont distincts.** Chaque utilisateur dispose aussi, dans ses propres paramètres (menu de son compte), d'une rubrique *Interface* avec des options de titre, d'étiquettes et de suggestions de suivi. Elles ne remplacent pas le réglage d'administration : dans le lab, les modifier n'a rien changé au nombre d'appels. Le seul réglage qui compte est celui de *Settings → Admin → Interface*, vérifié par le contrôle ci-dessous.
 
 **Contrôle de la base :**
 
@@ -661,19 +679,34 @@ PYEOF
 
 ## Étape 15 : configurer n8n
 
-n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 (étape 6) : corriger par `chown -R 1000:1000 /srv/rag-donnees/n8n_data` puis `docker compose up -d n8n`.
+n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 : corriger par `chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"` puis `docker compose up -d n8n`. `deploy.sh` et l'étape 6 le font déjà.
 
-1. **Créer le compte d'envoi des courriels :** *Settings → Credentials → Add credential → SMTP* (serveur, port, utilisateur et mot de passe de l'expéditeur).
-2. **Importer les deux workflows** du dossier `scripts/N8N/` du dépôt (*Workflows → Import from file*) : `n8n-sync-corpus.json` et `n8n-rappel-rotation-svc-rag.json`.
-3. Dans chacun, ouvrir le nœud de courriel, choisir le compte SMTP, et remplacer `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` (la valeur de `ADMIN_TOKEN` du `.env`).
-4. Vérifier le nœud « POST /admin/sync » : URL `http://rag-api:8080/admin/sync`, méthode POST, en-tête `Authorization: Bearer <ADMIN_TOKEN>`.
-5. Activer les deux workflows, puis lancer une exécution manuelle de la synchronisation.
+**1. Créer les deux identifiants** (*Credentials → Add credential*). Le jeton d'administration n'est écrit dans aucun workflow : il reste dans l'identifiant (§16.7).
+
+| Identifiant | Type | Réglages |
+|---|---|---|
+| `RAG API - ADMIN_TOKEN` | **Header Auth** | *Name* : `Authorization` ; *Value* : `Bearer ` suivi de la valeur de `ADMIN_TOKEN` du `.env` (`grep ^ADMIN_TOKEN /root/rag-stack/.env`) ; domaines autorisés : *Specific Domains*, `rag-api` |
+| Compte d'envoi des courriels | **SMTP** | Serveur, port, utilisateur et mot de passe de la boîte d'envoi ; *SSL/TLS* désactivé avec le port 587 (STARTTLS), *Disable STARTTLS* désactivé, *Client Host Name* vide |
+
+Restreindre `RAG API - ADMIN_TOKEN` au domaine `rag-api` empêche n8n d'envoyer le jeton à une autre adresse, par exemple dans un workflow modifié par erreur. Avec Exchange Online, le serveur est `smtp.office365.com`, port 587, et l'authentification SMTP doit être autorisée pour la boîte d'envoi.
+
+**2. Importer les deux workflows** du dossier `scripts/N8N/` du dépôt (*Import from File*) : `n8n-sync-corpus.json` et `n8n-rappel-rotation-svc-rag.json`.
+
+**3. Rattacher les identifiants dans chaque nœud.** Les identifiants référencés dans les fichiers importés n'existent pas chez vous : n8n affiche *Credentials not found* ou laisse le champ vide. Ouvrir **chaque** nœud concerné et y sélectionner l'identifiant créé à l'étape 1 : le nœud « POST /admin/sync » (*Authentication* : *Generic Credential Type*, *Header Auth*, `RAG API - ADMIN_TOKEN`), et chaque nœud de courriel (identifiant SMTP).
+
+**4. Renseigner les adresses** dans chaque nœud de courriel, à la place de `<EMAIL_EXPEDITEUR>` et `<EMAIL_DESTINATAIRE>` :
+- **Expéditeur** : exactement la boîte authentifiée par l'identifiant SMTP. Avec Exchange Online, une autre adresse est refusée (`554 5.2.252 SendAsDenied`).
+- **Destinataire** : une boîte **interne** à l'organisation. Les alertes citent des noms de fichiers et des comptes : elles ne sortent pas de l'organisation.
+
+**5. Vérifier le nœud « POST /admin/sync »** : URL `http://rag-api:8080/admin/sync`, méthode POST, authentification par l'identifiant `RAG API - ADMIN_TOKEN`. Aucun jeton n'est à recopier dans le nœud.
+
+**6. Publier les deux workflows**, puis lancer une exécution manuelle de la synchronisation :
 
 ```bash
 docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -10
 ```
 
-**Attendu :** `[SYNC] Terminé : success=True`.
+**Attendu :** `[SYNC] Terminé : success=True`. Le courriel de la synchronisation ne part qu'en cas d'erreur, de quarantaine ou d'alerte de cloisonnement. Pour tester son envoi sans provoquer de panne : épingler des données d'erreur sur le nœud « POST /admin/sync » (*Pin data*, avec par exemple `"success": false`), lancer le workflow, vérifier la réception, puis **retirer l'épingle** avant de publier. Modifier la sortie d'un nœud en aval (*Set mock data*) ne teste rien : le nœud de courriel suivant reçoit toujours les données réelles.
 
 > **Une synchronisation occupe la stack et le serveur de modèles.** Tant qu'elle tourne, les réponses sont nettement plus lentes : dans le lab, trois à cinq fois plus lentes pendant une synchronisation lancée juste avant une série de questions (§10.3). Ne pas juger la vitesse de la stack à ce moment-là.
 
@@ -691,6 +724,10 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 
 **Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4). Ce test vérifie les **droits** (le filtre sur les groupes, les refus nominatifs, Purview), pas la réponse du modèle : il dure quelques secondes. Dans le lab, sur le déploiement neuf : 72 verdicts, 70 `OK`, 2 `INFO`, 0 `FUITE` (§16.3).
 
+> **Le test du garde-fou ne doit pas verrouiller `svc-rag`.** Le contrôle « Garde-fou des droits » ci-dessous désigne un partage qui n'existe pas : le compte s'authentifie normalement, chaque lecture échoue, et le garde-fou doit abandonner sans toucher à Qdrant. Ne pas le tester avec un mot de passe faux : chaque essai compte dans le seuil de verrouillage de l'Active Directory, et un compte `svc-rag` verrouillé bloque la connexion de tous les utilisateurs (cas vécu dans le lab, avant la 2.20.4 qui arrête `acl_resolver.py` au premier refus d'authentification). Déverrouillage, sur un contrôleur de domaine : `Unlock-ADAccount -Identity svc-rag`. Ce contrôle par un partage inexistant n'a pas encore été rejoué en lab.
+
+**Avant la mise en service : un snapshot de la VM arrêtée**, une fois tous les contrôles passés. Arrêter la VM (`shutdown -h now`) avant le snapshot : un snapshot à chaud d'une VM dont le disque est chiffré et où tourne une base de données peut être incohérent. Prendre ensuite un snapshot Qdrant et le copier hors de la VM (§3.7).
+
 ### Checklist
 
 | Contrôle | Commande ou action | Attendu |
@@ -700,15 +737,18 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 | Extraits indexés | Étape 12 | Plus de 0 dans les deux collections |
 | Droits recopiés | Étape 13 | `autorises` non vide |
 | Santé de la RAG API | `docker compose exec n8n wget -qO- http://rag-api:8080/health` | `"status":"ok"` |
+| Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `4 tests OK` |
 | Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
 | Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |
 | Test de cloisonnement | Étape 16 | Aucune `FUITE` |
 | Journal nLPD | `tail -1 /var/log/rag/rag-queries.jsonl` | Une entrée avec `user_id` et `ancree` |
 | Synchronisation horaire | n8n, dernière exécution | Réussie |
-| Garde-fou des droits | `SMB_PASSWORD=faux python acl_resolver.py ...` | Code 1, `[GARDE-FOU]`, Qdrant intact |
+| Garde-fou des droits | `python acl_resolver.py --share //<NOM-FILESERVER>/PartageInexistant --mount /mnt/corpus-root` | Code 1, `[GARDE-FOU]`, Qdrant intact |
 | Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
 | Avec vLLM : la clé est exigée | Étape 3B, point 5 | `401` sans la clé |
+| Redémarrage complet | `reboot`, puis §15.3.5 et `getent hosts <NOM-DC>.votre-domaine.ch <NOM-FILESERVER>` | Disque ouvert sans saisie, conteneurs `Up`, les deux noms résolus |
+| Sauvegarde | Snapshot de la VM arrêtée, puis snapshots Qdrant copiés hors de `qdrant_data` (§3.7) | Fichiers `.snapshot` présents dans la copie |
 | Microsoft 365, si déployé | Checklists de §11.8, §12.9 et §13.9 | Tous les points validés |
 
 ---
@@ -782,7 +822,31 @@ LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem ldapwhoami -H ldaps://<NOM-DC>.votre-
     -D "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" -w "<mot-de-passe>" 2>&1
 ```
 
-Causes : mot de passe de `svc-rag` erroné ou changé, compte verrouillé, certificat de l'autorité de certification incorrect, ou attribut LDAP d'Open WebUI autre que `userPrincipalName`.
+Causes : mot de passe de `svc-rag` erroné ou changé, compte verrouillé, certificat de l'autorité de certification incorrect, attribut LDAP d'Open WebUI autre que `userPrincipalName`, ou nom du contrôleur de domaine qui ne se résout plus (DNS public dans la configuration de la VM, voir plus bas).
+
+**Tout fonctionnait, puis tout le monde est refusé après un redémarrage, et la synchronisation échoue**
+
+Journal de `rag-api` : `Erreur LDAP ... invalid server address` ; synchronisation : `NT_STATUS_INVALID_PARAMETER` sur chaque fichier, ou le garde-fou qui signale un nom de serveur introuvable. Les noms du domaine ne se résolvent plus :
+
+```bash
+resolvectl status | grep -E "Current DNS Server|DNS Servers"
+getent hosts <NOM-DC>.votre-domaine.ch <NOM-FILESERVER>
+```
+
+Si `Current DNS Server` est un DNS public, le retirer de la configuration réseau (étape 4). Le partage peut rester monté et lisible : il a été monté au démarrage, par son adresse ; ce sont les connexions suivantes, par le nom, qui échouent.
+
+**Le compte `svc-rag` est verrouillé**
+
+Journal : `NT_STATUS_ACCOUNT_LOCKED_OUT`, ou `[GARDE-FOU] Authentification refusée`. Le plus souvent, un mot de passe changé dans l'Active Directory et pas sur la VM (rotation, §9.5.1). Corriger le `.env` et le fichier de l'étape 5, puis déverrouiller sur un contrôleur de domaine :
+
+```powershell
+Unlock-ADAccount -Identity svc-rag
+Get-ADUser svc-rag -Properties LockedOut,BadLogonCount | Select-Object LockedOut,BadLogonCount
+```
+
+**`deploy.sh` ou l'étape 11 s'arrête sur un délai dépassé pendant l'installation des paquets Python**
+
+Coupure passagère vers `pypi.org`. Relancer `deploy.sh` : il reprend sans dommage, et l'installation essaie désormais dix fois avant d'abandonner. Si l'échec se répète, tester l'accès en IPv4 puis en IPv6 : `curl -4 -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/simple/`, puis la même chose avec `-6`. **Ne pas ajouter de DNS public pour contourner** : c'est la cause de la panne décrite plus haut.
 
 **La VM ne joint pas le serveur de modèles (étape 8)**
 

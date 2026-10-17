@@ -18,8 +18,13 @@ import logging
 import subprocess
 import asyncio
 import time
+import unicodedata
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access, entra_en_echec
+
+# Journaux et rapports (noms de fichiers, groupes, identifiants) : créés en 640,
+# lisibles par root et son groupe seulement (2.20.4).
+os.umask(0o027)
 
 
 def _env_nombre(nom: str, defaut, conv=int):
@@ -132,7 +137,7 @@ COLLECTION   = os.getenv("QDRANT_COLLECTION", "documents")
 DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
 DOCUMENTATION_PATHS = [
     p.strip() for p in
-    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    os.getenv("DOCUMENTATION_PATHS", "").split(",")
     if p.strip()
 ]
 LOG_FILE     = os.getenv("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
@@ -808,6 +813,46 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
         raise HTTPException(status_code=503, detail="Recherche documentaire temporairement indisponible")
 
 
+def _plier(texte: str) -> str:
+    """Forme de comparaison d'un nom de fichier : sans accents, sans casse,
+    composition Unicode unifiée (un nom lu sur le partage peut être en forme
+    décomposée, NFD, et le même nom écrit par le modèle en forme composée, NFC)."""
+    t = unicodedata.normalize("NFKD", texte)
+    return "".join(ch for ch in t if not unicodedata.combining(ch)).casefold().strip()
+
+
+def corriger_accents_citations(answer: str, noms: list[str]) -> str:
+    """
+    Le modèle recopie parfois un nom de fichier en perdant ou en ajoutant un
+    accent (« [Procedure_Purview.pdf] » pour « Procédure_Purview.pdf »). Le
+    contrôle des citations, exact par conception, signalait alors une source
+    inexistante, et la réponse recevait un avertissement à tort.
+
+    Correction limitée : une citation entre crochets qui n'est pas un nom exact
+    est remplacée par le nom réel seulement si sa forme pliée (sans accents ni
+    casse) correspond à UN SEUL document fourni au modèle, avec ou sans
+    l'extension. Ambiguïté ou aucune correspondance : la citation reste telle
+    quelle, et verifier_citations la signale comme avant.
+    """
+    noms_exacts = set(noms)
+    index: dict[str, set[str]] = {}
+    for nom in noms:
+        for cle in {_plier(nom), _plier(os.path.splitext(nom)[0])}:
+            index.setdefault(cle, set()).add(nom)
+
+    def remplacer(m: re.Match) -> str:
+        cite, suite = m.group(1), m.group(2) or ""
+        if cite in noms_exacts:
+            return m.group(0)
+        candidats = index.get(_plier(cite), set())
+        if len(candidats) == 1:
+            return f"[{next(iter(candidats))}{suite}]"
+        return m.group(0)
+
+    # [nom] ou [nom : emplacement recopié]
+    return re.sub(r"\[([^\]\[:\n]{3,150}?)(\s*:[^\]\n]*)?\]", remplacer, answer)
+
+
 def normaliser_citations(answer: str, chunks: list[dict]) -> str:
     """
     Remet entre crochets les noms de fichiers sources que le modèle a cités sans
@@ -815,9 +860,12 @@ def normaliser_citations(answer: str, chunks: list[dict]) -> str:
     recopié derrière (« fichier.docx : SharePoint, site RH, Documents »). Les
     citations deviennent ainsi vérifiables et cliquables. Seuls les noms des
     documents réellement fournis au modèle sont concernés.
+    Corrige aussi les citations dont seul un accent diffère du nom réel
+    (corriger_accents_citations).
     """
     noms = sorted({c.get("source", "").split("/")[-1] for c in chunks if c.get("source")},
                   key=len, reverse=True)
+    answer = corriger_accents_citations(answer, noms)
     for nom in noms:
         # Le modèle recopie parfois un lien trouvé dans un document :
         # « [nom.md](https://…) ». On garde la citation, sans ce lien : la RAG API
@@ -1034,18 +1082,20 @@ async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
     # correcte même sans chunks, et ne doit pas polluer le journal nLPD
     # avec ancree: false.
     if len(answer) < 200 and "ne figure pas dans les documents" in answer:
-        return {"ancree": True, "affirmations_non_sourcees": []}
+        return {"ancree": True, "affirmations_non_sourcees": [], "controle": "refus"}
 
     # Contrôle 2 : aucun chunk
     if not chunks:
-        return {"ancree": False, "affirmations_non_sourcees": ["Aucun document source récupéré"]}
+        return {"ancree": False, "affirmations_non_sourcees": ["Aucun document source récupéré"],
+                "controle": "aucun_document"}
 
     # Contrôle 3 : sources citées inexistantes
     inventees = verifier_citations(answer, chunks)
     if inventees:
         return {
             "ancree": False,
-            "affirmations_non_sourcees": [f"Source inexistante citée : {s}" for s in inventees]
+            "affirmations_non_sourcees": [f"Source inexistante citée : {s}" for s in inventees],
+            "controle": "citation_inexistante",
         }
 
     # Contrôle 4 : réponse longue sans citation
@@ -1053,7 +1103,8 @@ async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
     if len(answer) > 200 and not re.search(r'\[[^\]]+\]', answer):
         return {
             "ancree": False,
-            "affirmations_non_sourcees": ["Réponse substantielle sans aucune citation de source"]
+            "affirmations_non_sourcees": ["Réponse substantielle sans aucune citation de source"],
+            "controle": "sans_citation",
         }
 
     # Groundedness check par juge LLM
@@ -1114,11 +1165,13 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
             # sans cette validation, ce qui laisserait passer des réponses non ancrées.
             if result.get("ancree") is not True:
                 result["ancree"] = False
+            result["controle"] = "juge"
             return result
     except Exception as e:
         # Fail-closed : une vérification impossible n'est pas une vérification réussie.
         logger.warning(f"Groundedness check échoué : {e}")
-        return {"ancree": False, "affirmations_non_sourcees": [], "juge_error": str(e)}
+        return {"ancree": False, "affirmations_non_sourcees": [], "juge_error": str(e),
+                "controle": "juge_erreur"}
 
 
 # Valeurs d'exemple restées en place : avertissement bien visible au démarrage.
@@ -1146,8 +1199,13 @@ def empreinte(texte: str) -> str:
     return hashlib.sha256(texte.encode()).hexdigest()[:16]
 
 
-def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_error: str = ""):
-    """Journalise chaque requête pour audit nLPD."""
+def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_error: str = "",
+              controle: str = ""):
+    """Journalise chaque requête pour audit nLPD.
+    controle_echoue (réponse non ancrée seulement) : le contrôle qui a conclu,
+    pour distinguer un faux avertissement du contrôle des citations
+    (citation_inexistante, sans_citation, aucun_document) d'un refus du juge
+    (juge) ou d'une panne du juge (juge_erreur)."""
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "user_id": user_id,
@@ -1155,6 +1213,8 @@ def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_e
         "sources_accessed": list(dict.fromkeys(c["source"] for c in chunks)),
         "ancree": ancree,
     }
+    if not ancree and controle:
+        entry["controle_echoue"] = controle
     if juge_error:
         entry["juge_error"] = juge_error
         entry["verification"] = "erreur"
@@ -1238,7 +1298,8 @@ async def query(
     else:
         gc_result = await groundedness_check(answer, chunks)
 
-    log_query(request.user_id, request.query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
+    log_query(request.user_id, request.query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""),
+              gc_result.get("controle", ""))
 
     if not gc_result.get("ancree", True):
         raise HTTPException(
@@ -1380,7 +1441,8 @@ async def _openai_chat_completions(
     context = build_context(chunks)
     answer = normaliser_citations(nettoyer_reponse(await generate_answer(user_query, context)), chunks)
     gc_result = await groundedness_check(answer, chunks)
-    log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""))
+    log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""),
+              gc_result.get("controle", ""))
 
     # enrichir_citations après tous les contrôles (même logique que /query).
     answer = enrichir_citations(answer, chunks)

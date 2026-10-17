@@ -253,6 +253,8 @@ services:
     environment:
       # Clé d'API obligatoire pour tout accès à Qdrant (section 15)
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
+      # Snapshots écrits dans le volume, pas dans le conteneur (§3.7)
+      - QDRANT__STORAGE__SNAPSHOTS_PATH=/qdrant/storage/snapshots
     restart: unless-stopped
 
   n8n:
@@ -267,6 +269,9 @@ services:
       - N8N_HOST=0.0.0.0
       - WEBHOOK_URL=${N8N_WEBHOOK_URL}
       - N8N_SECURE_COOKIE=false
+      # Fuseau des déclencheurs planifiés (défaut de n8n : America/New_York)
+      - GENERIC_TIMEZONE=Europe/Zurich
+      - TZ=Europe/Zurich
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -355,6 +360,13 @@ services:
       - /var/log/rag:/var/log/rag
     depends_on:
       - qdrant
+    # « Up (healthy) » dans docker ps quand /health répond
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   open-webui:
@@ -492,59 +504,78 @@ ls -la /var/log/rag/
 
 ## §3.7 Sauvegarde et restauration Qdrant
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026.
+**Statut :** validé en lab le 17 octobre 2026 sur une VM Ubuntu 26.04 neuve, déployée par `deploy.sh` (disque de données chiffré, §1.5) : snapshot des deux collections, copie hors du dossier de Qdrant, suppression complète des données, restauration. Les deux collections ont été retrouvées à l'identique (76 et 1 616 extraits), la synchronisation des droits a réussi et le test de cloisonnement a donné les mêmes verdicts qu'avant.
 
-Qdrant stocke les vecteurs et les métadonnées (ACL, hashes, org_name) dans `./qdrant_data/`. Une perte de ce répertoire sans snapshot oblige à relancer une réindexation complète et un resync ACL. Prendre un snapshot avant toute opération risquée (mise à jour, modification du corpus, changement de modèle d'embedding).
+Qdrant stocke les vecteurs et les métadonnées (droits d'accès, empreintes, `org_name`) dans `./qdrant_data/`. Perdre ce dossier sans snapshot oblige à réindexer tout le partage et à resynchroniser les droits. Prendre un snapshot avant toute opération risquée : mise à jour, modification du corpus, changement de modèle d'embedding.
+
+> **Où Qdrant écrit ses snapshots.** Le `docker-compose.yml` du dépôt fixe `QDRANT__STORAGE__SNAPSHOTS_PATH=/qdrant/storage/snapshots` : les snapshots sont écrits dans le volume, donc dans `qdrant_data/snapshots/` sur la VM (sur le disque chiffré avec le §1.5). Sans ce réglage, présent depuis la 2.20.4, Qdrant les écrit dans `/qdrant/snapshots`, **à l'intérieur du conteneur** : ils sont introuvables sur la VM, et disparaissent à la première recréation du conteneur (`docker compose down`, mise à jour). Installation antérieure : récupérer d'abord les snapshots existants (`docker cp qdrant:/qdrant/snapshots/. <dossier-de-destination>/`), puis ajouter la ligne au Compose et lancer `docker compose up -d qdrant`.
 
 ### Créer un snapshot
 
 ```bash
 set -a && source /root/rag-stack/.env && set +a
 
-# Snapshot de la collection documents
-curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/snapshots
+# Un snapshot par collection
+curl -sS -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/snapshots; echo
+curl -sS -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation/snapshots; echo
 
-# Snapshot de la collection documentation
-curl -X POST -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation/snapshots
-
-# Lister les snapshots disponibles
-curl -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/snapshots
-curl -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation/snapshots
+# Contrôle : les fichiers sont bien sur la VM
+ls -lh /root/rag-stack/qdrant_data/snapshots/*/
 ```
 
-Les snapshots sont écrits dans `./qdrant_data/snapshots/`. Les copier hors du conteneur pour les conserver :
+**Attendu :** `"status":"ok"` pour chaque collection, puis un fichier `.snapshot` et son `.checksum` dans `documents/` et dans `documentation/`.
+
+**Copier les snapshots hors du dossier de Qdrant.** La restauration commence par supprimer `qdrant_data/`, snapshots compris : un snapshot laissé à cet endroit ne permet pas de restaurer.
 
 ```bash
-cp -r ~/rag-stack/qdrant_data/snapshots/ /backup/qdrant-snapshots-$(date +%Y%m%d)/
+DEST=<dossier-de-sauvegarde>/qdrant-$(date +%Y%m%d)
+mkdir -p "$DEST"
+cp -r /root/rag-stack/qdrant_data/snapshots/documents /root/rag-stack/qdrant_data/snapshots/documentation "$DEST"/
+ls -lhR "$DEST"
 ```
+
+Une copie sur le disque de la VM protège d'une fausse manœuvre, pas de la perte de la VM : la copie de référence va sur un autre support. Un snapshot contient le texte de tout le corpus et ses droits d'accès : il se protège comme les données elles-mêmes (chiffré, accès restreint).
 
 ### Restaurer un snapshot
 
 ```bash
-# Arrêter la stack
-cd ~/rag-stack && docker compose down
+cd /root/rag-stack
+set -a && source /root/rag-stack/.env && set +a
+COPIE=<dossier-de-sauvegarde>/qdrant-<date>      # copie faite à l'étape précédente
+ls -l "$COPIE"/documents "$COPIE"/documentation   # vérifier AVANT de supprimer
 
-# Supprimer les données existantes
-rm -rf ~/rag-stack/qdrant_data/
+# 1. Arrêter la stack et supprimer les données
+docker compose down
+rm -rf /root/rag-stack/qdrant_data/
+ls -la /root/rag-stack/qdrant_data/
 
-# Redémarrer Qdrant seul
+# 2. Remettre les snapshots en place, puis démarrer Qdrant seul
+mkdir -p /root/rag-stack/qdrant_data/snapshots
+cp -r "$COPIE"/documents "$COPIE"/documentation /root/rag-stack/qdrant_data/snapshots/
 docker compose up -d qdrant
 sleep 5
-set -a && source /root/rag-stack/.env && set +a
 
-# Restaurer la collection documents depuis le snapshot
-curl -X POST "http://localhost:6333/collections/documents/snapshots/recover" \
+# 3. Restaurer chaque collection (méthode PUT)
+curl -sS -w '\nHTTP %{http_code}\n' -X PUT "http://localhost:6333/collections/documents/snapshots/recover" \
   -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
-  -d '{"location": "file:///qdrant/storage/snapshots/documents/<nom-du-snapshot>.snapshot"}'
+  -d '{"location": "file:///qdrant/storage/snapshots/documents/<nom-du-snapshot-documents>.snapshot"}'
 
-# Restaurer la collection documentation
-curl -X POST "http://localhost:6333/collections/documentation/snapshots/recover" \
+curl -sS -w '\nHTTP %{http_code}\n' -X PUT "http://localhost:6333/collections/documentation/snapshots/recover" \
   -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
-  -d '{"location": "file:///qdrant/storage/snapshots/documentation/<nom-du-snapshot>.snapshot"}'
+  -d '{"location": "file:///qdrant/storage/snapshots/documentation/<nom-du-snapshot-documentation>.snapshot"}'
 
-# Redémarrer la stack complète
+# 4. Contrôler le nombre d'extraits, puis relancer toute la stack
+for c in documents documentation; do
+  echo -n "$c : "; curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/$c | grep -o '"points_count":[0-9]*'; echo
+done
 docker compose up -d
 ```
+
+**Attendu :** `{"result":true,"status":"ok",...}` et `HTTP 200` pour chaque collection, puis les mêmes nombres d'extraits qu'au moment du snapshot.
+
+> **`PUT`, pas `POST`.** La restauration passe par la méthode `PUT`. Envoyée en `POST`, elle répond `HTTP 404` sans aucun message : Qdrant ne regarde même pas le fichier. Les versions du guide antérieures à la 2.20.4 indiquaient `POST`, et cette restauration n'a jamais pu fonctionner telle qu'elle était écrite.
+
+> **`qdrant_data` est un lien symbolique** quand le disque chiffré du §1.5 est en place. `rm -rf /root/rag-stack/qdrant_data/`, avec la barre oblique finale, vide alors le dossier cible sur `/srv/rag-donnees` et **conserve le lien** (vérifié en lab) : la suite de la procédure est inchangée. Sans disque chiffré, la commande supprime le dossier, que `mkdir -p` recrée.
 
 > **Après une restauration :** relancer impérativement `acl_resolver.py` pour vérifier que les ACL sont cohérentes avec les permissions actuelles du file server. Un snapshot peut dater de plusieurs heures : des permissions modifiées entre-temps ne seraient pas reflétées.
 

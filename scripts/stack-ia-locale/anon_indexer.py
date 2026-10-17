@@ -74,6 +74,10 @@ import hashlib
 import json
 import os
 
+# Journaux et rapports (noms de fichiers, groupes, identifiants) : créés en 640,
+# lisibles par root et son groupe seulement (2.20.4).
+os.umask(0o027)
+
 
 def _env_nombre(nom: str, defaut, conv=int):
     """Lit une variable numérique ; absente OU vide = valeur par défaut. Une
@@ -135,7 +139,7 @@ COLLECTION    = os.getenv("QDRANT_COLLECTION", "documents")
 DOCUMENTATION_COLLECTION = os.getenv("DOCUMENTATION_COLLECTION", "documentation")
 DOCUMENTATION_PATHS = [
     p.strip() for p in
-    os.getenv("DOCUMENTATION_PATHS", "DOIT4EVERYONE").split(",")
+    os.getenv("DOCUMENTATION_PATHS", "").split(",")
     if p.strip()
 ]
 ORG_OWNER       = os.getenv("ORG_OWNER",       "Organisation interne")

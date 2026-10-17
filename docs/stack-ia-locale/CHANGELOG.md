@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.20.4] : Octobre 2026
+
+Second rejeu complet du §0 sur une VM Ubuntu 26.04 neuve, du 15 au 17 octobre 2026 (disque chiffré, `deploy.sh`, indexation, droits, Open WebUI, n8n, cloisonnement, deux redémarrages, sauvegarde et restauration de Qdrant). Corrections du script, du Compose, de deux outils et du guide ; procédure de restauration de Qdrant réécrite et validée.
+
+### Scripts
+
+- `deploy.sh` : contrôle de la résolution DNS du contrôleur de domaine et du serveur de fichiers, avertissement en cas de DNS public ; installation des paquets Python avec reprises (`--retries 10 --timeout 60`) et message d'erreur explicite ; dossier de documentation vide par défaut, finalité des deux collections expliquée, présence du dossier contrôlée ; montage existant en écriture signalé ; tests des citations lancés ; première indexation et synchronisation des droits proposées en fin de déploiement (facultatives, journalisées) ; résumé final corrigé (étapes n8n, snapshot).
+- `docker-compose.yml` : `QDRANT__STORAGE__SNAPSHOTS_PATH` (snapshots dans le volume) ; fuseau `Europe/Zurich` pour n8n ; `WEBHOOK_URL`, variable lue par n8n ; contrôle de santé de `rag-api`.
+- `anon_acl_resolver.py` : arrêt au premier refus d'authentification, pour ne pas verrouiller `svc-rag` ; contrôle DNS du serveur de fichiers ; messages `[GARDE-FOU]` aussi sur la sortie d'erreur ; en-tête avec les deux collections ; liste des fichiers dont une entrée ALLOWED a été ignorée.
+- `api/anon_main.py` : citations dont seul un accent ou la casse diffère du nom réel corrigées quand la correspondance est unique (faux avertissement constaté) ; contrôle qui a conclu inscrit au journal (`controle_echoue`) pour les réponses non ancrées.
+- `test_citations.py` (nouveau) : quatre tests unitaires du contrôle des citations.
+- `api/anon_main.py`, `anon_indexer.py`, `anon_acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py` : journaux et rapports créés en `640` ; dossier de documentation vide par défaut.
+- `env.example` : `DOCUMENTATION_PATHS` vide par défaut, commentaire réécrit.
+- `N8N/n8n-rappel-rotation-svc-rag.json` : mention publicitaire de n8n retirée du courriel. `N8N/index.md` : options SMTP, expéditeur, destinataire interne, fuseau.
+
+### Documentation
+
+- `section-00-quickstart.md` : statut ; étapes 2, 4 (DNS), 5 (lecture seule), 6, 7, 9, 11, 14 (libellés LDAP en français, réglages personnels), 15 (n8n, réécrite), 16 (garde-fou sans verrouillage, contrôle des citations, redémarrage, snapshot à froid) ; dépannage (noms du domaine introuvables après un redémarrage, compte verrouillé, téléchargement Python).
+- `section-03-docker-compose.md` : §3.4 extrait du Compose ; §3.7 réécrite et validée (snapshots dans le volume, copie avant suppression, restauration en `PUT`).
+- `section-05-connecteurs.md` : §5.3 DNS et lecture seule ; §5.4.2b arrêt au premier refus d'authentification, contrôle DNS, test du garde-fou ; §5.9 collection `documentation` et règle 1 corrigée.
+- `section-15-securite-donnees.md` : §15.3.5 contrôle des noms et état de santé.
+- `suivi-corrections.md` : points 89 et 93 à 104 corrigés ; points 31 et doc.5 mis à jour.
+
+---
+
 ## [2.20.3] : Octobre 2026
 
 Rejeu complet du §0 sur une VM Ubuntu 26.04 neuve : corrections de `deploy.sh`, du Compose et du guide ; section sur les sauvegardes réécrite ; lecture paginée de l'index BM25 ; points de suivi ouverts.

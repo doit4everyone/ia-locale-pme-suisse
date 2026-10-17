@@ -199,11 +199,14 @@ Une fois une synchronisation validée sans fichier « acl_illisible », retirer 
 # Installer les outils SMB et LDAP
 sudo apt install -y cifs-utils smbclient samba-common-bin ldap-utils
 
-# Configurer le DNS pour résoudre les noms AD
+# Vérifier d'abord la résolution des noms AD : si elle fonctionne déjà, ne rien modifier
+getent hosts <NOM-FILESERVER>
+resolvectl status | grep -E "DNS Servers"
+# Sinon, configurer le DNS du domaine
 sudo nano /etc/systemd/resolved.conf
 ```
 
-Ajouter dans le fichier :
+Seuls les DNS du domaine doivent figurer dans la configuration de la VM, jamais un DNS public à côté (détail et cas vécu : §0, étape 4). Si aucun DNS du domaine n'est configuré, ajouter dans le fichier :
 
 ```ini
 [Resolve]
@@ -243,7 +246,7 @@ sudo chown root:root /etc/smbcredentials/svc-rag
 sudo mkdir -p /mnt/corpus-root
 
 sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
-    -o credentials=/etc/smbcredentials/svc-rag,uid=1000,gid=1000
+    -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro
 
 # Vérifier
 ls /mnt/corpus-root/
@@ -265,11 +268,11 @@ Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab`
 sudo tee -a /etc/fstab << 'FSTAB'
 
 # Partage SMB FileService (corpus RAG, monté par svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,rw,soft,nofail 0 0
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail 0 0
 FSTAB
 ```
 
-`soft` : si le serveur est inaccessible, les opérations I/O retournent une erreur au lieu de bloquer indéfiniment. `nofail` : si le partage est inaccessible au démarrage, la VM démarre quand même au lieu de rester bloquée en attente.
+`ro` : lecture seule, la stack ne modifie jamais le partage (les versions du guide antérieures à la 2.20.4 indiquaient `rw` ici, `deploy.sh` montait déjà en `ro`). `soft` : si le serveur est inaccessible, les opérations I/O retournent une erreur au lieu de bloquer indéfiniment. `nofail` : si le partage est inaccessible au démarrage, la VM démarre quand même au lieu de rester bloquée en attente.
 
 Tester sans rebooter :
 
@@ -334,6 +337,20 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe (svc-rag
 ```
 
 Le workflow n8n détecte le code 1 et envoie un email d'alerte. Les ACL dans Qdrant ne sont pas modifiées : les accès restent tels qu'ils étaient avant la passe échouée.
+
+Depuis la 2.20.4, deux cas s'arrêtent avant même ce seuil, toujours sans modifier Qdrant :
+- **Authentification refusée** (`NT_STATUS_LOGON_FAILURE`, `NT_STATUS_ACCOUNT_LOCKED_OUT`, compte désactivé ou expiré) : arrêt au **premier** fichier. Continuer sur les autres verrouillerait `svc-rag` dans l'Active Directory, et avec lui la connexion de tous les utilisateurs. Cas vécu dans le lab : un test avec un mot de passe faux a verrouillé le compte dès le quatrième fichier.
+- **Nom du serveur de fichiers introuvable** : contrôle DNS avant la première lecture. Sans lui, chaque fichier échouait avec `NT_STATUS_INVALID_PARAMETER`, un message qui n'oriente pas vers le DNS.
+
+Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API reprend dans le rapport de synchronisation et donc dans le courriel d'alerte.
+
+**Tester le garde-fou sans risque** : désigner un partage inexistant sur le bon serveur. Le compte s'authentifie normalement, chaque lecture échoue, et le garde-fou doit abandonner (code 1). Ne pas tester avec un mot de passe faux.
+
+```bash
+python acl_resolver.py --share //<NOM-FILESERVER>/PartageInexistant --mount /mnt/corpus-root; echo "code retour : $?"
+```
+
+Ce test par un partage inexistant n'a pas encore été rejoué en lab.
 
 ### §5.4.3 Premier lancement en dry-run
 
@@ -505,8 +522,8 @@ Dans l'interface admin Open WebUI, naviguer vers **Settings → Admin → Authen
 | TLS | Activé |
 | Validate Certificate | Désactivé |
 | DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
-| Mot de passe DN | mot de passe de svc-rag |
-| Attribut pour le courriel | `userPrincipalName` |
+| Mot de passe DN de l'application | mot de passe de svc-rag |
+| Attribut pour l'e-mail | `userPrincipalName` |
 | Attribut pour le nom d'utilisateur | `sAMAccountName` |
 | Base de recherche | `DC=votre-domaine,DC=ch` |
 | Filtres de recherche | `(objectClass=user)` |
@@ -654,7 +671,7 @@ La stack utilise deux collections Qdrant distinctes pour séparer le corpus d'en
 | Collection | Contenu | Cloisonnement ACL |
 |---|---|---|
 | `documents` | Corpus entreprise (CLIENTS, RH, DIRECTION, etc.) | Oui, par groupes AD |
-| `documentation` | Documentation technique (DOIT4EVERYONE/) | Oui, selon les ACL NTFS du dossier dans Qdrant |
+| `documentation` | Documentation technique : les dossiers de `DOCUMENTATION_PATHS` (`DOIT4EVERYONE/` dans le lab ; aucun par défaut depuis la 2.20.4) | Oui, selon les ACL NTFS du dossier dans Qdrant |
 
 Le routage se fait automatiquement à l'indexation selon le chemin relatif du fichier. Les dossiers dont le chemin commence par un préfixe de `DOCUMENTATION_PATHS` vont dans `documentation`. Tout le reste va dans `documents`.
 
@@ -663,7 +680,7 @@ Le routage se fait automatiquement à l'indexation selon le chemin relatif du fi
 > **Ces règles sont structurelles.** Leur non-respect produit un routage silencieusement incorrect sans message d'erreur : des documents confidentiels peuvent se retrouver dans `documentation` sans cloisonnement ACL effectif.
 
 **Règle 1 : dossiers de documentation uniquement à la racine du partage.**
-Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\FileService`. Jamais dans un sous-dossier. Si `CLIENTS\DOIT4EVERYONE\` existe, ses fichiers partent en `documentation` sans cloisonnement ACL.
+Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\FileService`. Le routage compare le **début** du chemin relatif du fichier au nom déclaré : un dossier `CLIENTS\DOIT4EVERYONE\` n'est pas reconnu, et ses fichiers restent dans `documents`. Un chemin avec sous-dossier (`CLIENTS/DOC`) serait reconnu par le code, mais contredit cette règle : `deploy.sh` le refuse.
 
 **Règle 2 : droits AD sur les dossiers racine.**
 Seul un administrateur peut créer des dossiers à la racine du partage.
