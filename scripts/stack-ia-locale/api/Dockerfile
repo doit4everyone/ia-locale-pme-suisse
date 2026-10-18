@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Image de base figée par empreinte (relevée sur la VM de test le 17 octobre 2026).
+# Mettre à jour = revalider (§16.8).
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
 
 # smbclient fournit le binaire smbcacls, appelé par acl_resolver.py
 # pour lire les ACL NTFS du partage. Sans ce paquet, la synchronisation

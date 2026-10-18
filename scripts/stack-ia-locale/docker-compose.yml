@@ -16,7 +16,11 @@ services:
 
   qdrant:
     # Versions figées, validées en lab (§3.4). Mettre à jour = revalider (§16.8).
-    image: qdrant/qdrant:v1.19.0
+    # Chaque image est désignée par sa version ET par son empreinte (@sha256) :
+    # l'empreinte garantit que l'image téléchargée est exactement celle validée,
+    # même si l'éditeur republie une version sous le même nom. Empreintes
+    # relevées sur la VM de test le 17 octobre 2026 (docker image inspect).
+    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
@@ -35,17 +39,21 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:2.36.9
+    image: n8nio/n8n:2.36.9@sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d
     container_name: n8n
-    ports:
-      - "5678:5678"
+    # Aucun port publié : n8n est joint par Nginx, https://<NOM-STACK>:5678 (§9.8)
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-      - N8N_HOST=0.0.0.0
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
-      - N8N_SECURE_COOKIE=false
+      # Adresse publique de n8n, derrière Nginx (TLS terminé par Nginx, §9.8)
+      - N8N_HOST=${RAG_FQDN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_PROXY_HOPS=1
+      - WEBHOOK_URL=https://${RAG_FQDN}:5678/
+      # Cookie de session réservé à HTTPS
+      - N8N_SECURE_COOKIE=true
       # Fuseau horaire des déclencheurs planifiés et des dates affichées.
       # Sans lui, n8n compte en America/New_York.
       - GENERIC_TIMEZONE=Europe/Zurich
@@ -84,6 +92,8 @@ services:
       - ORG_NAME=${ORG_NAME}
       - API_TOKEN=${API_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
+      # Secret de vérification de l'identité signée par Open WebUI (point 44)
+      - OWUI_JWT_SECRET=${OWUI_JWT_SECRET}
       - LOG_FILE=${LOG_FILE}
       - REPORT_DIR=${REPORT_DIR}
       - TOP_K=${TOP_K}
@@ -220,12 +230,11 @@ services:
     restart: unless-stopped
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.11.3
+    image: ghcr.io/open-webui/open-webui:v0.11.3@sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933
     container_name: open-webui
     depends_on:
       - rag-api
-    ports:
-      - "3001:8080"
+    # Aucun port publié : Open WebUI est joint par Nginx, https://<NOM-STACK> (§9.8)
     environment:
       - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
       # Les utilisateurs ne doivent voir que la RAG API (§16.7). Lue au premier
@@ -233,6 +242,9 @@ services:
       - ENABLE_OLLAMA_API=false
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      # Identité signée : un jeton JWT (X-OpenWebUI-User-Jwt) au lieu des en-têtes
+      # simples, que la RAG API refuse. Même secret que OWUI_JWT_SECRET de rag-api.
+      - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OWUI_JWT_SECRET}
       # Tâches d'arrière-plan (titre, étiquettes, questions de suivi) : chacune adresse un
       # appel complet à rag-api (recherche, Purview, génération, juge) et une entrée au
       # journal nLPD. Désactivées ici. Comme ENABLE_OLLAMA_API, ces variables ne fixent que
@@ -241,8 +253,32 @@ services:
       - ENABLE_TAGS_GENERATION=false
       - ENABLE_FOLLOW_UP_GENERATION=false
       - ENABLE_AUTOCOMPLETE_GENERATION=false
+      # Pas de vérification de version sur Internet : la veille se fait à la main (§16.8)
+      - ENABLE_VERSION_UPDATE_CHECK=false
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
     volumes:
       - ./openwebui_data:/app/backend/data
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+    restart: unless-stopped
+
+  # Frontal TLS (§9.8) : seul service qui publie des ports sur la VM.
+  # Certificat dans /etc/rag-tls (rag.crt, rag.key) : autorité interne, ou
+  # auto-signé pour un essai. Configuration : ./nginx/rag.conf, où <NOM-STACK>
+  # est remplacé par le nom de la stack (RAG_FQDN).
+  nginx:
+    # Version figée. Mettre à jour = revalider (§16.8).
+    image: nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
+    container_name: nginx
+    depends_on:
+      - open-webui
+      - n8n
+    ports:
+      - "80:80"
+      - "443:443"
+      - "5678:5678"
+    volumes:
+      - ./nginx/rag.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/rag-tls:/etc/nginx/tls:ro
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped

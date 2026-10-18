@@ -47,15 +47,15 @@ import httpx
 os.umask(0o027)
 
 URL = os.getenv("RAG_URL", "http://localhost:8080")
-TOKEN = os.getenv("API_TOKEN", "")
 ADMIN = os.getenv("ADMIN_TOKEN", "")
 DOSSIER_RAPPORT = os.getenv("RAPPORT_DIR", "/var/log/rag")
 
 
 def interroger(question: str, compte: str) -> dict:
     """Pose la question au nom du compte. Renvoie réponse et sources."""
+    # /query est réservé au jeton d'administration (2.21.0)
     r = httpx.post(f"{URL}/query", timeout=900,
-                   headers={"Authorization": f"Bearer {TOKEN}"},
+                   headers={"Authorization": f"Bearer {ADMIN}"},
                    json={"query": question, "user_id": compte})
     if r.status_code == 200:
         d = r.json()
@@ -157,9 +157,8 @@ def main():
     ap.add_argument("--cas")
     ap.add_argument("--mode", choices=["acces", "complet"], default="acces")
     a = ap.parse_args()
-    if a.mode == "complet" and not TOKEN:
-        sys.exit("API_TOKEN absent de l'environnement")
-    if a.mode == "acces" and not ADMIN:
+    # Les deux modes utilisent le jeton d'administration (/query depuis la 2.21.0)
+    if not ADMIN:
         sys.exit("ADMIN_TOKEN absent de l'environnement")
 
     cfg = json.load(open(a.fichier_cas, encoding="utf-8"))

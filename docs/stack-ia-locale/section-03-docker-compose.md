@@ -34,13 +34,13 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 ## §3.1 Structure des répertoires
 
 ```bash
-mkdir -p ~/rag-stack/{qdrant_data,n8n_data,openwebui_data,api}
+mkdir -p ~/rag-stack/{qdrant_data,n8n_data,openwebui_data,api,nginx}
 mkdir -p /var/log/rag
 chmod 750 /var/log/rag
 cd ~/rag-stack
 ```
 
-`/var/log/rag` accueille le journal nLPD et les rapports de synchronisation. Ce répertoire doit exister avant le premier lancement, sinon le montage Docker échoue silencieusement.
+`/var/log/rag` accueille le journal nLPD et les rapports de synchronisation. Ce répertoire doit exister avant le premier lancement, sinon le montage Docker échoue silencieusement. `nginx` reçoit la configuration du frontal (`rag.conf`, §9.8) ; le certificat et sa clé vont dans `/etc/rag-tls`.
 
 ---
 
@@ -80,8 +80,17 @@ DOCUMENTATION_PATHS=DOIT4EVERYONE
 ORG_NAME=Axonix SA
 
 # Authentification API (générer avec openssl rand -hex 32)
+# Valeur d'exemple, vide, trop courte (< 32 caractères) ou jetons identiques :
+# la RAG API refuse de démarrer (§16.6).
 API_TOKEN=changeme-api-token
 ADMIN_TOKEN=changeme-admin-token
+# Identité signée par Open WebUI, vérifiée par la RAG API (§5.6.1)
+OWUI_JWT_SECRET=changeme-owui-jwt-secret
+# Empreintes HMAC des questions dans le journal (§16.6)
+LOG_HMAC_KEY=changeme-log-hmac-key
+
+# Nom de la stack (§9.8) : https://<RAG_FQDN> pour Open WebUI, :5678 pour n8n
+RAG_FQDN=<rag.votre-domaine.ch>
 
 # Journalisation et rapports de synchronisation
 LOG_FILE=/var/log/rag/rag-queries.jsonl
@@ -149,36 +158,34 @@ La RAG API est construite localement via Docker. Les trois fichiers suivants for
 
 **api/requirements.txt**
 
+Depuis la 2.21.0, le fichier fixe **toutes** les dépendances à la version exacte, relevées par `pip freeze` dans le conteneur validé (§16.8). Début du fichier ; la liste complète est dans le [dépôt](../../scripts/stack-ia-locale/api/requirements.txt) :
+
 ```
-# API
-fastapi
-uvicorn[standard]
-python-dotenv
-httpx
-
-# Vector store
-qdrant-client
-
-# Retrieval hybride BM25
-# Index en mémoire : ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
-# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors, voir §10).
-rank-bm25
-
-# Résolution LDAP
-ldap3
-
-# Extraction de texte
-python-docx
-pdfplumber
-python-pptx
+# Dépendances directes :
+#   fastapi, uvicorn[standard], python-dotenv, httpx  : API
+#   qdrant-client                                      : index vectoriel
+#   rank-bm25                                          : recherche par mots-clés
+#   ldap3                                              : groupes Active Directory (auth.py)
+#   msal                                               : Entra ID, Partie 3 (auth.py, teams.py)
+#   python-docx, pdfplumber, python-pptx               : extraction de texte (indexer.py)
+#   PyJWT                                              : identité signée par Open WebUI (main.py),
+#                                                        installé aussi comme dépendance de msal
+# Les autres lignes sont leurs dépendances, figées elles aussi.
+...
+fastapi==0.143.2
+...
 ```
+
+L'index BM25 tient en mémoire : environ 1 Mo pour 1 000 chunks, 200 Mo pour 50 000 chunks. Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors, voir §10).
 
 `ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. `rank-bm25` est requis par `main.py` pour le retrieval hybride BM25 : un index de recherche par mots-clés est construit en mémoire au démarrage du conteneur et fusionné avec la recherche vectorielle par Reciprocal Rank Fusion (RRF). L'index BM25 inclut le champ `chunk_index` pour que l'extension de contexte fonctionne même quand un chunk BM25 gagne le classement RRF.
 
 **api/Dockerfile**
 
 ```dockerfile
-FROM python:3.11-slim
+# Image de base figée par empreinte (relevée sur la VM de test le 17 octobre 2026).
+# Mettre à jour = revalider (§16.8).
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce
 
 # smbclient fournit le binaire smbcacls, appelé par acl_resolver.py
 # pour lire les ACL NTFS du partage. Sans ce paquet, la synchronisation
@@ -220,8 +227,11 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 | Qdrant | `qdrant/qdrant:v1.19.0` | `sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc` |
 | n8n | `n8nio/n8n:2.36.9` | `sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d` |
 | Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | `sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933` |
+| Nginx | `nginx:1.30.6-alpine` | `sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5` |
 
-En production, désigner les images par leur empreinte (`image@sha256:…`) garantit en plus que le contenu ne change pas sous un même numéro (§17.7). Toute mise à jour d'un composant se revalide : §16.8 en donne un exemple concret.
+Depuis la 2.21.0, le Compose du dépôt désigne chaque image par son numéro **et** son empreinte (`image: nginx:1.30.6-alpine@sha256:…`) : le contenu ne peut pas changer sous un même numéro. Toute mise à jour d'un composant se revalide : §16.8 en donne un exemple concret et la marche à suivre.
+
+> **Extrait.** Le bloc ci-dessous reprend les services des Parties 1 et 2 ; les variables de la Partie 3 (Entra ID, Teams, SharePoint, Purview) sont dans le [Compose du dépôt](../../scripts/stack-ia-locale/docker-compose.yml), qui fait foi.
 
 ```yaml
 services:
@@ -258,17 +268,21 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:2.36.9
+    image: n8nio/n8n:2.36.9@sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d
     container_name: n8n
-    ports:
-      - "5678:5678"
+    # Aucun port publié : n8n est joint par Nginx, https://<RAG_FQDN>:5678 (§9.8)
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-      - N8N_HOST=0.0.0.0
-      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
-      - N8N_SECURE_COOKIE=false
+      # Adresse publique de n8n, derrière Nginx (TLS terminé par Nginx, §9.8)
+      - N8N_HOST=${RAG_FQDN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - N8N_PROXY_HOPS=1
+      - WEBHOOK_URL=https://${RAG_FQDN}:5678/
+      # Cookie de session réservé à HTTPS
+      - N8N_SECURE_COOKIE=true
       # Fuseau des déclencheurs planifiés (défaut de n8n : America/New_York)
       - GENERIC_TIMEZONE=Europe/Zurich
       - TZ=Europe/Zurich
@@ -280,8 +294,8 @@ services:
     build: ./api
     container_name: rag-api
     # Port 8080 non publié sur le LAN : joignable uniquement depuis le réseau
-    # Compose interne (open-webui via http://rag-api:8080, n8n idem).
-    # Empêche la falsification de l'en-tête X-OpenWebUI-User-Email depuis le LAN.
+    # Compose interne (Nginx pour /sante, open-webui et n8n via http://rag-api:8080).
+    # L'identité de l'utilisateur est en plus signée par Open WebUI (OWUI_JWT_SECRET).
     environment:
       - QDRANT_HOST=${QDRANT_HOST}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
@@ -304,6 +318,8 @@ services:
       - ORG_NAME=${ORG_NAME}
       - API_TOKEN=${API_TOKEN}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
+      # Secret de vérification de l'identité signée par Open WebUI (§5.6.1)
+      - OWUI_JWT_SECRET=${OWUI_JWT_SECRET}
       - LOG_FILE=${LOG_FILE}
       - REPORT_DIR=${REPORT_DIR}
       - TOP_K=${TOP_K}
@@ -370,26 +386,56 @@ services:
     restart: unless-stopped
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.11.3
+    image: ghcr.io/open-webui/open-webui:v0.11.3@sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933
     container_name: open-webui
     depends_on:
       - rag-api
-    ports:
-      - "3001:8080"
+    # Aucun port publié : Open WebUI est joint par Nginx, https://<RAG_FQDN> (§9.8)
     environment:
       - OLLAMA_BASE_URL=http://<IP-HOTE-OLLAMA>:11434
+      - ENABLE_OLLAMA_API=false
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      # Identité signée (X-OpenWebUI-User-Jwt), même secret que rag-api (§5.6.1)
+      - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OWUI_JWT_SECRET}
+      - ENABLE_TITLE_GENERATION=false
+      - ENABLE_TAGS_GENERATION=false
+      - ENABLE_FOLLOW_UP_GENERATION=false
+      - ENABLE_AUTOCOMPLETE_GENERATION=false
+      # Pas de vérification de version sur Internet (§16.8)
+      - ENABLE_VERSION_UPDATE_CHECK=false
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
     volumes:
       - ./openwebui_data:/app/backend/data
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
+    restart: unless-stopped
+
+  # Frontal TLS (§9.8) : seul service qui publie des ports sur la VM.
+  nginx:
+    image: nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5
+    container_name: nginx
+    depends_on:
+      - open-webui
+      - n8n
+    ports:
+      - "80:80"
+      - "443:443"
+      - "5678:5678"
+    volumes:
+      # <NOM-STACK> remplacé par RAG_FQDN (deploy.sh, ou sed de §9.8.1)
+      - ./nginx/rag.conf:/etc/nginx/conf.d/default.conf:ro
+      # rag.crt (certificat suivi de l'intermédiaire) et rag.key
+      - /etc/rag-tls:/etc/nginx/tls:ro
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 ```
 
 > **Montage en lecture seule pour `/rag-pipeline` :** le conteneur exécute `indexer.py` et `acl_resolver.py` mais ne doit pas pouvoir les modifier. Si un lecteur suit ce guide avec un dépôt Git, ce montage protège les scripts d'une altération accidentelle depuis le conteneur.
 >
 > **Montage du certificat AD :** `/etc/ssl/certs/ad-chain.pem` doit exister sur l'hôte avant le lancement. En son absence, le montage échoue et le conteneur ne démarre pas. Voir §9.2 pour l'export et l'installation du certificat.
+>
+> **Certificat de Nginx :** `/etc/rag-tls/rag.crt` et `rag.key` doivent exister avant le lancement, sinon Nginx s'arrête aussitôt et la stack n'est pas joignable. `deploy.sh` génère un certificat auto-signé s'il n'en trouve pas ; à la main, la commande est en §9.8.6.
 
 ---
 
@@ -432,7 +478,7 @@ docker compose logs -f
 docker compose down
 ```
 
-> **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`. Si `n8n_data` est un lien (§1.5), `chown -R` appliqué au lien ne change pas le dossier : d'où `readlink -f`. L'adresse annoncée par n8n vient de `N8N_WEBHOOK_URL` dans le `.env`.
+> **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`. Si `n8n_data` est un lien (§1.5), `chown -R` appliqué au lien ne change pas le dossier : d'où `readlink -f`. L'adresse annoncée par n8n vient de `RAG_FQDN` dans le `.env` (2.21.0 ; auparavant `N8N_WEBHOOK_URL`).
 >
 > **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.2) avant toute connexion LDAP.
 
@@ -457,8 +503,11 @@ set -a && source .env && set +a
 # Qdrant opérationnel (la clé d'API est obligatoire)
 curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections
 
-# n8n health check
-curl http://localhost:5678/healthz
+# Frontal Nginx et RAG API (certificat de l'autorité interne ; auto-signé : -k)
+curl --cacert /etc/ssl/certs/ad-chain.pem https://$RAG_FQDN/sante
+
+# n8n health check (n8n ne publie plus de port depuis la 2.21.0)
+docker compose exec n8n wget -qO- http://localhost:5678/healthz
 
 # RAG API health
 docker compose exec n8n wget -qO- http://rag-api:8080/health
@@ -466,11 +515,12 @@ docker compose exec n8n wget -qO- http://rag-api:8080/health
 # RAG API stats (vérifie la connectivité Qdrant et la config LLM)
 docker compose exec n8n wget -qO- --header="Authorization: Bearer $ADMIN_TOKEN" http://rag-api:8080/stats
 
-# Test requête authentifiée via /query (endpoint machine à machine)
+# Test requête authentifiée via /query (outil d'administration et de test,
+# réservé à ADMIN_TOKEN depuis la 2.21.0 ; API_TOKEN est refusé : 401)
 # user_id doit être un email valide, sinon retourne 403
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/query \
-  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "Test RAG", "user_id": "admin@votre-domaine.ch"}'
 
@@ -483,11 +533,13 @@ docker run --rm --network rag-stack_default curlimages/curl \
 # Test rejet user_id sans @ (doit retourner 403)
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/query \
-  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "test", "user_id": "invalide"}'
 
-# Test endpoint OpenAI-Compatible (pour Open WebUI)
+# Test endpoint OpenAI-Compatible (pour Open WebUI). Sans l'identité signée
+# par Open WebUI, la requête est refusée : {"detail":"Identité utilisateur non signée"}.
+# Une question réelle se pose dans Open WebUI, ou avec tests-apres-modification.md.
 docker run --rm --network rag-stack_default curlimages/curl \
   -s -X POST http://rag-api:8080/v1/chat/completions \
   -H "Authorization: Bearer $API_TOKEN" \

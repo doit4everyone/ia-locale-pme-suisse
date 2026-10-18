@@ -86,14 +86,19 @@ docker exec rag-api python3 -c "import httpx; print(httpx.get('http://localhost:
 
 ## 5. Identité et résolution Entra
 
-Une question au nom de un compte aux droits limités, puis lecture du journal.
+Une question au nom d'un compte aux droits limités, puis lecture du journal.
+
+Depuis la 2.21.0, la RAG API n'accepte que l'identité **signée** par Open WebUI (§16.6 du guide). Les commandes de cette procédure signent elles-mêmes un jeton, avec `OWUI_JWT_SECRET` présent dans l'environnement du conteneur, exactement comme Open WebUI. Une identité transmise dans un en-tête simple est refusée (403).
 
 ```bash
 docker exec rag-api python3 -c "
-import httpx, os
+import httpx, os, time, jwt
+n = int(time.time())
+ident = jwt.encode({'email': 'client@votre-domaine.ch', 'iss': 'open-webui', 'iat': n, 'exp': n + 300},
+                   os.environ['OWUI_JWT_SECRET'], algorithm='HS256')
 r = httpx.post('http://localhost:8080/v1/chat/completions', timeout=900,
     headers={'Authorization': 'Bearer ' + os.environ['API_TOKEN'],
-             'X-OpenWebUI-User-Email': 'client@votre-domaine.ch'},
+             'X-OpenWebUI-User-Jwt': ident},
     json={'model': 'rag-api', 'messages': [{'role': 'user',
           'content': 'Que dit le guide de dépannage helpdesk ?'}]})
 print(r.status_code)"
@@ -125,10 +130,13 @@ docker exec rag-api python3 -c "import httpx; print(httpx.get('https://login.mic
 
 ```bash
 time docker exec rag-api python3 -c "
-import httpx, os
+import httpx, os, time, jwt
+n = int(time.time())
+ident = jwt.encode({'email': 'direction@votre-domaine.ch', 'iss': 'open-webui', 'iat': n, 'exp': n + 300},
+                   os.environ['OWUI_JWT_SECRET'], algorithm='HS256')
 r = httpx.post('http://localhost:8080/v1/chat/completions', timeout=900,
     headers={'Authorization': 'Bearer ' + os.environ['API_TOKEN'],
-             'X-OpenWebUI-User-Email': 'direction@votre-domaine.ch'},
+             'X-OpenWebUI-User-Jwt': ident},
     json={'model': 'rag-api', 'messages': [{'role': 'user',
           'content': 'Quelle est la durée du contrat de maintenance de l Etude Rochat ?'}]})
 print(r.json()['choices'][0]['message']['content'])"
@@ -157,10 +165,13 @@ for s in e['sources_accessed']: print('    ', s)"
 
 ```bash
 time docker exec rag-api python3 -c "
-import httpx, os
+import httpx, os, time, jwt
+n = int(time.time())
+ident = jwt.encode({'email': 'direction@votre-domaine.ch', 'iss': 'open-webui', 'iat': n, 'exp': n + 300},
+                   os.environ['OWUI_JWT_SECRET'], algorithm='HS256')
 r = httpx.post('http://localhost:8080/v1/chat/completions', timeout=900,
     headers={'Authorization': 'Bearer ' + os.environ['API_TOKEN'],
-             'X-OpenWebUI-User-Email': 'direction@votre-domaine.ch'},
+             'X-OpenWebUI-User-Jwt': ident},
     json={'model': 'rag-api', 'messages': [{'role': 'user',
           'content': 'fait moi un resumé sur tout ce que tu sais sur les clients'}]})
 print(r.json()['choices'][0]['message']['content'])"
@@ -208,10 +219,13 @@ Indispensable après toute modification du prompt : une question à laquelle le 
 
 ```bash
 docker exec rag-api python3 -c "
-import httpx, os
+import httpx, os, time, jwt
+n = int(time.time())
+ident = jwt.encode({'email': 'direction@votre-domaine.ch', 'iss': 'open-webui', 'iat': n, 'exp': n + 300},
+                   os.environ['OWUI_JWT_SECRET'], algorithm='HS256')
 r = httpx.post('http://localhost:8080/v1/chat/completions', timeout=900,
     headers={'Authorization': 'Bearer ' + os.environ['API_TOKEN'],
-             'X-OpenWebUI-User-Email': 'direction@votre-domaine.ch'},
+             'X-OpenWebUI-User-Jwt': ident},
     json={'model': 'rag-api', 'messages': [{'role': 'user',
           'content': 'Quelle est la capitale de l Australie ?'}]})
 print(r.json()['choices'][0]['message']['content'])"
@@ -223,10 +237,13 @@ print(r.json()['choices'][0]['message']['content'])"
 
 ```bash
 docker exec rag-api python3 -c "
-import httpx, os
+import httpx, os, time, jwt
+n = int(time.time())
+ident = jwt.encode({'email': 'direction@votre-domaine.ch', 'iss': 'open-webui', 'iat': n, 'exp': n + 300},
+                   os.environ['OWUI_JWT_SECRET'], algorithm='HS256')
 r = httpx.post('http://localhost:8080/v1/chat/completions', timeout=900,
     headers={'Authorization': 'Bearer ' + os.environ['API_TOKEN'],
-             'X-OpenWebUI-User-Email': 'direction@votre-domaine.ch'},
+             'X-OpenWebUI-User-Jwt': ident},
     json={'model': 'rag-api', 'messages': [{'role': 'user',
           'content': 'Quel est le montant mensuel du contrat de maintenance de la société Dupont Logistique SA ?'}]})
 print(r.json()['choices'][0]['message']['content'])"

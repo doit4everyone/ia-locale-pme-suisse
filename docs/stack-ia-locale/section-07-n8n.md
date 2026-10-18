@@ -40,14 +40,14 @@ Les pipelines de maintenance et de sécurité sont indépendants du GPU. Le rés
 
 ### §7.1.1 Accès à l'interface n8n
 
-n8n est accessible sur `http://<IP-VM>:5678`. Identifiants définis dans le fichier `.env` :
+n8n est accessible sur `https://<RAG_FQDN>:5678` (par exemple `https://rag.votre-domaine.ch:5678`), à travers le frontal Nginx (§9.8). Identifiants définis dans le fichier `.env` :
 
 ```bash
 N8N_BASIC_AUTH_USER=admin
 N8N_BASIC_AUTH_PASSWORD=<mot-de-passe>
 ```
 
-> **`N8N_SECURE_COOKIE=false` en lab :** n8n refuse l'accès via IP en HTTP par défaut. Cette variable désactive la restriction pour un accès en réseau local sans TLS. En production, mettre en place un reverse proxy Nginx avec TLS et retirer cette variable.
+> **HTTPS depuis la 2.21.0 :** n8n ne publie plus de port ; Nginx le sert en HTTPS sur le port 5678, sous le nom de la stack. Le Compose du dépôt lui indique qu'il est derrière un frontal (`N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `WEBHOOK_URL=https://<RAG_FQDN>:5678/`) et réserve le cookie de session au HTTPS (`N8N_SECURE_COOKIE=true`). Avant la 2.21.0, l'accès se faisait en HTTP par `http://<IP-VM>:5678`, avec `N8N_SECURE_COOKIE=false`. Les workflows joignent toujours la RAG API par le réseau interne (`http://rag-api:8080`) : ils ne changent pas.
 
 ### §7.1.2 Importer un pipeline
 

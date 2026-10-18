@@ -1,29 +1,66 @@
-# API
-fastapi
-uvicorn[standard]
-python-dotenv
-httpx
-
-# Vector store (main.py, indexer.py, acl_resolver.py)
-qdrant-client
-
-# Retrieval hybride BM25 (main.py)
-# Index en mémoire, ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
-# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors).
-rank-bm25
-
-# Résolution LDAP des groupes AD (auth.py)
-ldap3
-
-# Résolution Entra ID via Microsoft Graph, authentification par certificat
-# (auth.py, extension Partie 3, active si ENTRA_ENABLED=true)
-msal
-
-# Extraction de texte des documents (indexer.py)
-python-docx
-
-# Extraction PDF (indexer.py)
-pdfplumber
-
-# Extraction PowerPoint (indexer.py)
-python-pptx
+# Dépendances de la RAG API, figées à la version exacte (2.21.0).
+# Relevées par « pip freeze » dans le conteneur rag-api validé sur la VM de test
+# le 17 octobre 2026 : deux constructions donnent les mêmes paquets.
+# Mettre à jour = revalider (§16.8), puis relever à nouveau la liste.
+#
+# Dépendances directes :
+#   fastapi, uvicorn[standard], python-dotenv, httpx  : API
+#   qdrant-client                                      : index vectoriel
+#   rank-bm25                                          : recherche par mots-clés
+#   ldap3                                              : groupes Active Directory (auth.py)
+#   msal                                               : Entra ID, Partie 3 (auth.py, teams.py)
+#   python-docx, pdfplumber, python-pptx               : extraction de texte (indexer.py)
+#   PyJWT                                              : identité signée par Open WebUI (main.py),
+#                                                        installé aussi comme dépendance de msal
+# Les autres lignes sont leurs dépendances, figées elles aussi.
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+cryptography==50.0.2
+fastapi==0.143.2
+grpcio==1.84.0
+h11==0.16.0
+h2==4.4.1
+hpack==4.2.0
+httpcore==1.0.9
+httptools==0.9.0
+httpx==0.28.1
+hyperframe==6.1.0
+idna==3.20
+ldap3==2.9.1
+lxml==6.1.3
+msal==1.39.0
+numpy==2.4.6
+opentelemetry-api==1.45.1
+packaging==26.3
+pdfminer.six==20260107
+pdfplumber==0.11.10
+pillow==12.3.0
+portalocker==3.2.0
+protobuf==7.36.2
+pyasn1==0.6.4
+pycparser==3.11
+pydantic==2.14.1
+pydantic_core==2.50.1
+PyJWT==2.15.1
+pypdfium2==5.14.0
+python-docx==1.2.0
+python-dotenv==1.2.4
+python-pptx==1.0.2
+PyYAML==6.0.3
+qdrant-client==1.19.1
+rank-bm25==0.2.2
+requests==2.34.2
+starlette==1.8.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.8.0
+uvicorn[standard]==0.54.0
+uvloop==0.23.0
+watchfiles==1.3.0
+websockets==17.2
+xlsxwriter==3.2.9

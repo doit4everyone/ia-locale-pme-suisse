@@ -495,15 +495,16 @@ Open WebUI doit transmettre l'identité de l'utilisateur connecté à la RAG API
 
 ### §5.6.1 Activer la transmission de l'identité
 
-Dans `docker-compose.yml`, ajouter la variable d'environnement au service `open-webui` :
+Dans `docker-compose.yml`, service `open-webui` (déjà présent dans le Compose du dépôt) :
 
 ```yaml
 open-webui:
   environment:
     - ENABLE_FORWARD_USER_INFO_HEADERS=true
+    - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OWUI_JWT_SECRET}
 ```
 
-Sans cette variable, Open WebUI traite la RAG API comme un simple endpoint OpenAI et ne transmet pas l'identité. Les headers transmis sont `x-openwebui-user-name`, `x-openwebui-user-email`, `x-openwebui-user-id` et `x-openwebui-user-role`.
+Sans la première variable, Open WebUI traite la RAG API comme un simple endpoint OpenAI et ne transmet pas l'identité. La seconde, depuis la 2.21.0, fait **signer** cette identité : Open WebUI (v0.11.3) n'envoie plus les en-têtes simples `X-OpenWebUI-User-*`, mais un seul en-tête `X-OpenWebUI-User-Jwt`, jeton HS256 qui porte l'adresse, le nom et le rôle de l'utilisateur, émis par `open-webui` et valable cinq minutes. La RAG API le vérifie avec le même secret (`OWUI_JWT_SECRET`, généré par `deploy.sh`) et refuse toute requête sans jeton valide (403). Les en-têtes simples ne sont plus pris en compte : quiconque connaissait `API_TOKEN` pouvait y écrire l'adresse d'un autre compte (§16.6).
 
 ```bash
 cd /root/rag-stack
@@ -550,20 +551,18 @@ Dans **Settings → Admin → Models** :
 
 ## §5.7 Intégration dans main.py
 
-La RAG API extrait l'email du header `x-openwebui-user-email`, résout les groupes AD via `auth.py`, et filtre la recherche Qdrant en conséquence.
+La RAG API extrait l'adresse de l'utilisateur du jeton signé par Open WebUI (§5.6.1), résout les groupes AD via `auth.py`, et filtre la recherche Qdrant en conséquence.
 
 ### §5.7.1 Filtre Qdrant par identité
 
 ```python
 from auth import get_user_groups
 
-# Dans l'endpoint /v1/chat/completions (comportement réel depuis v2.5.0) :
-# Si owui_email2 est absent → 403 Forbidden
+# Dans l'endpoint /v1/chat/completions (identité signée depuis la 2.21.0) :
+# Jeton absent, expiré ou invalide → 403 Forbidden (identite_open_webui)
 # Si la résolution LDAP échoue → 403 Forbidden
 # Aucun accès non filtré n'est possible
-owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
-if not owui_email2:
-    raise HTTPException(status_code=403, detail="Identité utilisateur manquante")
+owui_email2 = identite_open_webui(raw_request)   # vérifie X-OpenWebUI-User-Jwt
 user_groups = get_user_groups(owui_email2)
 if not user_groups:
     raise HTTPException(status_code=403, detail="Résolution des droits impossible")

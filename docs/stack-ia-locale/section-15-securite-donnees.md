@@ -263,6 +263,8 @@ Le même inventaire vaut côté Entra : une application d'un pilote abandonné g
 ## §15.5 Sauvegardes chiffrées
 
 > **Non validées en lab.** La nLPD n'impose pas nommément le chiffrement des sauvegardes, mais son devoir de sécurité exige des mesures appropriées au risque. Une sauvegarde contient les mêmes données que le disque chiffré : la laisser en clair annule la protection, d'autant qu'elle est souvent stockée hors du serveur. La procédure ci-dessous décrit l'approche retenue ; **elle n'a pas été rejouée en lab**, et le test de restauration de la fin de cette section est à faire avant de la déclarer validée.
+>
+> **Choix assumé (2.21.0) :** la sauvegarde de la VM relève de l'outil et des procédures de l'organisation, qui sait sauvegarder et restaurer ses machines virtuelles. Ce guide décrit ce qu'elle doit couvrir et comment la tester ; il ne la met pas en place. Seuls les snapshots Qdrant (§3.7) ont été validés en lab, restauration comprise.
 
 ### L'approche retenue : la sauvegarde de la VM entière
 
@@ -277,6 +279,7 @@ La plupart des entreprises disposent déjà d'un outil de sauvegarde de machines
 | Open WebUI (comptes, historique des conversations) | `openwebui_data` | **Non** |
 | n8n (workflows, identifiants) | `n8n_data` | **Non** (les workflows sont aussi dans le dépôt, les identifiants non) |
 | `.env`, `/etc/rag-certs` (clés des applications Entra) | Disque chiffré | Non pour le `.env` ; les certificats se régénèrent mais exigent de les réinscrire dans les App Registrations |
+| `/etc/rag-tls` (certificat et clé de Nginx, §9.8) | Disque chiffré | Oui : nouvelle demande à l'autorité interne (§9.8.6), ou auto-signé régénéré par `deploy.sh` |
 | Phrase secrète du disque (§15.3) | **Hors de la VM** | Non : sans elle, la restauration ne sert à rien |
 
 Seuls Open WebUI, n8n et les secrets déterminent donc la perte tolérable. L'index, lui, se reconstruit.

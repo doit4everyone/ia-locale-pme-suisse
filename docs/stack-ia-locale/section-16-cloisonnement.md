@@ -1,6 +1,6 @@
 ---
 title: "§16 Contrôle du cloisonnement et durcissement | Guide de déploiement stack IA locale"
-description: "Test de non-divulgation automatisé, contrôle du cloisonnement après chaque synchronisation avec alerte, correction du masque des droits NTFS, et durcissement de la RAG API, d'Open WebUI et de n8n à la suite d'une revue externe."
+description: "Test de non-divulgation automatisé, contrôle du cloisonnement après chaque synchronisation avec alerte, correction du masque des droits NTFS, durcissement de la RAG API, d'Open WebUI et de n8n à la suite d'une revue externe, versions figées et supervision externe."
 ---
 <style>
   header, footer { display: none !important; }
@@ -17,7 +17,7 @@ description: "Test de non-divulgation automatisé, contrôle du cloisonnement ap
 
 [Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md) | [Section suivante : §17 Gouvernance](section-17-gouvernance.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, octobre 2026 : 40 cas de cloisonnement conformes, une faille du calcul des droits NTFS reproduite puis corrigée, alerte prouvée par une fuite simulée.
+**Statut :** validé en lab sur VM-RAG-LAB, octobre 2026 : 40 cas de cloisonnement conformes, une faille du calcul des droits NTFS reproduite puis corrigée, alerte prouvée par une fuite simulée. Compléments de la 2.21.0 (refus des secrets d'exemple, identité signée, versions figées, supervision externe) validés sur la VM de test, octobre 2026.
 
 ---
 
@@ -127,17 +127,43 @@ Jusqu'à la v2.16, `acl_resolver.py` ne lisait que le début de la ligne : **tou
 | Panne de Qdrant ou de l'embedding | « Information absente » | Erreur 503 explicite |
 | `/stats`, `/health` | `/stats` ouvert, `/health` révèle l'adresse du moteur | `/stats` réservé à l'administration, `/health` minimal |
 | Empreinte des questions au journal | SHA-256 tronqué : une question courte se retrouve par dictionnaire | HMAC avec une clé secrète (`LOG_HMAC_KEY`) |
-| Valeurs d'exemple (`changeme`) | Aucun signal | Avertissement au démarrage pour chaque secret concerné |
+| Valeurs d'exemple (`changeme`) | Aucun signal | Avertissement au démarrage (2.17.0), puis **démarrage refusé** (2.21.0) |
+| Identité de l'utilisateur | En-têtes simples `X-OpenWebUI-User-*`, que tout détenteur d'`API_TOKEN` pouvait écrire | Jeton signé par Open WebUI, vérifié par la RAG API (2.21.0) |
+| `/query` | Accepté avec `API_TOKEN` | Réservé à `ADMIN_TOKEN` (2.21.0) |
 
-Le jeton d'administration du lab était d'ailleurs resté à sa valeur d'exemple : la stack fonctionnait sans rien signaler. L'avertissement aurait suffi à le voir.
+Le jeton d'administration du lab était d'ailleurs resté à sa valeur d'exemple : la stack fonctionnait sans rien signaler. L'avertissement aurait suffi à le voir ; depuis la 2.21.0, la RAG API refuse de démarrer.
+
+**Secrets refusés au démarrage (2.21.0).** La RAG API s'arrête (code de sortie 1) si l'un de ses secrets est vide, garde une valeur d'exemple (`changeme…`, ou un gabarit entier comme `<mot-de-passe>`), est trop court (32 caractères au moins pour les jetons et clés générés), ou si deux jetons sont identiques (`API_TOKEN`, `ADMIN_TOKEN`, `OWUI_JWT_SECRET`). Le journal dit lequel :
+
+```bash
+docker logs rag-api 2>&1 | grep SÉCURITÉ
+# [SÉCURITÉ] ADMIN_TOKEN garde une valeur d'exemple
+# [SÉCURITÉ] Démarrage refusé. Corriger le .env (jetons : openssl rand -hex 32), puis docker compose up -d rag-api
+```
+
+Les mots de passe de `svc-rag` (`LDAP_BIND_PWD`, `SMB_PASSWORD`) ne sont contrôlés que pour le vide et la valeur d'exemple : leur longueur dépend de la politique de l'annuaire. `deploy.sh` génère tous les jetons ; le refus concerne surtout une installation à la main ou un `.env` repris d'un essai.
+
+**Identité signée (2.21.0).** La RAG API résout les droits d'après l'adresse de l'utilisateur transmise par Open WebUI. Jusqu'à la 2.20, cette adresse arrivait dans un en-tête simple : un client qui connaissait `API_TOKEN` pouvait y écrire l'adresse d'un autre compte et obtenir ses droits. Désormais, Open WebUI signe l'identité avec un secret partagé (`OWUI_JWT_SECRET` du `.env`, passé à Open WebUI par `FORWARD_USER_INFO_HEADER_JWT_SECRET`) : jeton HS256, émetteur `open-webui`, valable cinq minutes. La RAG API vérifie la signature, l'émetteur et l'échéance, et ignore les en-têtes simples. Sans jeton valide : refus (403).
+
+Contrôle d'usurpation, sur la VM (une seule ligne) :
+
+```bash
+docker exec rag-api python3 -c "import os,json,urllib.request as u; d=json.dumps({'model':'rag-api','messages':[{'role':'user','content':'test'}]}).encode(); r=u.Request('http://localhost:8080/v1/chat/completions',data=d,headers={'Authorization':'Bearer '+os.environ['API_TOKEN'],'Content-Type':'application/json','X-OpenWebUI-User-Email':'<COMPTE>@votre-domaine.ch'}); print(u.urlopen(r).status)"
+# Attendu, en dernière ligne : urllib.error.HTTPError: HTTP Error 403: Forbidden
+docker logs rag-api 2>&1 | grep "identité non signée" | tail -1
+```
+
+> **Validé sur la VM de test, octobre 2026 (2.21.0) :** une question posée dans Open WebUI obtient sa réponse, avec les 17 groupes du compte de test ; un en-tête d'identité simple est refusé (403) ; `/query` avec `API_TOKEN` est refusé (401) ; `test_cloisonnement.py`, qui passe désormais par `ADMIN_TOKEN`, donne 6 cas conformes sur 6. Le test d'usurpation a été mené avec une commande équivalente ; la ligne ci-dessus est à rejouer telle quelle.
 
 ## §16.7 Open WebUI, n8n et le moteur d'inférence
 
-**Open WebUI** : dans **Réglages d'administration** → **Connexions**, désactiver **API Ollama** et **Direct connexions**. Les utilisateurs ne voient plus que le modèle de la RAG API, et ne peuvent pas ajouter eux-mêmes l'adresse d'Ollama. Faire ce réglage dans l'interface : la variable `ENABLE_OLLAMA_API=false`, placée dans le Compose du dépôt, n'est lue qu'au **premier** démarrage d'Open WebUI, qui garde ensuite ses réglages dans sa base.
+**Open WebUI** : depuis la 2.21.0, Open WebUI ne publie plus de port ; il n'est joignable que par Nginx, en HTTPS (§9.8). Il signe l'identité transmise à la RAG API (§16.6). `ENABLE_VERSION_UPDATE_CHECK=false` supprime la vérification des nouvelles versions et la bannière qui invite à mettre à jour (§16.8).
+
+Dans **Réglages d'administration** → **Connexions**, désactiver **API Ollama** et **Direct connexions**. Les utilisateurs ne voient plus que le modèle de la RAG API, et ne peuvent pas ajouter eux-mêmes l'adresse d'Ollama. Faire ce réglage dans l'interface : la variable `ENABLE_OLLAMA_API=false`, placée dans le Compose du dépôt, n'est lue qu'au **premier** démarrage d'Open WebUI, qui garde ensuite ses réglages dans sa base.
 
 **Le moteur d'inférence** : Ollama écoute sur le réseau pour que la VM puisse l'atteindre, donc n'importe quel poste peut l'interroger directement. Pas de fuite du corpus par ce chemin (le modèle n'a pas les documents), mais ni journal ni contrôle. Le pare-feu du serveur d'inférence doit n'accepter le port 11434 que depuis la VM de la stack. Si la VM est derrière un routeur qui traduit les adresses, le serveur voit l'adresse du routeur : la restriction se complète alors sur le routeur. Vérification : depuis un autre poste, `curl -m 5 http://<serveur>:11434/api/tags` doit échouer.
 
-**n8n** : le jeton d'administration n'est plus écrit dans les nœuds HTTP. Un identifiant unique de type **Header Auth** (*Name* `Authorization`, *Value* `Bearer <jeton>`, domaine autorisé : `rag-api`) est utilisé par les nœuds de synchronisation et de synthèse Teams, avec « Send Headers » désactivé. Le jeton n'apparaît plus dans les workflows ni dans leurs exports, et sa rotation se fait en un seul endroit :
+**n8n** : depuis la 2.21.0, n8n ne publie plus de port ; il est joint par `https://<RAG_FQDN>:5678`, à travers Nginx (§9.8). Le jeton d'administration n'est plus écrit dans les nœuds HTTP. Un identifiant unique de type **Header Auth** (*Name* `Authorization`, *Value* `Bearer <jeton>`, domaine autorisé : `rag-api`) est utilisé par les nœuds de synchronisation et de synthèse Teams, avec « Send Headers » désactivé. Le jeton n'apparaît plus dans les workflows ni dans leurs exports, et sa rotation se fait en un seul endroit :
 
 ```bash
 cd /root/rag-stack
@@ -157,6 +183,32 @@ En figeant les versions (§3.4), le lab est passé d'une construction de dévelo
 
 La leçon tient en une règle : **une mise à jour d'Open WebUI, de n8n ou de Qdrant ne s'installe pas sur une invitation à mettre à jour**. Elle se fait sur décision, puis se revalide : connexions d'Open WebUI, transmission de l'identité (`[AUTH] /v1` dans les journaux), test de cloisonnement, synchronisation.
 
+**Versions figées jusqu'à l'octet (2.21.0).** Un numéro de version (`tag`) peut être republié sur Docker Hub avec un autre contenu. Le `docker-compose.yml` fixe donc chaque image par son numéro **et** son empreinte (`image: nginx:1.30.6-alpine@sha256:…`) : Docker refuse une image dont le contenu diffère. L'image de base de la RAG API (`python:3.11-slim`) est figée de la même façon dans le `Dockerfile`, et `api/requirements.txt` fixe toutes les dépendances Python à la version exacte, relevées par `pip freeze` dans le conteneur validé. Validé sur la VM de test : deux constructions successives donnent la même liste de paquets, et un `docker compose pull` ne télécharge rien.
+
+**Mettre à jour une image**, Nginx par exemple, quand une nouvelle version stable est publiée (`nginx.org`, rubrique des versions) :
+
+```bash
+# 1. Télécharger la nouvelle version et relever son empreinte
+docker pull nginx:<VERSION>-alpine
+docker image inspect --format '{{index .RepoDigests 0}}' nginx:<VERSION>-alpine
+# → nginx@sha256:<EMPREINTE>
+
+# 2. Reporter numéro et empreinte dans /root/rag-stack/docker-compose.yml :
+#    image: nginx:<VERSION>-alpine@sha256:<EMPREINTE>
+
+# 3. Recréer le seul conteneur concerné, puis contrôler
+cd /root/rag-stack
+docker compose up -d nginx
+docker exec nginx nginx -v
+curl --cacert /etc/ssl/certs/ad-chain.pem https://<RAG_FQDN>/sante
+```
+
+En cas de problème, remettre l'ancienne ligne `image:` et relancer `docker compose up -d nginx`. Même démarche pour Qdrant, n8n et Open WebUI, avec la revalidation ci-dessus. Pour les dépendances Python, modifier la version dans `requirements.txt`, reconstruire (`docker compose build rag-api`), revalider, puis relever la liste complète par `docker exec rag-api pip freeze`.
+
+> **Branche suivie pour Nginx :** la branche *stable* (paire : 1.30 en octobre 2026). Une branche stable n'est plus maintenue quand la suivante sort : la 1.28 ne reçoit plus de correctifs depuis la sortie de la 1.30. Validé sur la VM de test avec la 1.30.6.
+
+**Revue des versions.** Figer n'est pas oublier : les correctifs de sécurité n'arrivent que si quelqu'un met à jour. Revoir les versions de chaque composant lors de l'audit périodique (§17.6), et plus tôt en cas d'alerte de sécurité publiée pour l'un d'eux. Comme la bannière de mise à jour d'Open WebUI est désactivée, cette revue est le seul signal.
+
 ## §16.9 Une perte d'accès doit se détecter
 
 Pendant ces tests, une coupure réseau de quelques instants a empêché la RAG API de joindre Microsoft Entra. Pour l'utilisateur concerné, la résolution des identités cloud a échoué : il n'a gardé que ses groupes AD (3 au lieu de 8), et a perdu l'accès à tous les documents SharePoint. Le comportement de sécurité était le bon (moins d'accès, jamais plus), mais la réponse ne l'était pas : « Cette information ne figure pas dans les documents disponibles », alors que le document existait et que l'utilisateur y avait droit.
@@ -167,9 +219,87 @@ Le contrôle après synchronisation (§16.4) détecte aussi ce cas : si la panne
 
 > **Un message d'erreur peut tromper.** Le journal indiquait `Network is unreachable`, une erreur IPv6, alors que la cause était une coupure IPv4. Le conteneur n'ayant pas d'IPv6, le système essaie l'IPv4, puis l'IPv6 en dernier recours : quand tout échoue, c'est la dernière erreur qui s'affiche. Vérifier la connectivité réelle (`curl` depuis la VM et depuis le conteneur) avant de conclure.
 
-> **Deux jetons, deux usages.** `ADMIN_TOKEN` sert à n8n (synchronisation, synthèse Teams), `API_TOKEN` à Open WebUI (questions des utilisateurs). Le lab avait renouvelé le premier ; l'avertissement de démarrage (§16.6) a signalé dès son premier lancement que le second gardait sa valeur d'exemple. Sa rotation se fait dans le `.env`, puis dans la clé d'API de la connexion `rag-api` d'Open WebUI.
+> **Deux jetons, deux usages.** `ADMIN_TOKEN` sert à n8n (synchronisation, synthèse Teams) et aux tests (`/query`), `API_TOKEN` à Open WebUI (questions des utilisateurs). Le lab avait renouvelé le premier ; l'avertissement de démarrage (§16.6) a signalé dès son premier lancement que le second gardait sa valeur d'exemple. Depuis la 2.21.0, la RAG API refuserait de démarrer. Sa rotation se fait dans le `.env`, puis dans la clé d'API de la connexion `rag-api` d'Open WebUI.
 
-## §16.10 Checklist
+## §16.10 Supervision externe
+
+Le contrôle après synchronisation (§16.4) alerte quand le cloisonnement est faux. Il ne dit rien si la stack est arrêtée, si la synchronisation ne tourne plus ou si le certificat arrive à échéance : **une alerte qui ne part pas ne se remarque pas.** Ces cas demandent une surveillance **depuis une autre machine** que la VM, puisqu'une VM arrêtée ne signale rien.
+
+Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un. Ce qui compte, ce sont les contrôles.
+
+### §16.10.1 Les contrôles
+
+| Contrôle | Comment | Ce qu'il détecte | Exemple §16.10.2 |
+|---|---|---|---|
+| La stack répond | `GET https://<RAG_FQDN>/sante`, réponse contenant `ok` | VM, Nginx ou RAG API arrêtés, nom DNS perdu | Oui |
+| Le certificat est valide | Contrôle TLS de la même adresse, échéance | Certificat expiré ou proche de l'échéance (§9.8.6), chaîne cassée | Oui |
+| La synchronisation tourne | Signal envoyé par n8n après chaque synchronisation (« Push ») ; absence de signal = alerte | n8n arrêté, workflow désactivé, synchronisation en échec | Oui |
+| Le cloisonnement est juste | Courriel du contrôle après synchronisation (§16.4) | Fuite ou refus à tort | Déjà en place, sans outil |
+| Espace disque | `/srv/rag-donnees`, `/var/log/rag`, espace Docker | Disque plein : Qdrant, journaux nLPD | Non, outil de l'organisation |
+| Moteur d'inférence | Contrôle du serveur Ollama ou vLLM | Questions sans réponse alors que `/sante` répond | Non, outil de l'organisation |
+
+> **Ce que `/sante` ne dit pas :** la réponse prouve que Nginx et la RAG API répondent. Elle ne contrôle ni Qdrant, ni le moteur d'inférence, ni l'annuaire : `/health` est volontairement minimal (§16.6) et ne révèle rien de l'installation. Une question réelle reste le seul contrôle de bout en bout.
+
+**Le certificat de l'autorité interne.** L'outil de supervision doit faire confiance à la racine de l'autorité, sinon la sonde HTTPS échoue ou doit ignorer les erreurs de certificat, et ne contrôle plus rien de ce côté. Pour un outil Node.js : variable `NODE_EXTRA_CA_CERTS` (§9.8.5).
+
+**Le signal de synchronisation.** Le workflow `n8n-sync-corpus.json` du dépôt contient un nœud **Signal supervision (Push)**, **désactivé** par défaut. Branché en parallèle du test de résultat, il appelle l'adresse Push de l'outil après chaque synchronisation, avec `status=up` si elle a réussi, `status=down` sinon. Il ne bloque jamais le courriel d'erreur : en cas d'échec de l'appel, le workflow continue (*On Error* : *Continue*). Pour l'activer : remplacer `<NOM-COMPLET-SUPERVISION>` et `<CLE-PUSH>` dans l'URL, puis activer le nœud.
+
+> **Nom complet obligatoire.** Le conteneur n8n ne résout pas les noms courts du domaine : `http://supervision:3001/...` échoue (`getaddrinfo EAI_AGAIN`), `http://supervision.votre-domaine.ch:3001/...` fonctionne. Le nom doit exister dans le DNS du domaine.
+
+### §16.10.2 Exemple : Uptime Kuma
+
+> **Exemple, pas une recommandation.** Uptime Kuma est un outil libre de surveillance, simple à installer en conteneur. Il a été utilisé dans le lab pour valider les trois premiers contrôles, sur une machine Docker existante, distincte de la VM de la stack. Testé avec Uptime Kuma 2.5.4, octobre 2026.
+
+**Installation**, sur la machine de supervision (`/opt/uptime-kuma/docker-compose.yml`) :
+
+```yaml
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.4@sha256:917318f9d7be5257f43ba412c766a473be336eb451d70744f3b482d0c3997c0e
+    container_name: uptime-kuma
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      # Chaîne de l'autorité interne (§9.2.4), pour contrôler le certificat de la stack
+      - ./certs/ad-chain.pem:/certs/ad-chain.pem:ro
+    environment:
+      - NODE_EXTRA_CA_CERTS=/certs/ad-chain.pem
+    mem_limit: 384m
+    restart: unless-stopped
+```
+
+```bash
+cd /opt/uptime-kuma
+mkdir -p certs && cp /chemin/vers/ad-chain.pem certs/
+docker compose up -d
+```
+
+L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier compte créé est l'administrateur. Avant d'installer sur une machine qui porte déjà d'autres services, vérifier que le port 3001 est libre (`ss -tlnp | grep 3001`) et qu'il reste assez de mémoire.
+
+**Notification.** Dans les paramètres d'Uptime Kuma, configurer une notification par courriel (SMTP), puis l'activer sur chaque sonde.
+
+**Sonde 1, la stack et son certificat.** Nouvelle sonde :
+
+- type **HTTP(s) - Mot-clé** ;
+- URL `https://<RAG_FQDN>/sante`, mot-clé `ok` ;
+- cocher la notification d'expiration du certificat.
+
+**Sonde 2, la synchronisation.** Nouvelle sonde :
+
+- type **Push** ; l'outil affiche une adresse Push, dont la clé est à reporter dans le nœud n8n (§16.10.1) ;
+- intervalle de **3 900 secondes** : la synchronisation est horaire, l'alerte part si aucun signal n'arrive pendant 65 minutes.
+
+> **Validé en lab, octobre 2026 :** la sonde 1 affiche la stack en service et l'échéance du certificat de l'autorité interne (chaîne validée grâce à `NODE_EXTRA_CA_CERTS`). La sonde 2 reçoit le signal de n8n, en ligne de commande et depuis le workflow. Synchronisation arrêtée, le courriel « [Synchronisation RAG] [🔴 Down] No heartbeat in the time window » est arrivé.
+
+**Limites de cet exemple :**
+
+- l'interface d'Uptime Kuma est en HTTP : la placer derrière un frontal HTTPS, ou la réserver au réseau d'administration ;
+- la clé Push figure en clair dans l'URL du nœud n8n et dans les journaux de la machine de supervision : qui la connaît peut envoyer un faux signal « up ». Elle ne donne accès à rien d'autre ;
+- l'appel Push part en HTTP ;
+- une seule machine de supervision : si elle s'arrête, plus rien ne surveille. C'est le rôle de l'outil de l'organisation, s'il en a un, de couvrir ce cas.
+
+## §16.11 Checklist
 
 | Point | Vérification | Attendu |
 |---|---|---|
@@ -178,12 +308,17 @@ Le contrôle après synchronisation (§16.4) détecte aussi ce cas : si la panne
 | Alerte | Contre-épreuve (fuite simulée) | Courriel « FUITE DE CLOISONNEMENT » reçu |
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
-| Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne |
+| Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |
+| Identité signée | Contrôle d'usurpation (§16.6) | HTTP 403 |
+| `/query` | Appel avec `API_TOKEN` | HTTP 401 |
 | `/stats` | Appel sans jeton | HTTP 401 ou 403 |
 | Journal | `tail -1 /var/log/rag/rag-queries.jsonl` | `question_hash` commençant par `hmac:` |
 | Open WebUI | Liste des modèles avec un compte utilisateur | `rag-api` seul |
 | Moteur d'inférence | `curl` depuis un autre poste | Pas de réponse |
 | n8n | Export d'un workflow | Aucun jeton en clair |
+| Versions figées | `grep 'image:' docker-compose.yml` | Chaque image avec `@sha256:` |
+| Supervision externe | Sondes `/sante` et Push (§16.10) | En service ; alerte reçue lors d'un essai |
+| Échéance du certificat | Sonde ou `openssl x509 -checkend` (§9.8.6) | Plus de 30 jours |
 | Après une mise à jour d'un composant | Connexions, `[AUTH] /v1`, test, synchronisation | Tout conforme avant d'utiliser la nouvelle version |
 
 ---

@@ -25,11 +25,12 @@ description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter
 Ce guide documente le déploiement d'une stack RAG locale pour PME, validée en lab sur processeur, puis sur carte graphique (§10). L'architecture en service à l'issue de ce guide :
 
 ```
-Utilisateur → Open WebUI (VM-RAG-LAB, port 3001, authentification LDAP AD)
-                  └→ RAG API FastAPI (port 8080)
-                       ├→ auth.py : résolution groupes AD (LDAP, svc-rag)
-                       ├→ Qdrant : index vectoriel + ACL NTFS (autorises[])
-                       └→ Serveur de modèles : Ollama ou vLLM, qwen3:14b (§2)
+Utilisateur → Nginx (HTTPS, https://rag.votre-domaine.ch, §9.8)
+                  └→ Open WebUI (authentification LDAP AD, identité signée)
+                       └→ RAG API FastAPI (port 8080, réseau interne)
+                            ├→ auth.py : résolution groupes AD (LDAP, svc-rag)
+                            ├→ Qdrant : index vectoriel + ACL NTFS (autorises[])
+                            └→ Serveur de modèles : Ollama ou vLLM, qwen3:14b (§2)
 ```
 
 Onyx CE est déployé dans §4 comme étape de validation de l'indexation et du backend Ollama. Il est ensuite remplacé par Open WebUI + RAG API FastAPI qui constituent la stack finale, avec le cloisonnement documentaire réel.
@@ -46,7 +47,7 @@ Pour un corpus sans restriction d'accès (base de connaissances commune, documen
 
 ### Avertissements
 
-> Tous les secrets présents dans ce guide sont en `changeme-*`. n8n est configuré en authentification basique sans TLS, les services sont exposés en HTTP. C'est une configuration de lab. Ne pas transposer telle quelle en production sans avoir appliqué §9.
+> Tous les secrets présents dans ce guide sont en `changeme-*` : depuis la 2.21.0, la RAG API refuse de démarrer tant qu'il en reste un dans le `.env` (§16.6). Open WebUI et n8n sont servis en HTTPS par Nginx (§9.8), avec un certificat auto-signé tant que celui de l'autorité interne n'est pas installé. C'est une configuration de lab. Ne pas transposer telle quelle en production sans avoir appliqué §9, §15, §16 et §17.
 
 > Le serveur RAG concentre le contenu de plusieurs partages sans les ACL d'origine. Ses sauvegardes deviennent aussi sensibles que les sources. À traiter comme un actif de valeur, pas comme une VM de service ordinaire.
 
@@ -79,7 +80,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié |
 | [§7 Pipelines n8n](section-07-n8n.md) | Synchronisation corpus, rappel rotation svc-rag, OCR (documentaire) ; Teams : voir §12 | Publié |
 | [§8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | Contrôles déterministes, groundedness check, formation utilisateurs | Publié |
-| [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
+| [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, frontal HTTPS Nginx et renouvellement du certificat, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | [§10 Validation et performances sur GPU](section-10-gpu.md) | Passage sur GPU, placement des modèles, méthode de mesure, choix des modèles, construction du contexte, reranker, limites du corpus, Ollama contre vLLM | Publié |
 
 > **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés en lab pour ces sections sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les scripts du dossier principal évoluent avec la Partie 3, en restant compatibles avec la stack SMB.
@@ -93,8 +94,8 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§13 Connecteur SharePoint Online](section-13-sharepoint.md) | Indexation des bibliothèques SharePoint, traduction des permissions (groupes SharePoint, Entra, AD synchronisés, partages, liens) jusqu'aux chunks Qdrant, application Sites.Selected, matrice de cloisonnement | Publié |
 | [§14 Documents protégés par Purview](section-14-purview.md) | Service de déchiffrement interne, double condition (permissions SharePoint et droits de l'étiquette évalués par Purview à la question), autorisations, mise en garde, matrice de validation | Publié |
 | [§15 Sécurité des données](section-15-securite-donnees.md) | Clé d'API Qdrant, chiffrement des données au repos (LUKS2, TPM), secrets et clés sur le disque chiffré, migration, composants abandonnés, sauvegardes | Publié |
-| [§16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md) | Test de non-divulgation automatisé, contrôle après chaque synchronisation avec alerte, masque des droits NTFS, durcissement de la RAG API, d'Open WebUI et de n8n | Publié |
-| [§17 Gouvernance](section-17-gouvernance.md) | Responsabilités, rotation des secrets et certificats, politique de corpus, droit à l'effacement, audit périodique, limites de la conformité technique | Publié |
+| [§16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md) | Test de non-divulgation automatisé, contrôle après chaque synchronisation avec alerte, masque des droits NTFS, durcissement de la RAG API, d'Open WebUI et de n8n, identité signée, versions figées, supervision externe | Publié |
+| [§17 Gouvernance](section-17-gouvernance.md) | Responsabilités, rotation des secrets et certificats, politique de corpus, droit à l'effacement, audit périodique, limites de la conformité technique, modèle de matrice RACI | Publié |
 
 Les numéros de section sont attribués à la publication.
 

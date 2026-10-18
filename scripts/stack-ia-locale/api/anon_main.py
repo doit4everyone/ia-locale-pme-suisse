@@ -42,6 +42,10 @@ from rank_bm25 import BM25Okapi
 
 API_TOKEN    = os.getenv("API_TOKEN", "changeme-api-token")
 ADMIN_TOKEN  = os.getenv("ADMIN_TOKEN", "changeme-admin-token")
+# Secret partagé avec Open WebUI (FORWARD_USER_INFO_HEADER_JWT_SECRET) : Open WebUI
+# signe l'identité de l'utilisateur (jeton JWT HS256, en-tête X-OpenWebUI-User-Jwt)
+# et la RAG API vérifie la signature avant de s'en servir (point 44, 2.21.0).
+OWUI_JWT_SECRET = os.getenv("OWUI_JWT_SECRET", "")
 SYNC_SCRIPTS_DIR = os.getenv("SYNC_SCRIPTS_DIR", "/rag-pipeline")
 SMB_SHARE    = os.getenv("SMB_SHARE", "//fileserver/FileService")
 SMB_MOUNT    = os.getenv("SMB_MOUNT", "/mnt/corpus-root")
@@ -1174,14 +1178,57 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                 "controle": "juge_erreur"}
 
 
-# Valeurs d'exemple restées en place : avertissement bien visible au démarrage.
-# (Un refus de démarrer casserait une stack en service ; deploy.sh génère des
-# valeurs aléatoires, le risque concerne surtout les installations manuelles.)
-for _nom in ("API_TOKEN", "ADMIN_TOKEN", "QDRANT_API_KEY", "MIP_TOKEN", "LDAP_BIND_PWD", "SMB_PASSWORD"):
-    _val = os.getenv(_nom, "")
-    if _val.lower().startswith("changeme") or _val.startswith("<") or (_nom in ("API_TOKEN", "ADMIN_TOKEN") and not _val):
-        logger.error(f"[SÉCURITÉ] {_nom} est vide ou garde une valeur d'exemple (changeme, <...>) : "
-                     f"à remplacer dans le .env (openssl rand -hex 32), puis docker compose up -d rag-api")
+# Secrets : refus de démarrer sur une valeur vide, d'exemple (changeme, <...>)
+# ou trop courte (2.21.0). Une stack qui tournerait avec ADMIN_TOKEN=changeme
+# est exactement ce que ce contrôle doit empêcher : l'arrêt est immédiat, et le
+# journal du conteneur dit quoi corriger. deploy.sh génère des valeurs
+# aléatoires ; le contrôle protège surtout les installations manuelles et les
+# modifications ultérieures du .env.
+SECRET_LONGUEUR_MIN = 32
+
+
+def controler_secrets(env=os.environ) -> list[str]:
+    """Liste des problèmes de secrets ; vide si tout est conforme."""
+    problemes = []
+
+    def exemple(v: str) -> bool:
+        # « changeme... » ou un gabarit entier « <...> » : un vrai mot de passe
+        # peut contenir < ou >, il n'est pas refusé pour autant.
+        v = v.strip()
+        return v.lower().startswith("changeme") or (v.startswith("<") and v.endswith(">"))
+
+    jetons = ["API_TOKEN", "ADMIN_TOKEN", "QDRANT_API_KEY", "LOG_HMAC_KEY", "OWUI_JWT_SECRET"]
+    if env.get("MIP_URL", ""):
+        jetons.append("MIP_TOKEN")      # utilisé seulement avec Purview (§14)
+    for nom in jetons:
+        v = env.get(nom, "")
+        if not v:
+            problemes.append(f"{nom} est vide")
+        elif exemple(v):
+            problemes.append(f"{nom} garde une valeur d'exemple")
+        elif len(v) < SECRET_LONGUEUR_MIN:
+            problemes.append(f"{nom} est trop court ({len(v)} caractères, {SECRET_LONGUEUR_MIN} au moins)")
+    for nom in ("LDAP_BIND_PWD", "SMB_PASSWORD"):
+        v = env.get(nom, "")
+        if not v:
+            problemes.append(f"{nom} est vide")
+        elif exemple(v):
+            problemes.append(f"{nom} garde une valeur d'exemple")
+    distincts = [n for n in ("API_TOKEN", "ADMIN_TOKEN", "OWUI_JWT_SECRET") if env.get(n)]
+    for i, a in enumerate(distincts):
+        for b in distincts[i + 1:]:
+            if env.get(a) == env.get(b):
+                problemes.append(f"{a} et {b} sont identiques")
+    return problemes
+
+
+_problemes_secrets = controler_secrets()
+if _problemes_secrets:
+    for _p in _problemes_secrets:
+        logger.critical(f"[SÉCURITÉ] {_p}")
+    logger.critical("[SÉCURITÉ] Démarrage refusé. Corriger le .env (jetons : openssl rand -hex 32), "
+                    "puis docker compose up -d rag-api")
+    raise SystemExit(1)
 
 LOG_HMAC_KEY = os.getenv("LOG_HMAC_KEY", "")
 if not LOG_HMAC_KEY:
@@ -1265,18 +1312,55 @@ async def stats(credentials: HTTPAuthorizationCredentials = Security(security)):
     }
 
 
+def identite_open_webui(raw_request: Request) -> str:
+    """
+    Identité de l'utilisateur transmise par Open WebUI, VÉRIFIÉE.
+
+    Open WebUI signe l'identité (JWT HS256 : email, nom, rôle, émetteur
+    « open-webui », validité 5 minutes) avec le secret partagé. Les en-têtes
+    simples X-OpenWebUI-User-* ne sont plus pris en compte : n'importe quel
+    détenteur d'API_TOKEN pouvait y écrire l'adresse de son choix et obtenir les
+    droits d'un autre utilisateur. Sans jeton valide : refus (403).
+    """
+    import jwt  # PyJWT, dépendance figée dans requirements.txt
+    jeton = raw_request.headers.get("X-OpenWebUI-User-Jwt", "")
+    if not jeton:
+        if raw_request.headers.get("X-OpenWebUI-User-Email"):
+            logger.warning("[AUTH] /v1 : identité non signée reçue (X-OpenWebUI-User-Email) et ignorée. "
+                           "Vérifier FORWARD_USER_INFO_HEADER_JWT_SECRET dans le service open-webui")
+        else:
+            logger.warning("[AUTH] /v1 : aucun jeton d'identité, accès refusé")
+        raise HTTPException(status_code=403, detail="Identité utilisateur non signée")
+    try:
+        donnees = jwt.decode(
+            jeton, OWUI_JWT_SECRET, algorithms=["HS256"], issuer="open-webui",
+            leeway=30, options={"require": ["exp", "iat", "iss", "email"]},
+        )
+    except jwt.ExpiredSignatureError:
+        logger.warning("[AUTH] /v1 : jeton d'identité expiré, accès refusé")
+        raise HTTPException(status_code=403, detail="Identité utilisateur expirée")
+    except jwt.InvalidTokenError as e:
+        logger.error(f"[AUTH] /v1 : jeton d'identité invalide ({type(e).__name__}), accès refusé")
+        raise HTTPException(status_code=403, detail="Identité utilisateur invalide")
+    email = str(donnees.get("email", "")).strip()
+    if "@" not in email:
+        logger.error("[AUTH] /v1 : jeton d'identité sans adresse valide, accès refusé")
+        raise HTTPException(status_code=403, detail="Identité utilisateur invalide")
+    return email
+
+
 @app.post("/query", response_model=QueryResponse)
 async def query(
     request: QueryRequest,
     credentials: HTTPAuthorizationCredentials = Security(security)
 ):
-    if credentials.credentials != API_TOKEN:
+    # /query pose la question AU NOM du compte déclaré dans la requête (user_id) :
+    # c'est un outil d'administration et de test (test de cloisonnement, mode
+    # complet), réservé au jeton d'administration depuis la 2.21.0. Avec
+    # API_TOKEN, n'importe quel client aurait pu se faire passer pour un autre
+    # utilisateur. Les utilisateurs passent par /v1 (identité signée).
+    if credentials.credentials != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
-
-    # Résolution des groupes AD depuis user_id fourni par le client.
-    # /query est un endpoint machine à machine (API_TOKEN). L'identité
-    # est déclarée par l'appelant : à n'utiliser que depuis des systèmes
-    # de confiance internes. Pour les utilisateurs finaux, utiliser /v1.
     if "@" not in request.user_id:
         logger.warning(f"[AUTH] /query user_id '{request.user_id}' invalide (pas d'@), accès refusé")
         raise HTTPException(status_code=403, detail="user_id invalide : format email requis")
@@ -1412,10 +1496,8 @@ async def _openai_chat_completions(
     if credentials.credentials != API_TOKEN:
         raise HTTPException(status_code=401, detail="Token invalide")
 
-    # owui_email2 : identité transmise par Open WebUI, utilisée pour la résolution LDAP.
-    # owui_id : conservé pour une future corrélation dans le journal nLPD.
-    owui_email2 = raw_request.headers.get("X-OpenWebUI-User-Email", "")
-    owui_id     = raw_request.headers.get("X-OpenWebUI-User-Id", "")
+    # Identité signée par Open WebUI et vérifiée ici (identite_open_webui)
+    owui_email2 = identite_open_webui(raw_request)
 
     user_query = ""
     for msg in reversed(request.messages):

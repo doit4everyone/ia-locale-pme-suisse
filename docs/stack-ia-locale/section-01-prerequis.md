@@ -139,17 +139,18 @@ Le déverrouillage automatique exige une machine en **UEFI avec un TPM 2.0**. Se
 **2. Préparer l'arborescence et les liens**, avant `deploy.sh` :
 
 ```bash
-mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/rag-certs}
-chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs
+mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/rag-certs,secrets/rag-tls}
+chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs /srv/rag-donnees/secrets/rag-tls
 mkdir -p /root/rag-stack
 for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
 ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env     # lien vers un fichier qui n'existe pas encore : normal
 ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ln -s /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls        # certificat de Nginx (§9.8)
 ln -s /srv/rag-donnees/log-rag           /var/log/rag
-ls -l /root/rag-stack /etc/rag-certs /var/log/rag
+ls -l /root/rag-stack /etc/rag-certs /etc/rag-tls /var/log/rag
 ```
 
-`deploy.sh` écrit ensuite le `.env`, les données et les journaux **à travers ces liens**, directement sur le disque chiffré. Les certificats des applications Entra, créés aux sections §11 à §14, iront de même dans `/etc/rag-certs`. Docker ne démarrant qu'avec le disque monté (§15.3.3), un lien sans sa cible ne peut pas se produire en fonctionnement normal.
+`deploy.sh` écrit ensuite le `.env`, les données et les journaux **à travers ces liens**, directement sur le disque chiffré. Les certificats des applications Entra, créés aux sections §11 à §14, iront de même dans `/etc/rag-certs`, et le certificat de Nginx dans `/etc/rag-tls` (depuis la 2.21.0, `deploy.sh` crée ce dernier lien lui-même s'il manque). Docker ne démarrant qu'avec le disque monté (§15.3.3), un lien sans sa cible ne peut pas se produire en fonctionnement normal.
 
 **Deux conséquences à connaître.** Le `.env` est un lien vers un fichier qui n'existe pas encore : `cp` refuse d'y écrire tant qu'on le désigne par le lien, et `sed -i` **remplace** le lien par un vrai fichier, sur le disque système, en clair. On désigne donc toujours le vrai chemin (`/srv/rag-donnees/secrets/.env`, ou `$(readlink -f /root/rag-stack/.env)`), comme à l'étape 7 du §0. De même, le dossier `n8n_data` doit appartenir à l'utilisateur 1000 : `chown -R 1000:1000 /srv/rag-donnees/n8n_data` (sur le vrai dossier, pas sur le lien).
 

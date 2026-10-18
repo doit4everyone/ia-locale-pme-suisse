@@ -313,7 +313,7 @@ L'extraction du texte se fait dans `/dev/shm`, en mémoire, pour tous les docume
 
 La fonction `filtrer_purview` s'applique deux fois : sur les résultats de la recherche hybride, puis sur l'extension de contexte (les chunks voisins du meilleur résultat). Les décisions sont gardées en cache pour chaque combinaison utilisateur, étiquette et propriétaire, pendant `MIP_CACHE_TTL` secondes.
 
-L'utilisateur est identifié par l'adresse transmise par Open WebUI (`X-OpenWebUI-User-Email`). Cette adresse doit être à la fois l'UPN de l'AD, pour l'authentification LDAP, et l'adresse de messagerie connue de Purview.
+L'utilisateur est identifié par l'adresse transmise par Open WebUI (jeton signé `X-OpenWebUI-User-Jwt` depuis la 2.21.0, §5.6.1). Cette adresse doit être à la fois l'UPN de l'AD, pour l'authentification LDAP, et l'adresse de messagerie connue de Purview.
 
 Un changement de droits sur une étiquette est donc pris en compte au plus tard après la durée du cache. Un changement d'étiquette sur un document modifie le fichier : il est pris en compte à la synchronisation suivante.
 

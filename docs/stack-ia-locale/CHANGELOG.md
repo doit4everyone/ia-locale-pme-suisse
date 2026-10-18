@@ -4,6 +4,34 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.0] : Octobre 2026
+
+Sécurisation de la stack, validée élément par élément sur la VM de test en service (Ubuntu 26.04), du 17 au 18 octobre 2026 : frontal HTTPS Nginx, identité signée entre Open WebUI et la RAG API, refus de démarrer sur un secret d'exemple, versions figées par empreinte, supervision externe. Procédure de renouvellement du certificat et matrice RACI. La procédure complète du §0 avec cette version reste à rejouer sur une VM neuve.
+
+### Scripts
+
+- `nginx/rag.conf` (nouveau) : frontal TLS (1.2 et 1.3) ; Open WebUI sur le port 443, n8n sur le port 5678, `/sante` pour la supervision ; redirection de HTTP vers HTTPS ; WebSocket, réponses non mises en tampon, délai de 600 s ; requêtes par adresse IP ou par un autre nom refusées (`return 444`, `ssl_reject_handshake`) ; HSTS prévu, commenté.
+- `docker-compose.yml` : service `nginx` (1.30.6), seul à publier des ports ; Open WebUI et n8n sans port publié ; n8n derrière le frontal (`N8N_HOST`, `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS`, `WEBHOOK_URL` construits depuis `RAG_FQDN`, cookie sécurisé) ; identité signée (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, `OWUI_JWT_SECRET`) ; `ENABLE_VERSION_UPDATE_CHECK=false` ; toutes les images figées par empreinte.
+- `api/anon_main.py` : démarrage refusé sur un secret vide, une valeur d'exemple, un jeton de moins de 32 caractères ou deux jetons identiques ; identité de l'utilisateur lue dans le jeton signé par Open WebUI (`X-OpenWebUI-User-Jwt`), en-têtes simples refusés ; `/query` réservé à `ADMIN_TOKEN`.
+- `api/Dockerfile` : image de base figée par empreinte. `api/requirements.txt` : toutes les dépendances figées (`pip freeze` du conteneur validé), PyJWT cité comme dépendance directe.
+- `deploy.sh` : nom de la stack demandé et contrôlé ; certificat fourni contrôlé (clé, nom, échéance) ou auto-signé généré, auto-signé existant signalé ; `/etc/rag-tls` sur le disque chiffré ; configuration de Nginx au nom de la stack ; `OWUI_JWT_SECRET` généré, jeton saisi trop court refusé ; cinq conteneurs et `/sante` contrôlés à travers Nginx ; adresses finales en HTTPS.
+- `env.example` : `OWUI_JWT_SECRET`, `RAG_FQDN` (remplace `N8N_WEBHOOK_URL`).
+- `test_cloisonnement.py` : `/query` par `ADMIN_TOKEN`. `tests-apres-modification.md` : questions de test avec une identité signée.
+- `N8N/n8n-sync-corpus.json` : nœud « Signal supervision (Push) », désactivé par défaut, sans effet sur le courriel d'erreur en cas d'échec. `N8N/index.md` : adresse HTTPS, nom complet de la machine de supervision.
+- `index.md` des scripts : architecture avec Nginx, `nginx/rag.conf`, dépendances figées, identité signée.
+
+### Documentation
+
+- `section-09-securite.md` : §9.8 nouvelle, frontal HTTPS et certificats (nom DNS de la stack, auto-signé ou autorité interne, obtention par `certreq` avec le modèle Serveur Web, chaîne, postes clients, **renouvellement pas à pas avec retour arrière**, refus par adresse IP, HSTS, noms multiples, exposition réseau) ; §9.1.2 et §9.1.5 mis à jour ; checklist devenue §9.9.
+- `section-16-cloisonnement.md` : §16.6 (secrets refusés, identité signée, contrôle d'usurpation, `/query`) ; §16.7 ; §16.8 (empreintes, mise à jour d'une image, branche stable de Nginx, revue des versions) ; §16.10 nouvelle, supervision externe (contrôles, signal de synchronisation, exemple Uptime Kuma validé en lab et ses limites) ; checklist devenue §16.11.
+- `section-17-gouvernance.md` : §17.3 (identité signée, certificat de la stack, certificats de l'autorité) ; §17.6 (revue des versions, essai de la supervision) ; §17.7 en tableau d'état ; **§17.9 nouvelle, matrice RACI**, modèle à adapter.
+- `section-15-securite-donnees.md` : §15.5, sauvegarde laissée à l'outil de l'organisation (choix assumé, restauration non testée) ; certificat de Nginx.
+- `section-00-quickstart.md` : prérequis (nom DNS, certificat) ; étapes 6, 7 (point 5 : nom de la stack, configuration de Nginx, certificat), 9, 14, 15 (signal de supervision), 16 et checklist.
+- `section-01-prerequis.md`, `section-03-docker-compose.md`, `section-05-connecteurs.md`, `section-07-n8n.md`, `section-08-fiabilite.md`, `section-14-purview.md`, `index.md` : adresses HTTPS, identité signée, extraits du `.env` et du Compose.
+- `suivi-corrections.md` : points 44 et 105 à 113 corrigés ; points 114 à 116 ouverts ; points doc.3, doc.5 et 34 mis à jour.
+
+---
+
 ## [2.20.4] : Octobre 2026
 
 Second rejeu complet du §0 sur une VM Ubuntu 26.04 neuve, du 15 au 17 octobre 2026 (disque chiffré, `deploy.sh`, indexation, droits, Open WebUI, n8n, cloisonnement, deux redémarrages, sauvegarde et restauration de Qdrant). Corrections du script, du Compose, de deux outils et du guide ; procédure de restauration de Qdrant réécrite et validée.

@@ -33,7 +33,11 @@ description: "Scripts Python du pipeline RAG local : indexation SMB avec résolu
 ## Architecture
 
 ```
-Utilisateur (authentifié LDAP via Open WebUI)
+Utilisateur (navigateur, https://<nom de la stack>)
+    ↓
+Nginx (seul service qui publie des ports : 80, 443, 5678 ; §9.8)
+    ↓
+Open WebUI (authentification LDAP, identité signée transmise à la RAG API)
     ↓
 RAG API FastAPI (main.py + auth.py)
     ├→ Qdrant                     → chunks filtrés par ACL NTFS
@@ -73,6 +77,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `test_citations.py` | Tests unitaires du contrôle des citations (accents, ambiguïté, source inventée), sans modèle ni Qdrant | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py`, voir §0 étape 16 |
 | [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
 | [`s10/jeu_questions_s10.json`](s10/jeu_questions_s10.json) | Jeu de 17 questions du corpus de démonstration, avec leurs critères ; à adapter à votre corpus | Lu par `mesure_s10.py` |
+| `nginx/rag.conf` | Frontal HTTPS de la stack : Open WebUI sur le port 443, n8n sur le port 5678, `/sante` pour la supervision, refus des requêtes par adresse IP ou autre nom | Conteneur `nginx`, `deploy.sh` remplace `<NOM-STACK>`, voir §9.8 |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 
 Dans le dépôt, les scripts contenant des valeurs d'exemple sont préfixés `anon_` (`api/anon_main.py`, `api/anon_auth.py`, `anon_indexer.py`, `anon_acl_resolver.py`). `deploy.sh` les renomme à l'installation.
@@ -151,7 +156,7 @@ Résolution des groupes Active Directory via LDAP. Appelé par `main.py` à chaq
 
 Fonctionnalités :
 
-- Extraction de l'identité utilisateur depuis les en-têtes Open WebUI (`X-OpenWebUI-User-Email`)
+- Extraction de l'identité utilisateur depuis le jeton signé par Open WebUI (`X-OpenWebUI-User-Jwt`, vérifié avec `OWUI_JWT_SECRET` ; en-têtes simples refusés depuis la 2.21.0)
 - Bind LDAP avec TLS : `CERT_REQUIRED` si le certificat CA est présent et non vide, `CERT_NONE` avec avertissement dans les logs si absent
 - Résolution récursive des groupes imbriqués via `memberOf`
 - Cache TTL configurable (défaut 300 secondes)
@@ -350,7 +355,7 @@ Le workflow n8n correspondant est [`n8n-teams-sync.json`](../N8N/).
 
 ## Dépendances
 
-**Dans le conteneur `rag-api` (`api/requirements.txt`) :**
+**Dans le conteneur `rag-api` (`api/requirements.txt`) :** depuis la 2.21.0, toutes les dépendances sont figées à la version exacte (`pip freeze` du conteneur validé) ; l'image de base `python:3.11-slim` est figée par son empreinte dans le `Dockerfile`. Mettre à jour une version, c'est revalider (§16.8). Les dépendances directes :
 
 ```
 # API
@@ -358,6 +363,9 @@ fastapi
 uvicorn[standard]
 python-dotenv
 httpx
+
+# Identité signée transmise par Open WebUI
+PyJWT
 
 # Vector store
 qdrant-client

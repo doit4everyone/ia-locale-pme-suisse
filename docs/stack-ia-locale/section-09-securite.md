@@ -1,6 +1,6 @@
 ---
 title: "§9 Sécurité et durcissement | Guide de déploiement stack IA locale"
-description: "UFW, certificat TLS LDAP, journalisation nLPD, rotation des comptes à privilèges, injection de prompt et durcissement du pipeline RAG."
+description: "UFW, certificat TLS LDAP, frontal HTTPS Nginx et renouvellement du certificat, journalisation nLPD, rotation des comptes à privilèges, injection de prompt et durcissement du pipeline RAG."
 ---
 <style>
   header, footer { display: none !important; }
@@ -17,7 +17,7 @@ description: "UFW, certificat TLS LDAP, journalisation nLPD, rotation des compte
 
 [Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | [Section suivante : §10 Validation et performances sur GPU](section-10-gpu.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5. Frontal HTTPS Nginx (§9.8) validé sur la VM de test, octobre 2026 (2.21.0), sauf les refus par adresse IP, testés hors lab.
 
 ---
 
@@ -44,12 +44,13 @@ La protection des services Docker repose donc sur la façon dont chaque port est
 
 | Service | Publication dans `docker-compose.yml` | Accessible depuis |
 |---|---|---|
-| RAG API (8080) | Aucune (pas de section `ports`) | Réseau Compose uniquement (Open WebUI, n8n) |
+| Nginx (80, 443, 5678) | `80:80`, `443:443`, `5678:5678` | Tout le réseau, en HTTPS (§9.8) |
+| Open WebUI (8080) | Aucune depuis la 2.21.0 | Nginx, par le réseau Compose |
+| n8n (5678) | Aucune depuis la 2.21.0 | Nginx, par le réseau Compose |
+| RAG API (8080) | Aucune (pas de section `ports`) | Réseau Compose uniquement (Nginx pour `/sante`, Open WebUI, n8n) |
 | Qdrant (6333) | `127.0.0.1:6333:6333` | La VM elle-même uniquement |
-| Open WebUI (3001) | `3001:8080` | Tout le réseau |
-| n8n (5678) | `5678:5678` | Tout le réseau |
 
-Open WebUI et n8n sont les deux seuls services exposés sur le réseau. Open WebUI exige une authentification LDAP AD, n8n une authentification basique. En lab, c'est acceptable. En production, restreindre ces deux ports aux subnets internes demande une règle au niveau de Docker (chaîne `DOCKER-USER`, voir la documentation Docker) ou un reverse proxy TLS devant les services. Cette partie est documentaire, non validée en lab.
+Depuis la 2.21.0, Nginx est le seul service exposé sur le réseau : Open WebUI (authentification LDAP AD) et n8n (authentification propre) ne sont joignables qu'à travers lui, en HTTPS (§9.8). Avant la 2.21.0, Open WebUI publiait le port 3001 et n8n le port 5678, en HTTP. Restreindre les ports de Nginx à certains subnets demande toujours une règle au niveau de Docker (chaîne `DOCKER-USER`, voir la documentation Docker) : cette partie reste documentaire, non validée en lab.
 
 ### §9.1.3 Règles d'accès
 
@@ -100,15 +101,7 @@ To                         Action      From
 22/tcp                     ALLOW IN    Anywhere
 ```
 
-Vérifier la publication réelle des ports Docker :
-
-```bash
-cd /root/rag-stack && docker compose ps
-# qdrant     : 127.0.0.1:6333->6333/tcp
-# rag-api    : aucun port publié
-# open-webui : 0.0.0.0:3001->8080/tcp
-# n8n        : 0.0.0.0:5678->5678/tcp
-```
+Vérifier la publication réelle des ports Docker : depuis la 2.21.0, voir §9.8.8 (seul Nginx publie des ports). Les résultats ci-dessous datent d'avant la 2.21.0, quand Open WebUI et n8n publiaient encore leurs ports.
 
 **Validé en lab, septembre 2026 :** toutes les règles UFW supprimées à l'exception de SSH. La chaîne interne reste fonctionnelle : `/health` répond depuis n8n et depuis Open WebUI, `/stats` liste les deux collections Qdrant, `/admin/sync` retourne `"success": true`, et une question posée dans Open WebUI obtient une réponse avec citations.
 
@@ -642,7 +635,281 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 
 ---
 
-## §9.8 Checklist de déploiement sécurisé
+## §9.8 Frontal HTTPS (Nginx) et certificats
+
+> **Depuis la 2.21.0 :** Open WebUI et n8n ne publient plus de port. Un conteneur Nginx est le seul point d'entrée de la stack, en HTTPS, sous un nom DNS propre au service. Validé sur la VM de test (Ubuntu 26.04, Nginx 1.30.6), octobre 2026, avec un certificat auto-signé puis un certificat de l'autorité interne du lab. Les refus par adresse IP (§9.8.7) ont été testés hors lab, avec Nginx 1.24 ; ils sont à valider sur la VM au prochain rejeu.
+
+### §9.8.1 Un seul point d'entrée
+
+| Adresse | Service | Remarque |
+|---|---|---|
+| `https://rag.votre-domaine.ch` | Open WebUI | Port 443 |
+| `https://rag.votre-domaine.ch:5678` | n8n | Réservé aux administrateurs |
+| `https://rag.votre-domaine.ch/sante` | État de la RAG API | Réponse `{"status":"ok"}`, pour la supervision (§16.10) |
+| `http://rag.votre-domaine.ch` | Redirection vers https | Code 301 |
+
+Nginx joint Open WebUI, n8n et la RAG API par le réseau interne de Docker (`http://open-webui:8080`, `http://n8n:5678`, `http://rag-api:8080`). Il retrouve leur adresse par le DNS interne de Docker à chaque requête : un conteneur recréé change d'adresse sans que Nginx doive redémarrer.
+
+La configuration est dans `nginx/rag.conf` ([fichier dans le dépôt](../../scripts/stack-ia-locale/nginx/rag.conf)). `deploy.sh` y remplace `<NOM-STACK>` par la valeur de `RAG_FQDN` du `.env` et la copie dans `/root/rag-stack/nginx/rag.conf`. Elle prévoit :
+
+- TLS 1.2 et 1.3 uniquement, sans numéro de version de Nginx dans les réponses ;
+- les WebSocket, dont Open WebUI et n8n se servent pour l'affichage en direct ;
+- pas de mise en tampon des réponses et un délai de 600 secondes, pour qu'une réponse longue du modèle arrive au fil de l'eau et ne soit pas coupée ;
+- 50 Mo au plus par pièce jointe déposée dans Open WebUI.
+
+n8n est configuré pour se savoir derrière un frontal : `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `WEBHOOK_URL=https://<RAG_FQDN>:5678/` et `N8N_SECURE_COOKIE=true` (cookie de session envoyé en HTTPS seulement), dans le `docker-compose.yml`.
+
+### §9.8.2 Le nom de la stack dans le DNS
+
+Le nom choisi (`rag.votre-domaine.ch` dans ce guide) désigne le **service**, pas la VM. Il n'a pas à correspondre au nom d'hôte de la VM : un enregistrement A dans la zone DNS du domaine suffit, vers l'adresse IP de la VM.
+
+Sur le contrôleur de domaine (PowerShell), ou dans la console DNS :
+
+```powershell
+Add-DnsServerResourceRecordA -ZoneName "votre-domaine.ch" -Name "rag" -IPv4Address "<IP-VM>"
+Resolve-DnsName rag.votre-domaine.ch
+```
+
+Sur la VM :
+
+```bash
+getent hosts rag.votre-domaine.ch
+# Attendu : <IP-VM>   rag.votre-domaine.ch
+```
+
+`deploy.sh` demande ce nom (variable `RAG_FQDN`) et avertit s'il ne se résout pas, ou pas vers l'adresse de la VM. C'est ce nom que portent le certificat, la configuration de Nginx et les adresses de n8n : le changer plus tard demande de mettre à jour les trois (`.env`, `nginx/rag.conf` régénéré, nouveau certificat).
+
+> **Pourquoi un nom et pas l'adresse IP :** Nginx est le seul service qui écoute sur la VM. C'est le nom demandé par le navigateur qui lui indique quel site servir, et c'est ce nom que le certificat garantit. Une requête par adresse IP est refusée (§9.8.7). La même VM pourrait servir plusieurs noms (§9.8.7).
+
+### §9.8.3 Certificat auto-signé ou certificat de l'autorité interne
+
+Le certificat et sa clé sont dans `/etc/rag-tls` (`rag.crt` et `rag.key`), monté en lecture seule dans le conteneur. Quand le disque chiffré des données est monté (§15.3), `/etc/rag-tls` est un lien vers `/srv/rag-donnees/secrets/rag-tls` : la clé privée est chiffrée au repos avec les autres secrets.
+
+À l'étape 6b, `deploy.sh` :
+
+- **utilise le certificat présent** dans `/etc/rag-tls` s'il y en a un, après trois contrôles : la clé correspond au certificat (sinon arrêt), le certificat porte le nom de la stack (sinon avertissement), il n'expire pas dans les 30 jours (sinon avertissement) ;
+- **génère un certificat auto-signé** sinon (RSA 3072 bits, 825 jours, au nom de la stack), avec un avertissement.
+
+| | Auto-signé | Autorité interne (AD CS) |
+|---|---|---|
+| Connexions chiffrées | Oui | Oui |
+| Avertissement du navigateur | Oui, sur chaque poste | Non, sur les postes qui font confiance à l'autorité |
+| Supervision externe (§16.10) | La sonde doit ignorer les erreurs de certificat | Contrôle complet, échéance comprise |
+| Usage | Essai, lab | Production |
+
+Le certificat auto-signé suffit quand l'organisation n'a pas d'autorité de certification. Il se remplace plus tard par un certificat de l'autorité, sans redéployer (§9.8.6). Un certificat public (Let's Encrypt) n'est pas documenté : il suppose que le nom soit validé depuis Internet, ce qui ne convient pas à une stack joignable seulement depuis le réseau interne.
+
+### §9.8.4 Obtenir le certificat de l'autorité interne
+
+Procédure suivie sur le lab, avec une autorité intermédiaire AD CS d'entreprise et le modèle de certificat **Serveur Web** (`WebServer`). La clé privée est générée sur la VM et ne la quitte pas : seule la demande (CSR) est transmise à l'autorité.
+
+**1. Clé et demande, sur la VM :**
+
+```bash
+cd /etc/rag-tls
+FQDN=rag.votre-domaine.ch
+openssl req -new -newkey rsa:3072 -nodes \
+    -keyout rag-nouveau.key -out rag.csr \
+    -subj "/CN=${FQDN}" -addext "subjectAltName=DNS:${FQDN}"
+chmod 600 rag-nouveau.key
+```
+
+> **Où est le fichier :** `/etc/rag-tls` est un lien. Un client SFTP comme FileZilla affiche le lien, pas son contenu : le fichier `rag.csr` se trouve dans `/srv/rag-donnees/secrets/rag-tls`. Le plus simple est de le copier dans le dossier personnel de l'utilisateur SSH (`cp rag.csr /home/<UTILISATEUR>/`) pour le récupérer.
+
+**2. Soumission à l'autorité, sur un poste ou serveur Windows du domaine (invite de commandes) :**
+
+```
+certreq -submit -attrib "CertificateTemplate:WebServer" rag.csr rag.cer
+```
+
+Sans l'option `-config`, `certreq` affiche la liste des autorités du domaine : choisir l'autorité intermédiaire. Le compte qui soumet la demande doit avoir le droit d'inscription sur le modèle Serveur Web (par défaut : administrateurs du domaine et de l'entreprise).
+
+**3. Retour sur la VM, construction de la chaîne et contrôles :**
+
+```bash
+# rag.cer copié dans /home/<UTILISATEUR>, puis :
+cd /etc/rag-tls
+cp /home/<UTILISATEUR>/rag.cer .
+
+# Le certificat est-il émis par l'autorité de confiance ?
+openssl verify -CAfile /etc/ssl/certs/ad-chain.pem rag.cer
+# Attendu : rag.cer: OK
+
+# La clé correspond-elle au certificat ? (les deux empreintes doivent être identiques)
+openssl x509 -in rag.cer -noout -pubkey | sha256sum
+openssl pkey -in rag-nouveau.key -pubout | sha256sum
+
+# Nom et échéance
+openssl x509 -in rag.cer -noout -ext subjectAltName -enddate
+```
+
+> Si `openssl` refuse de lire `rag.cer`, le fichier est au format binaire (DER) : ajouter `-inform DER` à la commande, ou le convertir une fois avec `openssl x509 -inform DER -in rag.cer -out rag.cer.pem`.
+
+Nginx doit présenter le certificat **suivi de l'autorité intermédiaire** : un poste qui connaît la racine, mais pas l'intermédiaire, ne pourrait pas reconstituer la chaîne. L'intermédiaire est celle exportée pour LDAP (§9.2.4) :
+
+```bash
+cat rag.cer /etc/ssl/certs/ad-subca.pem > rag-nouveau.crt
+```
+
+La mise en place est ensuite la même que pour un renouvellement : §9.8.6, à partir de l'étape 2.
+
+> **Validé en lab, octobre 2026 :** certificat émis par l'autorité intermédiaire du lab avec le modèle Serveur Web, échéance à deux ans (octobre 2028). Contrôle depuis un poste Windows du domaine : `certutil -verify -urlfetch` valide la chaîne jusqu'à la racine ; cadenas affiché par Edge après un redémarrage complet du navigateur (fermer toutes les fenêtres, y compris celles qui restent en arrière-plan).
+
+### §9.8.5 Postes clients et outils
+
+**Postes du domaine.** Ils font confiance à la racine d'une autorité AD CS d'entreprise, distribuée par l'annuaire. Aucune action n'est nécessaire, sauf à redémarrer le navigateur s'il était ouvert pendant le remplacement du certificat.
+
+**Postes hors domaine.** Importer le certificat de la racine (`ad-rootca.cer`, §9.2.3) dans le magasin « Autorités de certification racines de confiance », ou accepter l'avertissement en connaissance de cause.
+
+**Contrôle depuis un poste Windows :**
+
+```
+certutil -verify -urlfetch rag.cer
+```
+
+`-urlfetch` vérifie aussi que les listes de révocation publiées par l'autorité sont joignables et à jour. Une liste expirée ou injoignable est un défaut de l'autorité, pas de la stack, mais certains clients refusent alors le certificat.
+
+**Ligne de commande sur la VM.** Le magasin de certificats d'Ubuntu ne contient pas la racine de l'autorité interne : `curl` sans option échoue (code `000`). Indiquer la chaîne explicitement :
+
+```bash
+curl --cacert /etc/ssl/certs/ad-chain.pem https://rag.votre-domaine.ch/sante
+# Attendu : {"status":"ok"}
+```
+
+Avec un certificat auto-signé, remplacer `--cacert …` par `-k` (connexion chiffrée, certificat non vérifié).
+
+**Outils Node.js** (Uptime Kuma, par exemple, §16.10). Ils ignorent le magasin du système : leur indiquer la chaîne par la variable `NODE_EXTRA_CA_CERTS`.
+
+### §9.8.6 Renouveler le certificat
+
+Un certificat de l'autorité interne émis avec le modèle Serveur Web est valable deux ans ; l'auto-signé généré par `deploy.sh`, 825 jours. Le renouvellement remplace deux fichiers et recharge Nginx : **aucun conteneur n'est recréé** : au rechargement, Nginx termine normalement les connexions en cours. L'échéance se suit par la supervision (§16.10) ou à la main :
+
+```bash
+openssl x509 -in /etc/rag-tls/rag.crt -noout -enddate
+openssl x509 -in /etc/rag-tls/rag.crt -noout -checkend 2592000 && echo "plus de 30 jours" || echo "À RENOUVELER"
+```
+
+Prévoir le renouvellement au moins un mois avant l'échéance, et l'inscrire au calendrier des rotations (§17.3).
+
+> **Statut :** la mise en place d'un nouveau certificat sur une stack en service (étapes 2 à 5) a été suivie en lab, octobre 2026, pour passer de l'auto-signé au certificat de l'autorité. Le renouvellement d'un certificat proche de l'échéance n'a pas encore eu lieu : c'est la même procédure. Les commandes des étapes 1 à 6 ont été essayées hors lab (Nginx 1.24, certificats auto-signés) : remplacement, rechargement sans coupure et retour arrière conformes, nouvelle échéance visible aussitôt.
+
+**1. Nouvelle clé, demande et certificat.** Refaire §9.8.4, étapes 1 à 3. Une nouvelle clé à chaque renouvellement : si l'ancienne avait fuité, elle ne sert plus à rien. On obtient `rag-nouveau.key` et `rag-nouveau.crt` dans `/etc/rag-tls`.
+
+Pour un certificat **auto-signé**, la commande de `deploy.sh` suffit :
+
+```bash
+cd /etc/rag-tls
+FQDN=rag.votre-domaine.ch
+openssl req -x509 -newkey rsa:3072 -nodes -days 825 \
+    -keyout rag-nouveau.key -out rag-nouveau.crt \
+    -subj "/CN=${FQDN}" -addext "subjectAltName=DNS:${FQDN}"
+chmod 600 rag-nouveau.key
+```
+
+**2. Contrôle de la paire avant de toucher à Nginx :**
+
+```bash
+cd /etc/rag-tls
+openssl x509 -in rag-nouveau.crt -noout -pubkey | sha256sum
+openssl pkey -in rag-nouveau.key -pubout | sha256sum
+# Les deux empreintes doivent être identiques. Sinon, s'arrêter là.
+```
+
+**3. Sauvegarde de la paire en service, puis remplacement :**
+
+```bash
+cd /etc/rag-tls
+JOUR=$(date +%Y%m%d)
+cp -p rag.crt "rag.crt.${JOUR}"
+cp -p rag.key "rag.key.${JOUR}"
+cp rag-nouveau.crt rag.crt
+cp rag-nouveau.key rag.key
+chmod 600 rag.key rag.key.${JOUR}
+```
+
+**4. Test de la configuration, puis rechargement :**
+
+```bash
+docker exec nginx nginx -t
+# Attendu : syntax is ok / test is successful
+docker exec nginx nginx -s reload
+```
+
+Si `nginx -t` signale une erreur, **ne pas recharger** : Nginx continue de servir l'ancien certificat, qu'il a gardé en mémoire, mais il ne redémarrerait pas avec les fichiers en place. Revenir en arrière tout de suite (étape 6).
+
+**5. Vérification :**
+
+```bash
+FQDN=rag.votre-domaine.ch
+for PORT in 443 5678; do
+    echo | openssl s_client -connect "${FQDN}:${PORT}" -servername "${FQDN}" 2>/dev/null \
+        | openssl x509 -noout -issuer -enddate
+done
+curl --cacert /etc/ssl/certs/ad-chain.pem "https://${FQDN}/sante"
+```
+
+Les deux ports doivent afficher la **nouvelle** échéance, et `/sante` répondre `{"status":"ok"}`. Ouvrir ensuite l'interface depuis un poste (redémarrer le navigateur au besoin) et vérifier que la sonde de supervision affiche la nouvelle échéance.
+
+**6. Retour arrière, si la vérification échoue :**
+
+```bash
+cd /etc/rag-tls
+cp -p "rag.crt.${JOUR}" rag.crt
+cp -p "rag.key.${JOUR}" rag.key
+docker exec nginx nginx -t && docker exec nginx nginx -s reload
+```
+
+**7. Ménage.** Une fois le nouveau certificat vérifié, supprimer `rag.csr`, `rag.cer`, les fichiers `rag-nouveau.*` et les copies laissées dans le dossier personnel de l'utilisateur SSH. Garder la sauvegarde datée jusqu'au renouvellement suivant, puis la supprimer : elle contient une clé privée.
+
+> **Cas particuliers :**
+>
+> - **Le certificat de l'autorité intermédiaire est renouvelé.** Mettre à jour `ad-subca.pem` et `ad-chain.pem` (§9.2.4), qui servent aussi à LDAP, puis reconstruire `rag.crt` avec la nouvelle intermédiaire (§9.8.4, étape 3) et recharger Nginx.
+> - **Changement de nom de la stack.** Nouveau certificat au nouveau nom, enregistrement DNS, `RAG_FQDN` dans le `.env`, `nginx/rag.conf` régénéré (`sed` de §9.8.1), puis `docker compose up -d` pour que n8n prenne ses nouvelles adresses.
+> - **Clé compromise.** Renouveler immédiatement, avec une nouvelle clé, et faire révoquer l'ancien certificat sur l'autorité.
+
+### §9.8.7 Refus, HSTS et noms multiples
+
+**Requêtes par adresse IP ou par un autre nom.** Nginx ne répond qu'au nom de la stack. Les autres requêtes tombent sur un serveur par défaut :
+
+- en HTTP (port 80) : connexion fermée sans réponse (`return 444`) ;
+- en HTTPS (ports 443 et 5678) : négociation TLS refusée (`ssl_reject_handshake on`), sans même présenter le certificat. Un balayage de l'adresse IP n'apprend donc pas le nom de la stack.
+
+Contrôle, depuis la VM :
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://<IP-VM>/        # Attendu : 000 (connexion fermée)
+curl -sk https://<IP-VM>/; echo "code $?"                        # Attendu : code 35 (négociation refusée)
+curl -s -o /dev/null -w "%{http_code}\n" http://rag.votre-domaine.ch/   # Attendu : 301
+```
+
+**HSTS** (`Strict-Transport-Security`). L'en-tête oblige le navigateur à n'utiliser que HTTPS pour ce nom, et lui retire la possibilité de passer outre un avertissement de certificat. Il est commenté dans `rag.conf`. Ne l'activer qu'avec un certificat de l'autorité interne et quand **tous** les postes qui ouvrent l'interface font confiance à cette autorité : sinon, la page devient inaccessible pour eux pendant toute la durée indiquée (un an dans l'exemple).
+
+**Plusieurs noms sur la même VM.** Comme Nginx choisit le site d'après le nom demandé, la même VM pourrait servir plusieurs noms, par exemple n8n sous `n8n.votre-domaine.ch` sur le port 443 au lieu du port 5678 : un bloc `server` par nom, un enregistrement DNS par nom, et un certificat qui porte tous les noms (plusieurs entrées `DNS:` dans `subjectAltName`). Ce montage n'est pas retenu dans ce guide, pour garder une seule configuration à maintenir ; il n'a pas été testé.
+
+### §9.8.8 Exposition réseau attendue
+
+Les ports publiés sur la VM ne sont plus que ceux de Nginx (§9.1.2) :
+
+```bash
+cd /root/rag-stack && docker compose ps --format "table {{.Name}}\t{{.Ports}}"
+# nginx      : 0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, 0.0.0.0:5678->5678/tcp
+# qdrant     : 127.0.0.1:6333->6333/tcp
+# open-webui, n8n, rag-api : aucun port publié
+```
+
+Depuis un autre poste du réseau (PowerShell) :
+
+```powershell
+80, 443, 5678, 3001, 8080, 6333 | ForEach-Object {
+    "{0,5} : {1}" -f $_, (Test-NetConnection <IP-VM> -Port $_ -WarningAction SilentlyContinue).TcpTestSucceeded
+}
+```
+
+Attendu : `True` pour 80, 443 et 5678 ; `False` pour 3001, 8080 et 6333. Ce test est à rejouer sur la VM avec la 2.21.0 ; le résultat obtenu avant la 2.21.0 figure en §9.1.5.
+
+---
+
+## §9.9 Checklist de déploiement sécurisé
 
 À vérifier avant toute mise en production :
 
@@ -659,6 +926,12 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 | Qdrant sur la boucle locale | `docker compose ps qdrant` | `127.0.0.1:6333->6333/tcp` |
 | Aucune règle UFW obsolète | `sudo ufw status` | Pas de règle 8080, 6333 ni `172.18.0.0/16` |
 | SSH restreint (prod) | `sudo ufw status \| grep 22` | Subnet interne uniquement |
+| Seul Nginx publie des ports | `docker compose ps` | 80, 443, 5678 sur `nginx` ; rien sur `open-webui`, `n8n`, `rag-api` (§9.8.8) |
+| Nom de la stack dans le DNS | `getent hosts <RAG_FQDN>` | Adresse IP de la VM |
+| Certificat de l'autorité interne | `openssl verify -CAfile /etc/ssl/certs/ad-chain.pem /etc/rag-tls/rag.crt` | `OK` ; pas d'auto-signé en production |
+| Certificat valable plus de 30 jours | `openssl x509 -in /etc/rag-tls/rag.crt -noout -checkend 2592000` | `Certificate will not expire` |
+| Refus par adresse IP | `curl -sk https://<IP-VM>/; echo $?` | `35` (§9.8.7) |
+| État de santé par le frontal | `curl --cacert /etc/ssl/certs/ad-chain.pem https://<RAG_FQDN>/sante` | `{"status":"ok"}` |
 | DENY validé | Voir §9.4.5 | Test positif + test négatif effectués |
 | Groupes imbriqués | Voir §9.4.5 | Résolution récursive validée |
 
@@ -668,4 +941,4 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026. §9.5.2 Option A (JIT AD PAM) est documentaire, non validé sur matériel. Tests DENY et groupes imbriqués validés en session, résultats en §9.4.5.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026 ; frontal Nginx (§9.8) validé sur la VM de test, octobre 2026. §9.5.2 Option A (JIT AD PAM) est documentaire, non validé sur matériel. Tests DENY et groupes imbriqués validés en session, résultats en §9.4.5.*

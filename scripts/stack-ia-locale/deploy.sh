@@ -149,6 +149,24 @@ echo -e "${BLUE}-- Paramètres réseau de la VM --${NC}"
 ask "IP de la VM Ubuntu (ex: 10.0.0.20) :"
 read -r VM_IP
 
+# Nom de la stack : celui que les utilisateurs tapent, inscrit dans le certificat
+# de Nginx (§9.8). Un nom de service plutôt que le nom de la VM : la VM peut être
+# remplacée sans changer l'adresse des utilisateurs ni le certificat.
+ask "Nom DNS complet de la stack, pour les utilisateurs (ex: rag.votre-domaine.ch) :"
+read -r RAG_FQDN
+RAG_FQDN=$(echo "$RAG_FQDN" | tr '[:upper:]' '[:lower:]')
+[[ "$RAG_FQDN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
+    || error "Nom de la stack invalide : un nom DNS complet est attendu (ex: rag.votre-domaine.ch)."
+ADRESSE_FQDN=$(getent hosts "$RAG_FQDN" 2>/dev/null | awk '{print $1; exit}' || true)
+if [[ -z "$ADRESSE_FQDN" ]]; then
+    warn "« $RAG_FQDN » ne se résout pas encore : créer l'enregistrement DNS vers $VM_IP"
+    warn "(sur le DC : Add-DnsServerResourceRecordA, §9.8). Le déploiement continue."
+elif [[ "$ADRESSE_FQDN" != "$VM_IP" ]]; then
+    warn "« $RAG_FQDN » pointe vers $ADRESSE_FQDN, et non vers la VM ($VM_IP) : corriger l'enregistrement DNS."
+else
+    ok "Nom de la stack : $RAG_FQDN → $VM_IP"
+fi
+
 echo ""
 echo -e "${BLUE}-- Active Directory --${NC}"
 
@@ -213,17 +231,21 @@ echo "(Appuyer sur Entree pour générér automatiquement)"
 ask "API_TOKEN (token utilisateurs RAG) :"
 read -r API_TOKEN_INPUT
 API_TOKEN="${API_TOKEN_INPUT:-$(openssl rand -hex 32)}"
+# La RAG API refuse de démarrer avec un jeton de moins de 32 caractères
+[ "${#API_TOKEN}" -ge 32 ] || error "API_TOKEN trop court (32 caractères au moins) : laisser vide pour le générer."
 [ -z "$API_TOKEN_INPUT" ] && ok "API_TOKEN généré automatiquement"
 
 ask "ADMIN_TOKEN (token administration, distinct du precedent) :"
 read -r ADMIN_TOKEN_INPUT
 ADMIN_TOKEN="${ADMIN_TOKEN_INPUT:-$(openssl rand -hex 32)}"
+[ "${#ADMIN_TOKEN}" -ge 32 ] || error "ADMIN_TOKEN trop court (32 caractères au moins) : laisser vide pour le générer."
 [ "$ADMIN_TOKEN" = "$API_TOKEN" ] && error "ADMIN_TOKEN et API_TOKEN doivent etre differents."
 [ -z "$ADMIN_TOKEN_INPUT" ] && ok "ADMIN_TOKEN généré automatiquement"
 
 WEBUI_SECRET_KEY="$(openssl rand -hex 32)"
 QDRANT_API_KEY="$(openssl rand -hex 32)"
 LOG_HMAC_KEY="$(openssl rand -hex 32)"
+OWUI_JWT_SECRET="$(openssl rand -hex 32)"
 MIP_TOKEN="$(openssl rand -hex 32)"
 
 echo ""
@@ -250,6 +272,7 @@ echo "============================================================"
 echo "  Organisation    : $ORG_NAME"
 echo "  Moteur          : $MOTEUR (génération : $LLM_URL ; embedding : $EMBED_URL)"
 echo "  VM IP           : $VM_IP"
+echo "  Nom de la stack : https://$RAG_FQDN (n8n : https://$RAG_FQDN:5678)"
 echo "  DC              : $DC_HOST"
 echo "  Domaine         : $DOMAIN_NETBIOS / $DOMAIN_DNS"
 echo "  svc-rag OU      : $SVC_RAG_OU"
@@ -323,6 +346,18 @@ mkdir -p /etc/smbcredentials
 # sinon Docker le créerait au démarrage avec des droits par défaut.
 mkdir -p /etc/rag-certs
 chmod 700 /etc/rag-certs
+# Certificat et clé de Nginx (§9.8) : sur le disque chiffré quand il est prêt,
+# comme les autres secrets (§15.3.6), avec un lien depuis /etc/rag-tls.
+if [ ! -e /etc/rag-tls ]; then
+    if mountpoint -q /srv/rag-donnees 2>/dev/null; then
+        mkdir -p /srv/rag-donnees/secrets/rag-tls
+        chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-tls
+        ln -s /srv/rag-donnees/secrets/rag-tls /etc/rag-tls
+    else
+        mkdir -p /etc/rag-tls
+    fi
+fi
+chmod 700 "$(readlink -f /etc/rag-tls)"
 
 ok "Répertoires créés"
 
@@ -336,6 +371,9 @@ cp docker-compose.yml /root/rag-stack/docker-compose.yml
 # Evite le probleme d'imbrication api/api/ lors d'une relance.
 mkdir -p /root/rag-stack/api
 cp -r api/. /root/rag-stack/api/
+# Configuration de Nginx, avec le nom de la stack
+mkdir -p /root/rag-stack/nginx
+sed "s/<NOM-STACK>/${RAG_FQDN}/g" nginx/rag.conf > /root/rag-stack/nginx/rag.conf
 
 cp acl_resolver.py /root/rag-pipeline/acl_resolver.py
 if [ -f "indexer.py" ]; then
@@ -403,6 +441,8 @@ DOCUMENTATION_PATHS='${DOCUMENTATION_PATHS}'
 # Tokens d'authentification
 API_TOKEN=${API_TOKEN}
 ADMIN_TOKEN=${ADMIN_TOKEN}
+# Identité des utilisateurs signée par Open WebUI, vérifiée par la RAG API
+OWUI_JWT_SECRET=${OWUI_JWT_SECRET}
 
 # Open WebUI
 WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
@@ -497,8 +537,9 @@ MIP_CACHE_TTL=3600
 # n8n
 N8N_BASIC_AUTH_USER=admin
 N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)
-N8N_WEBHOOK_URL=http://${VM_IP}:5678
-N8N_SECURE_COOKIE=false
+
+# Nom de la stack (§9.8) : certificat de Nginx, adresse annoncée par n8n
+RAG_FQDN=${RAG_FQDN}
 ENVEOF
 
 chmod 600 /root/rag-stack/.env
@@ -543,6 +584,45 @@ else
     else
         error "Deploiement interrompu. Installer le certificat et relancer."
     fi
+fi
+
+# ─────────────────────────────────────────
+# Étape 6b : certificat de la stack (Nginx, §9.8)
+# ─────────────────────────────────────────
+info "Étape 6b : certificat de la stack (${RAG_FQDN})..."
+
+CRT=/etc/rag-tls/rag.crt
+KEY=/etc/rag-tls/rag.key
+if [ -s "$CRT" ] && [ -s "$KEY" ]; then
+    # Certificat fourni (autorité interne) : contrôles, sans le modifier
+    EMPREINTE_CRT=$(openssl x509 -in "$CRT" -noout -pubkey 2>/dev/null | sha256sum | cut -d' ' -f1)
+    EMPREINTE_KEY=$(openssl pkey -in "$KEY" -pubout 2>/dev/null | sha256sum | cut -d' ' -f1)
+    [ "$EMPREINTE_CRT" = "$EMPREINTE_KEY" ] \
+        || error "rag.crt et rag.key ne correspondent pas (/etc/rag-tls). Voir §9.8.4."
+    openssl x509 -in "$CRT" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:${RAG_FQDN}" \
+        || warn "Le certificat fourni ne porte pas le nom ${RAG_FQDN} : le navigateur affichera un avertissement."
+    openssl x509 -in "$CRT" -noout -checkend 2592000 >/dev/null \
+        || warn "Le certificat fourni expire dans moins de 30 jours : le renouveler (§9.8.6)."
+    # Émetteur identique au sujet : certificat auto-signé (déploiement précédent)
+    if [ "$(openssl x509 -in "$CRT" -noout -issuer | sed 's/^issuer=//')" = "$(openssl x509 -in "$CRT" -noout -subject | sed 's/^subject=//')" ]; then
+        CERT_AUTOSIGNE=oui
+        warn "Certificat existant conservé, mais AUTO-SIGNÉ : le remplacer pour la production (§9.8.6)."
+    else
+        CERT_AUTOSIGNE=non
+        ok "Certificat fourni utilisé : $(openssl x509 -in "$CRT" -noout -issuer | sed 's/^issuer=//')"
+    fi
+else
+    # Aucun certificat : auto-signé, pour un essai. Les connexions sont chiffrées,
+    # mais le navigateur affichera un avertissement jusqu'à son remplacement.
+    openssl req -x509 -newkey rsa:3072 -nodes -days 825 \
+        -keyout "$KEY" -out "$CRT" \
+        -subj "/CN=${RAG_FQDN}" -addext "subjectAltName=DNS:${RAG_FQDN}" >/dev/null 2>&1 \
+        || error "Génération du certificat auto-signé échouée."
+    chmod 600 "$KEY"
+    warn "Aucun certificat fourni : certificat AUTO-SIGNÉ généré pour ${RAG_FQDN}."
+    warn "Les navigateurs afficheront un avertissement. Pour la production, le remplacer"
+    warn "par un certificat de l'autorité interne (§9.8.4, §9.8.6), sans redéployer."
+    CERT_AUTOSIGNE=oui
 fi
 
 # ─────────────────────────────────────────
@@ -658,11 +738,11 @@ else
     PROBLEMES="${PROBLEMES}  - RAG API sans réponse après 120 s (docker logs rag-api --tail 30)\n"
 fi
 
-# Les quatre conteneurs doivent tourner, sans redémarrage. Un conteneur qui plante
+# Les cinq conteneurs doivent tourner, sans redémarrage. Un conteneur qui plante
 # au démarrage (n8n sans droits sur son dossier, par exemple) redémarre en boucle
 # sans que « docker compose up -d » le signale.
 sleep 20
-for C in qdrant rag-api open-webui n8n; do
+for C in qdrant rag-api open-webui n8n nginx; do
     ETAT=$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$C" 2>/dev/null || echo "absent 0")
     if [ "$ETAT" = "running 0" ]; then
         ok "Conteneur $C démarré"
@@ -687,6 +767,15 @@ print(httpx.get(u, headers=h, timeout=10).status_code)
         warn "Serveur de modèles non joint depuis le conteneur (${VAR_URL} : ${CODE}). Voir « En cas de problème » au §0."
     fi
 done
+
+# Accès par Nginx, sous le nom de la stack, sans dépendre du DNS (--resolve) :
+# la RAG API doit répondre par l'adresse de santé de la supervision (§16.10).
+SANTE=$(curl -sk -m 10 --resolve "${RAG_FQDN}:443:127.0.0.1" "https://${RAG_FQDN}/sante" 2>/dev/null || echo "")
+if echo "$SANTE" | grep -q '"status":"ok"'; then
+    ok "Accès HTTPS par Nginx : https://${RAG_FQDN}/sante répond"
+else
+    PROBLEMES="${PROBLEMES}  - Nginx : https://${RAG_FQDN}/sante sans réponse (docker logs nginx --tail 30)\n"
+fi
 
 # Contrôle des citations : tests unitaires, sans modèle ni Qdrant
 if [ -f /root/rag-pipeline/test_citations.py ]; then
@@ -761,8 +850,14 @@ echo "============================================================"
 echo "  Déploiement terminé"
 echo "============================================================"
 echo ""
-echo "  Open WebUI   : http://${VM_IP}:3001"
-echo "  n8n          : http://${VM_IP}:5678"
+echo "  Open WebUI   : https://${RAG_FQDN}"
+echo "  n8n          : https://${RAG_FQDN}:5678"
+if [ "$CERT_AUTOSIGNE" = "oui" ]; then
+    echo "  Certificat   : AUTO-SIGNÉ (avertissement du navigateur). Remplacement : §9.8.6"
+else
+    echo "  Certificat   : fourni ($(openssl x509 -in /etc/rag-tls/rag.crt -noout -enddate | sed 's/notAfter=/échéance /'))"
+fi
+echo "  Supervision  : https://${RAG_FQDN}/sante (§16.10)"
 echo "  Logs nLPD    : /var/log/rag/rag-queries.jsonl"
 echo "  Tokens       : /root/rag-stack/.env (chmod 600)"
 echo ""
@@ -791,7 +886,7 @@ else
     echo "     python acl_resolver.py --share ${SMB_SHARE} --mount ${SMB_MOUNT}"
     N=4
 fi
-echo "  ${N}. Configurer n8n (§0, étape 15, http://${VM_IP}:5678) :"
+echo "  ${N}. Configurer n8n (§0, étape 15, https://${RAG_FQDN}:5678) :"
 echo "     a. Créer l'identifiant Header Auth « RAG API - ADMIN_TOKEN »"
 echo "        (Name : Authorization ; Value : Bearer <ADMIN_TOKEN du .env> ;"
 echo "        domaine autorisé : rag-api), puis l'identifiant SMTP."

@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4) ; cette version corrigée n'a pas encore été rejouée (encadré de l'étape 6).
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4) ; cette version corrigée n'a pas encore été rejouée (encadré de l'étape 6). La 2.21.0 ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées : chaque élément a été validé sur la VM de test, mais la procédure complète avec la 2.21.0 reste à rejouer.
 
 ---
 
@@ -41,10 +41,10 @@ Ce guide mène d'une installation vierge à un assistant en service. Comptez une
  Utilisateur (navigateur)
         │
         ▼
- VM de la stack ── Open WebUI → RAG API → Qdrant (index des documents)
-                                  │
-                                  ├→ Active Directory : qui est l'utilisateur, quels sont ses groupes
-                                  └→ Serveur de modèles : rédaction, vérification, recherche
+ VM de la stack ── Nginx (HTTPS) → Open WebUI → RAG API → Qdrant (index des documents)
+                                                    │
+                                                    ├→ Active Directory : qui est l'utilisateur, quels sont ses groupes
+                                                    └→ Serveur de modèles : rédaction, vérification, recherche
 ```
 
 Dans le lab, la VM de la stack tourne dans VMware Workstation sur le poste Windows qui porte la carte graphique. Ce peuvent aussi être deux machines distinctes.
@@ -73,6 +73,8 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 - **Une carte graphique NVIDIA d'au moins 16 Go** sur le serveur de modèles (le lab : une RTX 5060 Ti 16 Go). Sans carte, Ollama fonctionne sur le processeur, mais une question prend une à deux minutes (§10.4) ; vLLM exige une carte.
 - **Un accès à Internet** pendant l'installation : paquets, images Docker, modèles.
 - **Les informations de votre réseau** : l'adresse IP de la VM, celle du serveur de modèles, le nom DNS du contrôleur de domaine, le nom du serveur de fichiers et du partage à indexer.
+- **Un nom DNS pour la stack**, par exemple `rag.votre-domaine.ch` : un enregistrement A vers l'adresse de la VM, dans la zone du domaine (§9.8.2). C'est par ce nom que les utilisateurs ouvriront l'assistant, en HTTPS.
+- **Facultatif : un certificat de l'autorité interne** pour ce nom (§9.8.4). Sans lui, un certificat auto-signé est généré : les connexions sont chiffrées, mais les navigateurs affichent un avertissement jusqu'à son remplacement.
 
 > **Conventions de ce guide.** Les blocs `powershell` se lancent sur Windows, dans PowerShell **ouvert en administrateur**. Les blocs `bash` se lancent sur Linux. Sur la VM, **toutes les commandes se lancent en root** : ouvrir d'abord une session root avec `sudo -i`. Les valeurs entre chevrons, `<comme-ceci>`, sont à remplacer par les vôtres, chevrons compris. Chaque étape se termine par un résultat **attendu** : ne pas passer à la suite tant qu'il n'est pas obtenu.
 
@@ -415,7 +417,7 @@ chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 
 # La stack : Compose, configuration d'exemple, RAG API, service Purview
 cp docker-compose.yml env.example /root/rag-stack/
-mkdir -p /root/rag-stack/api /root/rag-stack/mip-service
+mkdir -p /root/rag-stack/api /root/rag-stack/mip-service /root/rag-stack/nginx
 cp -r api/. /root/rag-stack/api/
 mv /root/rag-stack/api/anon_main.py /root/rag-stack/api/main.py
 mv /root/rag-stack/api/anon_auth.py /root/rag-stack/api/auth.py
@@ -431,7 +433,7 @@ ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 
 **Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py` et `test_citations.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les quatre conteneurs tournent sans redémarrage et que la RAG API répond ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple) : il reprend sans dommage. **Statut :** rejoué deux fois sur une VM neuve ; le second rejeu a fait corriger le script (version 2.20.4, consignée dans le suivi des corrections), et cette version n'a pas encore été rejouée. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier, en root.
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple) : il reprend sans dommage. **Statut :** rejoué deux fois sur une VM neuve ; le second rejeu a fait corriger le script (version 2.20.4, consignée dans le suivi des corrections), et cette version n'a pas encore été rejouée. Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier, en root.
 
 ---
 
@@ -448,14 +450,14 @@ cd /root/rag-stack
 ENVF=$(readlink -f /root/rag-stack/.env)
 cp env.example "$ENVF"
 chmod 600 "$ENVF"
-for v in API_TOKEN ADMIN_TOKEN WEBUI_SECRET_KEY QDRANT_API_KEY LOG_HMAC_KEY MIP_TOKEN; do
+for v in API_TOKEN ADMIN_TOKEN WEBUI_SECRET_KEY QDRANT_API_KEY LOG_HMAC_KEY MIP_TOKEN OWUI_JWT_SECRET; do
     sed -i "s|^${v}=.*|${v}=$(openssl rand -hex 32)|" "$ENVF"
 done
 sed -i "s|^N8N_BASIC_AUTH_PASSWORD=.*|N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)|" "$ENVF"
 grep -c changeme "$ENVF"
 ```
 
-**Attendu :** `0` : plus aucune valeur d'exemple pour les secrets. Sans disque chiffré, `readlink -f` rend simplement le chemin de `.env` : la suite est identique.
+**Attendu :** `0` : plus aucune valeur d'exemple pour les secrets. C'est indispensable : depuis la 2.21.0, la RAG API refuse de démarrer sur une valeur d'exemple, un secret vide ou trop court, ou deux jetons identiques (§16.6). Sans disque chiffré, `readlink -f` rend simplement le chemin de `.env` : la suite est identique.
 
 Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`, ou `nano /srv/rag-donnees/secrets/.env`), puis **`docker compose up -d <service>`**, jamais `docker compose restart` : `restart` ne relit pas le `.env` et garde l'ancienne valeur, sans erreur.
 
@@ -472,7 +474,7 @@ Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`
 | `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTREDOMAINE` |
 | `SMB_SHARE` | Le partage à indexer | `//FILESERVER/FileService` |
 | `DOCUMENTATION_PATHS` | Facultatif. Le ou les dossiers de documentation technique (guides, procédures, manuels), **à la racine** du partage, séparés par des virgules. Leur contenu va dans la collection `documentation`, tout le reste dans `documents` ; les droits NTFS s'appliquent de la même façon aux deux. **Vide** : tout le partage va dans `documents`. Changer ce réglage après l'indexation exige une réindexation complète (§5.9) | `DOCUMENTATION` (lab : `DOIT4EVERYONE`) |
-| `N8N_WEBHOOK_URL` | L'adresse de la VM, avec le port de n8n, comme n8n l'annonce à ses utilisateurs | `http://<IP-VM>:5678` |
+| `RAG_FQDN` | Le nom DNS de la stack, sans `https://` (§9.8.2). Il fixe aussi l'adresse de n8n, `https://<RAG_FQDN>:5678` | `rag.votre-domaine.ch` |
 
 Les valeurs qui contiennent un espace sont **entre apostrophes** dans `env.example` (par exemple `SP_EXCLUDE_DRIVES='Preservation Hold Library'`). Les conserver : sans elles, `source .env` échoue avec « command not found » sur le mot qui suit l'espace.
 
@@ -492,6 +494,40 @@ grep -nE "^[A-Z_]+=.*<" .env
 ```
 
 **Attendu :** seulement des lignes `ENTRA_`, `TEAMS_`, `SP_` et `MIP_TENANT_DOMAINE`, qui concernent Microsoft 365 et restent inactives tant qu'il n'est pas configuré.
+
+**5. Le nom de la stack et son certificat** (§9.8). Vérifier d'abord le nom, puis préparer la configuration de Nginx et le certificat :
+
+```bash
+cd /root/rag-stack
+FQDN=$(grep '^RAG_FQDN=' .env | cut -d= -f2)
+getent hosts "$FQDN"
+# Attendu : l'adresse IP de la VM
+
+# Configuration de Nginx, au nom de la stack
+sed "s/<NOM-STACK>/${FQDN}/g" /root/ia-locale-pme-suisse/scripts/stack-ia-locale/nginx/rag.conf > nginx/rag.conf
+grep -c "$FQDN" nginx/rag.conf
+
+# Dossier du certificat : sur le disque chiffré si le lien du §1.5 existe
+[ -e /etc/rag-tls ] || mkdir -p /etc/rag-tls
+chmod 700 "$(readlink -f /etc/rag-tls)"
+ls -l /etc/rag-tls/
+```
+
+**Attendu :** l'adresse de la VM, puis un nombre supérieur à 0.
+
+- **Avec un certificat de l'autorité interne :** suivre §9.8.4 pour obtenir `rag.crt` (certificat suivi de l'autorité intermédiaire) et `rag.key`, et les placer dans `/etc/rag-tls`, la clé en `600`.
+- **Sans autorité :** générer un certificat auto-signé, remplaçable plus tard sans redéployer (§9.8.6) :
+
+```bash
+cd /etc/rag-tls
+FQDN=$(grep '^RAG_FQDN=' /root/rag-stack/.env | cut -d= -f2)
+openssl req -x509 -newkey rsa:3072 -nodes -days 825 \
+    -keyout rag.key -out rag.crt \
+    -subj "/CN=${FQDN}" -addext "subjectAltName=DNS:${FQDN}"
+chmod 600 rag.key
+```
+
+**Attendu :** `rag.crt` et `rag.key` dans `/etc/rag-tls`. Sans eux, Nginx s'arrête au démarrage et la stack n'est pas joignable.
 
 ---
 
@@ -526,7 +562,13 @@ docker compose up -d
 docker compose ps
 ```
 
-**Attendu :** `qdrant` et `n8n` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les deux autres. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent une variable manquante dans `.env`, ou le certificat de l'étape 4 absent).
+**Attendu :** `qdrant`, `n8n` et `nginx` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les trois autres. Seul `nginx` publie des ports (80, 443, 5678). Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent un secret refusé, ligne `[SÉCURITÉ]`, une variable manquante dans `.env`, ou le certificat de l'étape 4 absent). Si `nginx` s'arrête : `docker logs nginx` (certificat absent de `/etc/rag-tls`, ou `nginx/rag.conf` manquant).
+
+```bash
+curl -sk https://$(grep '^RAG_FQDN=' .env | cut -d= -f2)/sante
+```
+
+**Attendu :** `{"status":"ok"}` (avec `-k`, le certificat n'est pas vérifié ; contrôle complet à l'étape 16).
 
 ---
 
@@ -629,7 +671,7 @@ curl -s -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
 
 ## Étape 14 : configurer Open WebUI
 
-Ouvrir `http://<IP-VM>:3001` depuis un poste du réseau. Le premier compte créé devient administrateur.
+Ouvrir `https://<RAG_FQDN>` (par exemple `https://rag.votre-domaine.ch`) depuis un poste du réseau. Le premier compte créé devient administrateur. Avec le certificat auto-signé, le navigateur affiche un avertissement : l'accepter pour ce poste, en sachant que tous les utilisateurs le verront jusqu'au remplacement du certificat (§9.8.6). Par l'adresse IP, la connexion est refusée : c'est voulu (§9.8.7).
 
 **Raccorder la RAG API :**
 
@@ -679,7 +721,7 @@ PYEOF
 
 ## Étape 15 : configurer n8n
 
-n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `http://<IP-VM>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 : corriger par `chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"` puis `docker compose up -d n8n`. `deploy.sh` et l'étape 6 le font déjà.
+n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `https://<RAG_FQDN>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 : corriger par `chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"` puis `docker compose up -d n8n`. `deploy.sh` et l'étape 6 le font déjà.
 
 **1. Créer les deux identifiants** (*Credentials → Add credential*). Le jeton d'administration n'est écrit dans aucun workflow : il reste dans l'identifiant (§16.7).
 
@@ -708,6 +750,8 @@ docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -10
 
 **Attendu :** `[SYNC] Terminé : success=True`. Le courriel de la synchronisation ne part qu'en cas d'erreur, de quarantaine ou d'alerte de cloisonnement. Pour tester son envoi sans provoquer de panne : épingler des données d'erreur sur le nœud « POST /admin/sync » (*Pin data*, avec par exemple `"success": false`), lancer le workflow, vérifier la réception, puis **retirer l'épingle** avant de publier. Modifier la sortie d'un nœud en aval (*Set mock data*) ne teste rien : le nœud de courriel suivant reçoit toujours les données réelles.
 
+**7. Facultatif : le signal de supervision.** Si l'organisation surveille la stack depuis une autre machine (§16.10), le nœud « Signal supervision (Push) » du workflow de synchronisation, désactivé à l'import, prévient l'outil après chaque synchronisation. Remplacer `<NOM-COMPLET-SUPERVISION>` et `<CLE-PUSH>` dans son URL, l'activer, publier. Le nom de la machine de supervision doit être un nom DNS **complet** : le conteneur n8n ne résout pas les noms courts.
+
 > **Une synchronisation occupe la stack et le serveur de modèles.** Tant qu'elle tourne, les réponses sont nettement plus lentes : dans le lab, trois à cinq fois plus lentes pendant une synchronisation lancée juste avant une série de questions (§10.3). Ne pas juger la vitesse de la stack à ce moment-là.
 
 ---
@@ -726,6 +770,18 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 
 > **Le test du garde-fou ne doit pas verrouiller `svc-rag`.** Le contrôle « Garde-fou des droits » ci-dessous désigne un partage qui n'existe pas : le compte s'authentifie normalement, chaque lecture échoue, et le garde-fou doit abandonner sans toucher à Qdrant. Ne pas le tester avec un mot de passe faux : chaque essai compte dans le seuil de verrouillage de l'Active Directory, et un compte `svc-rag` verrouillé bloque la connexion de tous les utilisateurs (cas vécu dans le lab, avant la 2.20.4 qui arrête `acl_resolver.py` au premier refus d'authentification). Déverrouillage, sur un contrôleur de domaine : `Unlock-ADAccount -Identity svc-rag`. Ce contrôle par un partage inexistant n'a pas encore été rejoué en lab.
 
+**Le frontal HTTPS et l'identité signée** (§9.8, §16.6), sur la VM :
+
+```bash
+FQDN=$(grep '^RAG_FQDN=' /root/rag-stack/.env | cut -d= -f2)
+# Certificat de l'autorité interne ; avec l'auto-signé, remplacer --cacert ... par -k
+curl --cacert /etc/ssl/certs/ad-chain.pem https://${FQDN}/sante; echo
+# Par l'adresse IP : refusé
+curl -sk https://<IP-VM>/; echo "code $?"
+```
+
+**Attendu :** `{"status":"ok"}`, puis `code 35`. Puis le contrôle d'usurpation de §16.6 : une identité transmise sans signature est refusée (`HTTP Error 403`). Depuis un autre poste, seuls les ports 80, 443 et 5678 doivent répondre (§9.8.8).
+
 **Avant la mise en service : un snapshot de la VM arrêtée**, une fois tous les contrôles passés. Arrêter la VM (`shutdown -h now`) avant le snapshot : un snapshot à chaud d'une VM dont le disque est chiffré et où tourne une base de données peut être incohérent. Prendre ensuite un snapshot Qdrant et le copier hors de la VM (§3.7).
 
 ### Checklist
@@ -737,6 +793,10 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 | Extraits indexés | Étape 12 | Plus de 0 dans les deux collections |
 | Droits recopiés | Étape 13 | `autorises` non vide |
 | Santé de la RAG API | `docker compose exec n8n wget -qO- http://rag-api:8080/health` | `"status":"ok"` |
+| Frontal HTTPS | `curl --cacert /etc/ssl/certs/ad-chain.pem https://<RAG_FQDN>/sante` | `{"status":"ok"}` (auto-signé : `-k`) |
+| Refus par adresse IP | `curl -sk https://<IP-VM>/; echo $?` | `35` |
+| Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
+| Ports exposés | `docker compose ps` | Seul `nginx` publie des ports : 80, 443, 5678 |
 | Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `4 tests OK` |
 | Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
@@ -744,6 +804,7 @@ docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/ca
 | Test de cloisonnement | Étape 16 | Aucune `FUITE` |
 | Journal nLPD | `tail -1 /var/log/rag/rag-queries.jsonl` | Une entrée avec `user_id` et `ancree` |
 | Synchronisation horaire | n8n, dernière exécution | Réussie |
+| Échéance du certificat | `openssl x509 -in /etc/rag-tls/rag.crt -noout -enddate` | Notée au calendrier des rotations (§17.3) |
 | Garde-fou des droits | `python acl_resolver.py --share //<NOM-FILESERVER>/PartageInexistant --mount /mnt/corpus-root` | Code 1, `[GARDE-FOU]`, Qdrant intact |
 | Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
 | Avec vLLM : la clé est exigée | Étape 3B, point 5 | `401` sans la clé |

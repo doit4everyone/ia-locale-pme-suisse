@@ -86,9 +86,11 @@ La réponse était bien formatée, complète, et indiscernable d'une réponse co
 La réponse architecturale est de ne pas laisser le LLM gérer seul la génération sans guardrails. La RAG API déployée en §3 implémente quatre couches de contrôle entre la récupération et l'affichage.
 
 ```
-Utilisateur (Open WebUI, port 3001)
+Utilisateur (navigateur, HTTPS par Nginx, §9.8)
     ↓
-RAG API (port 8080)
+Open WebUI (identité signée)
+    ↓
+RAG API (port 8080, réseau interne)
     ├── Retriever Qdrant : chunks du document le plus pertinent
     ├── Génération : qwen2.5:14b avec prompt strict
     ├── Contrôles déterministes (coût nul)

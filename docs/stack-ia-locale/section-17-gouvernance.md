@@ -1,6 +1,6 @@
 ---
 title: "§17 Gouvernance | Guide de déploiement stack IA locale"
-description: "Gouvernance d'un RAG d'entreprise : qui est responsable de quoi, rotation des secrets et des certificats, politique de corpus, droit à l'effacement, audit périodique, et ce que la nLPD exige au-delà de la technique."
+description: "Gouvernance d'un RAG d'entreprise : qui est responsable de quoi, rotation des secrets et des certificats, politique de corpus, droit à l'effacement, audit périodique, ce que la nLPD exige au-delà de la technique, et modèle de matrice RACI."
 ---
 <style>
   header, footer { display: none !important; }
@@ -41,7 +41,7 @@ Cette stack est **conçue pour faciliter la conformité à la nLPD**. Elle ne la
 
 ## §17.2 Qui est responsable de quoi
 
-Un RAG d'entreprise touche l'IT, la sécurité, les métiers et la direction. Sans attribution claire, chaque incident cherche un responsable qui n'existe pas. Cette matrice est un point de départ, à adapter à la taille de l'organisation ; dans une petite PME, une même personne peut tenir plusieurs rôles, mais aucun ne doit rester vacant.
+Un RAG d'entreprise touche l'IT, la sécurité, les métiers et la direction. Sans attribution claire, chaque incident cherche un responsable qui n'existe pas. Cette matrice est un point de départ, à adapter à la taille de l'organisation ; dans une petite PME, une même personne peut tenir plusieurs rôles, mais aucun ne doit rester vacant. L'annexe §17.9 la détaille sous forme de matrice RACI, activité par activité.
 
 | Action | Responsable type |
 |---|---|
@@ -67,8 +67,11 @@ La stack repose sur des secrets et des certificats qui ont tous une durée de vi
 | Certificats des applications Entra (identité, Teams, SharePoint, Purview) | Entra ID, `/etc/rag-certs` | 2 ans, alerte à J-30 | La fonction concernée échoue (§11.5.2) |
 | `ADMIN_TOKEN`, `API_TOKEN` | `.env` | À chaque départ d'un administrateur, et périodiquement | n8n et les appels d'administration échouent (401) |
 | `QDRANT_API_KEY`, `MIP_TOKEN`, `LOG_HMAC_KEY` | `.env` | Périodiquement | Service interrompu jusqu'au report de la nouvelle valeur |
+| `OWUI_JWT_SECRET` (identité signée, §16.6) | `.env`, lu par la RAG API et par Open WebUI | Périodiquement, et si le `.env` a pu être lu par un tiers | Si les deux services n'ont pas la même valeur, toutes les questions sont refusées (403). Recréer les deux : `docker compose up -d rag-api open-webui` |
+| Certificat de la stack (Nginx, §9.8) | `/etc/rag-tls` | Autorité interne, modèle Serveur Web : 2 ans ; auto-signé : 825 jours. Renouveler à J-30 au plus tard | Avertissement dans les navigateurs, sonde de supervision en alerte, n8n inaccessible sans passer l'avertissement. Procédure : §9.8.6 |
+| Certificats de l'autorité interne (racine, intermédiaire) | `ad-chain.pem`, `ad-subca.pem` (§9.2.4) | Selon la politique de la PKI | LDAP refusé (certificat non vérifiable) et chaîne de Nginx incomplète. Mettre à jour les deux fichiers, puis `rag.crt` (§9.8.6) |
 
-Après toute modification du `.env`, recréer les conteneurs (`docker compose up -d`, et non `restart`, voir §15.3.6). Le jeton d'administration se renouvelle en un seul endroit grâce à l'identifiant n8n (§16.7).
+Après toute modification du `.env`, recréer les conteneurs (`docker compose up -d`, et non `restart`, voir §15.3.6). Depuis la 2.21.0, une nouvelle valeur trop courte, identique à un autre jeton ou restée à l'exemple empêche la RAG API de démarrer (§16.6) : le contrôler par `docker compose ps` et `docker logs rag-api`. Le jeton d'administration se renouvelle en un seul endroit grâce à l'identifiant n8n (§16.7).
 
 Les certificats Entra sont le point le plus facile à oublier, parce qu'ils ne gênent personne jusqu'au jour de l'expiration, deux ans plus tard. Un rappel planifié vaut mieux que la mémoire : le dépôt fournit un workflow n8n de rappel mensuel pour `svc-rag`, à décliner pour chaque certificat avec sa date d'échéance.
 
@@ -142,7 +145,9 @@ La journalisation (§9.4) enregistre qui a interrogé le RAG et quels documents 
 | Aucune application inattendue ne détient de droit de déchiffrement | Trimestrielle | Audit `Content.SuperUser` (§14.4.3) |
 | Les droits du partage ne sont pas plus restrictifs que les NTFS | À chaque revue des droits | `Set-AccesIndexationRAG.ps1 -Verifier` (§16.5) |
 | Les appartenances du compte d'indexation se limitent à son groupe dédié | Trimestrielle | Revue AD (§5.2.4) |
-| Les certificats et secrets approchant de l'échéance | Mensuelle | §17.3 |
+| Les certificats et secrets approchant de l'échéance | Mensuelle | §17.3, sonde de supervision (§16.10) |
+| Les versions des composants : correctifs publiés, alertes de sécurité | Trimestrielle | Revue des versions (§16.8) |
+| La supervision alerte réellement | Semestrielle | Essai : synchronisation suspendue, courriel reçu (§16.10) |
 | Lecture des journaux d'accès : rien d'anormal | Selon le secteur | `/var/log/rag/rag-queries.jsonl` |
 | Qualité des réponses sur un jeu de questions de référence | Périodique | À définir au §10 |
 
@@ -150,14 +155,19 @@ La journalisation (§9.4) enregistre qui a interrogé le RAG et quels documents 
 
 ## §17.7 Ce qui relève du passage en production
 
-Ce guide documente un **lab** validé, pas une exploitation en entreprise. Plusieurs exigences de production dépassent son périmètre et feront l'objet d'une section « Du lab à la production » :
+Ce guide documente un **lab** validé, pas une exploitation en entreprise. Plusieurs exigences de production dépassent son périmètre et feront l'objet d'une section « Du lab à la production ». La 2.21.0 en traite une partie :
 
-- images Docker figées par version et empreinte, dépendances verrouillées, intégration continue, inventaire des composants et analyse des vulnérabilités ;
-- réseau segmenté, reverse proxy TLS devant Open WebUI et n8n, identité signée entre Open WebUI et la RAG API (§16, point 44) ;
-- refus de démarrer sur une valeur d'exemple ou une clé d'empreinte absente, plutôt qu'un avertissement ;
-- sauvegardes chiffrées automatisées, avec restauration testée (§15.5) ;
-- supervision et alertes depuis un point extérieur à la stack ;
-- haute disponibilité si la continuité de service l'exige.
+| Exigence | État |
+|---|---|
+| Images Docker figées par version et empreinte, dépendances Python verrouillées | **Fait** (2.21.0, §16.8) |
+| Intégration continue, inventaire des composants, analyse des vulnérabilités | À faire |
+| Frontal HTTPS devant Open WebUI et n8n | **Fait** (2.21.0, §9.8) |
+| Identité signée entre Open WebUI et la RAG API | **Fait** (2.21.0, §16.6) |
+| Refus de démarrer sur une valeur d'exemple ou une clé absente | **Fait** (2.21.0, §16.6) |
+| Réseau segmenté, ports de Nginx limités aux subnets autorisés | À faire (§9.1.2) |
+| Sauvegardes chiffrées automatisées, avec restauration testée | Documenté, s'appuie sur l'outil de l'organisation ; restauration non testée (§15.5) |
+| Supervision et alertes depuis un point extérieur à la stack | Contrôles définis, exemple validé en lab (§16.10) ; à intégrer à l'outil de l'organisation |
+| Haute disponibilité si la continuité de service l'exige | Hors périmètre |
 
 Les mentionner ici évite de laisser croire qu'un lab validé est prêt pour la production. Le passage de l'un à l'autre est un projet en soi.
 
@@ -176,6 +186,38 @@ Les mentionner ici évite de laisser croire qu'un lab validé est prêt pour la 
 | Calendrier d'audit établi, chaque contrôle avec un responsable | |
 | Politique de rétention des journaux et des sauvegardes définie | |
 | Formulation « facilite la conformité », jamais « conforme » | |
+| Matrice RACI (§17.9) adaptée et validée par la direction | |
+
+## §17.9 Annexe : matrice RACI
+
+> **Modèle à adapter.** Cette matrice reprend les activités de ce guide et les rôles de §17.2. Elle n'a pas été éprouvée dans une organisation réelle : c'est une base de discussion, à valider par la direction et à tenir à jour quand les personnes changent.
+
+**Légende :** **R** réalise ; **A** rend compte et tranche (une seule personne par ligne) ; **C** est consulté avant ; **I** est informé après. **A/R** : le même rôle tranche et réalise.
+
+**Rôles :** **Dir.** direction ; **Mét.** propriétaires des données métier ; **IT** exploitation, interne ou prestataire ; **Séc.** sécurité ou référent désigné ; **PD** référent protection des données.
+
+| Activité | Dir. | Mét. | IT | Séc. | PD | Voir |
+|---|---|---|---|---|---|---|
+| Définir la finalité et le périmètre du corpus | A | R | C | C | C | §17.1 |
+| Désigner les dossiers indexés et exclus | I | A | R | C | C | §17.4 |
+| Maintenir les permissions NTFS et SharePoint | | A | R | C | | §5.2.4, §16.5 |
+| Informer les collaborateurs, analyse d'impact | A | C | C | C | R | §17.1 |
+| Déployer la stack, appliquer les mises à jour | I | | A/R | C | | §0, §16.8 |
+| Revoir les versions des composants | | | A/R | C | | §16.8 |
+| Renouveler le certificat de la stack | | | A/R | I | | §9.8.6 |
+| Renouveler les secrets et le mot de passe de `svc-rag` | | | A/R | C | | §17.3, §9.5 |
+| Renouveler les certificats des applications Entra | | | A/R | I | | §17.3 |
+| Traiter une alerte de supervision (stack arrêtée, synchronisation absente) | | I | A/R | I | | §16.10 |
+| Traiter une alerte de cloisonnement (fuite ou refus à tort) | I | I | R | A | I | §16.4 |
+| Sauvegarder la VM et tester la restauration | I | | A/R | C | | §15.5 |
+| Répondre à une demande d'accès ou d'effacement | | C | R | | A | §17.5 |
+| Annoncer une violation de données au PFPDT | A | I | C | C | R | §17.1 |
+| Conduire l'audit périodique, lire les journaux | I | | C | A/R | I | §17.6 |
+| Former les utilisateurs | I | C | A/R | | | §17.2 |
+
+> **Avec un prestataire.** L'exploitation peut être confiée à un prestataire, qui devient **R** sur les lignes IT. Le **A** reste dans l'organisation : au sens de la nLPD, c'est elle le responsable du traitement (§17.1), et elle doit pouvoir trancher sans lui. Le contrat précise alors les délais de réaction, en particulier pour une alerte de cloisonnement et pour l'échéance d'un certificat.
+
+> **Dans une petite PME,** une même personne peut tenir les colonnes IT et Séc. Dans ce cas, l'audit périodique gagne à être relu par quelqu'un d'autre, la direction par exemple : celui qui exploite ne devrait pas être le seul à contrôler.
 
 ---
 
