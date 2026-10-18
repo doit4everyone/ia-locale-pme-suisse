@@ -192,7 +192,7 @@ Les mentionner ici évite de laisser croire qu'un lab validé est prêt pour la 
 
 > **Modèle à adapter.** Cette matrice reprend les activités de ce guide et les rôles de §17.2. Elle n'a pas été éprouvée dans une organisation réelle : c'est une base de discussion, à valider par la direction et à tenir à jour quand les personnes changent.
 
-**Légende :** **R** réalise ; **A** rend compte et tranche (une seule personne par ligne) ; **C** est consulté avant ; **I** est informé après. **A/R** : le même rôle tranche et réalise.
+**Légende :** **R** réalise ; **A** rend compte et tranche (une seule personne par ligne) ; **C** est consulté avant ; **I** est informé après. <span style="white-space:nowrap">**A/R**</span> : le même rôle tranche et réalise.
 
 **Rôles :** **Dir.** direction ; **Mét.** propriétaires des données métier ; **IT** exploitation, interne ou prestataire ; **Séc.** sécurité ou référent désigné ; **PD** référent protection des données.
 
@@ -202,18 +202,18 @@ Les mentionner ici évite de laisser croire qu'un lab validé est prêt pour la 
 | Désigner les dossiers indexés et exclus | I | A | R | C | C | §17.4 |
 | Maintenir les permissions NTFS et SharePoint | | A | R | C | | §5.2.4, §16.5 |
 | Informer les collaborateurs, analyse d'impact | A | C | C | C | R | §17.1 |
-| Déployer la stack, appliquer les mises à jour | I | | A/R | C | | §0, §16.8 |
-| Revoir les versions des composants | | | A/R | C | | §16.8 |
-| Renouveler le certificat de la stack | | | A/R | I | | §9.8.6 |
-| Renouveler les secrets et le mot de passe de `svc-rag` | | | A/R | C | | §17.3, §9.5 |
-| Renouveler les certificats des applications Entra | | | A/R | I | | §17.3 |
-| Traiter une alerte de supervision (stack arrêtée, synchronisation absente) | | I | A/R | I | | §16.10 |
+| Déployer la stack, appliquer les mises à jour | I | | <span style="white-space:nowrap">A/R</span> | C | | §0, §16.8 |
+| Revoir les versions des composants | | | <span style="white-space:nowrap">A/R</span> | C | | §16.8 |
+| Renouveler le certificat de la stack | | | <span style="white-space:nowrap">A/R</span> | I | | §9.8.6 |
+| Renouveler les secrets et le mot de passe de `svc-rag` | | | <span style="white-space:nowrap">A/R</span> | C | | §17.3, §9.5 |
+| Renouveler les certificats des applications Entra | | | <span style="white-space:nowrap">A/R</span> | I | | §17.3 |
+| Traiter une alerte de supervision (stack arrêtée, synchronisation absente) | | I | <span style="white-space:nowrap">A/R</span> | I | | §16.10 |
 | Traiter une alerte de cloisonnement (fuite ou refus à tort) | I | I | R | A | I | §16.4 |
-| Sauvegarder la VM et tester la restauration | I | | A/R | C | | §15.5 |
+| Sauvegarder la VM et tester la restauration | I | | <span style="white-space:nowrap">A/R</span> | C | | §15.5 |
 | Répondre à une demande d'accès ou d'effacement | | C | R | | A | §17.5 |
 | Annoncer une violation de données au PFPDT | A | I | C | C | R | §17.1 |
-| Conduire l'audit périodique, lire les journaux | I | | C | A/R | I | §17.6 |
-| Former les utilisateurs | I | C | A/R | | | §17.2 |
+| Conduire l'audit périodique, lire les journaux | I | | C | <span style="white-space:nowrap">A/R</span> | I | §17.6 |
+| Former les utilisateurs | I | C | <span style="white-space:nowrap">A/R</span> | | | §17.2 |
 
 > **Avec un prestataire.** L'exploitation peut être confiée à un prestataire, qui devient **R** sur les lignes IT. Le **A** reste dans l'organisation : au sens de la nLPD, c'est elle le responsable du traitement (§17.1), et elle doit pouvoir trancher sans lui. Le contrat précise alors les délais de réaction, en particulier pour une alerte de cloisonnement et pour l'échéance d'un certificat.
 
