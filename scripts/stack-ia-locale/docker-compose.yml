@@ -1,5 +1,6 @@
 services:
   # Reranker (§10.8), OPTIONNEL : désactivé dans la configuration recommandée.
+  # Seule image NON figée par empreinte : profil facultatif, non qualifié en 2.21.
   # Démarrage : docker compose --profile reranker up -d reranker, puis RERANKER_URL=http://reranker:80
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
@@ -43,15 +44,15 @@ services:
     container_name: n8n
     # Aucun port publié : n8n est joint par Nginx, https://<NOM-STACK>:5678 (§9.8)
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      # Pas de N8N_BASIC_AUTH_* : sans effet depuis n8n 1.0. L'accès est protégé
+      # par les comptes de n8n : compte propriétaire créé à la première ouverture.
       # Adresse publique de n8n, derrière Nginx (TLS terminé par Nginx, §9.8)
       - N8N_HOST=${RAG_FQDN}
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - N8N_PROXY_HOPS=1
-      - WEBHOOK_URL=https://${RAG_FQDN}:5678/
+      # N8N_WEBHOOK_URL (n8n 2.30 et suivantes) : WEBHOOK_URL est dépréciée depuis la 2.35
+      - N8N_WEBHOOK_URL=https://${RAG_FQDN}:5678/
       # Cookie de session réservé à HTTPS
       - N8N_SECURE_COOKIE=true
       # Fuseau horaire des déclencheurs planifiés et des dates affichées.

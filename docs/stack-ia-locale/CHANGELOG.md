@@ -4,6 +4,26 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.1] : Octobre 2026
+
+Corrections à la suite d'une revue externe du dépôt publié en 2.21.0 : variables de n8n, contrôle du certificat en fin de déploiement, portée du chiffrement, formulation sur les images figées.
+
+### Scripts
+
+- `docker-compose.yml` : `N8N_WEBHOOK_URL` à la place de `WEBHOOK_URL`, dépréciée depuis n8n 2.35 (la 2.20.4 avait fait le changement inverse, à tort) ; `N8N_BASIC_AUTH_*` retirées, sans effet depuis n8n 1.0 ; reranker signalé comme seule image non figée par empreinte.
+- `env.example`, `deploy.sh` : `N8N_BASIC_AUTH_*` retirées.
+- `deploy.sh` : en-tête en 2.21.1 ; avec un certificat de l'autorité interne, `/sante` vérifié aussi avec la chaîne de l'autorité (`--cacert`), et non plus seulement avec `-k`.
+
+### Documentation
+
+- `section-09-securite.md` : §9.8.1, `N8N_WEBHOOK_URL` ; tableau de ce que le frontal chiffre et ne chiffre pas (le TLS s'arrête à Nginx ; liaison vers le serveur de modèles en clair).
+- `section-07-n8n.md`, `section-00-quickstart.md` : compte propriétaire de n8n à créer dès la première ouverture ; `N8N_BASIC_AUTH_*` retirées.
+- `section-03-docker-compose.md`, `section-16-cloisonnement.md` : extraits du `.env` et du Compose ; images du déploiement standard figées, reranker excepté.
+- `section-17-gouvernance.md` : §17.9, « A/R » sans retour à la ligne.
+- `suivi-corrections.md` : points 117 à 120 corrigés, point 98 rectifié, doc.3 clos ; point 121 ouvert.
+
+---
+
 ## [2.21.0] : Octobre 2026
 
 Sécurisation de la stack, validée élément par élément sur la VM de test en service (Ubuntu 26.04), du 17 au 18 octobre 2026 : frontal HTTPS Nginx, identité signée entre Open WebUI et la RAG API, refus de démarrer sur un secret d'exemple, versions figées par empreinte, supervision externe. Procédure de renouvellement du certificat et matrice RACI. La procédure complète du §0 avec cette version reste à rejouer sur une VM neuve.
@@ -11,7 +31,7 @@ Sécurisation de la stack, validée élément par élément sur la VM de test en
 ### Scripts
 
 - `nginx/rag.conf` (nouveau) : frontal TLS (1.2 et 1.3) ; Open WebUI sur le port 443, n8n sur le port 5678, `/sante` pour la supervision ; redirection de HTTP vers HTTPS ; WebSocket, réponses non mises en tampon, délai de 600 s ; requêtes par adresse IP ou par un autre nom refusées (`return 444`, `ssl_reject_handshake`) ; HSTS prévu, commenté.
-- `docker-compose.yml` : service `nginx` (1.30.6), seul à publier des ports ; Open WebUI et n8n sans port publié ; n8n derrière le frontal (`N8N_HOST`, `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS`, `WEBHOOK_URL` construits depuis `RAG_FQDN`, cookie sécurisé) ; identité signée (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, `OWUI_JWT_SECRET`) ; `ENABLE_VERSION_UPDATE_CHECK=false` ; toutes les images figées par empreinte.
+- `docker-compose.yml` : service `nginx` (1.30.6), seul à publier des ports ; Open WebUI et n8n sans port publié ; n8n derrière le frontal (`N8N_HOST`, `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS`, `WEBHOOK_URL` construits depuis `RAG_FQDN`, cookie sécurisé) ; identité signée (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, `OWUI_JWT_SECRET`) ; `ENABLE_VERSION_UPDATE_CHECK=false` ; images du déploiement standard figées par empreinte (le reranker facultatif excepté, précision de la 2.21.1).
 - `api/anon_main.py` : démarrage refusé sur un secret vide, une valeur d'exemple, un jeton de moins de 32 caractères ou deux jetons identiques ; identité de l'utilisateur lue dans le jeton signé par Open WebUI (`X-OpenWebUI-User-Jwt`), en-têtes simples refusés ; `/query` réservé à `ADMIN_TOKEN`.
 - `api/Dockerfile` : image de base figée par empreinte. `api/requirements.txt` : toutes les dépendances figées (`pip freeze` du conteneur validé), PyJWT cité comme dépendance directe.
 - `deploy.sh` : nom de la stack demandé et contrôlé ; certificat fourni contrôlé (clé, nom, échéance) ou auto-signé généré, auto-signé existant signalé ; `/etc/rag-tls` sur le disque chiffré ; configuration de Nginx au nom de la stack ; `OWUI_JWT_SECRET` généré, jeton saisi trop court refusé ; cinq conteneurs et `/sante` contrôlés à travers Nginx ; adresses finales en HTTPS.

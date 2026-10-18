@@ -40,14 +40,13 @@ Les pipelines de maintenance et de sécurité sont indépendants du GPU. Le rés
 
 ### §7.1.1 Accès à l'interface n8n
 
-n8n est accessible sur `https://<RAG_FQDN>:5678` (par exemple `https://rag.votre-domaine.ch:5678`), à travers le frontal Nginx (§9.8). Identifiants définis dans le fichier `.env` :
+n8n est accessible sur `https://<RAG_FQDN>:5678` (par exemple `https://rag.votre-domaine.ch:5678`), à travers le frontal Nginx (§9.8).
 
-```bash
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=<mot-de-passe>
-```
+**Compte propriétaire.** À la première ouverture, n8n affiche un écran d'inscription : le compte créé devient le **propriétaire** de l'instance. Le créer immédiatement après le déploiement, avec un mot de passe fort conservé dans le gestionnaire de mots de passe de l'organisation : tant qu'il n'existe pas, le premier venu qui ouvre l'adresse peut le créer. La double authentification est activée au niveau de l'instance par défaut (`N8N_MFA_ENABLED`, valeur par défaut `true`, d'après la documentation de n8n) ; l'activer pour le compte propriétaire est recommandé, non testé dans le lab.
 
-> **HTTPS depuis la 2.21.0 :** n8n ne publie plus de port ; Nginx le sert en HTTPS sur le port 5678, sous le nom de la stack. Le Compose du dépôt lui indique qu'il est derrière un frontal (`N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `WEBHOOK_URL=https://<RAG_FQDN>:5678/`) et réserve le cookie de session au HTTPS (`N8N_SECURE_COOKIE=true`). Avant la 2.21.0, l'accès se faisait en HTTP par `http://<IP-VM>:5678`, avec `N8N_SECURE_COOKIE=false`. Les workflows joignent toujours la RAG API par le réseau interne (`http://rag-api:8080`) : ils ne changent pas.
+> **`N8N_BASIC_AUTH_*` retirées (2.21.1).** Ces variables n'ont plus d'effet depuis n8n 1.0, qui a remplacé l'authentification basique par ses propres comptes. Elles figuraient encore dans le Compose et le `.env` du dépôt, et laissaient croire à une protection qu'elles n'apportaient pas. Sur une installation existante, les lignes restées dans le `.env` sont sans effet et peuvent être supprimées.
+
+> **HTTPS depuis la 2.21.0 :** n8n ne publie plus de port ; Nginx le sert en HTTPS sur le port 5678, sous le nom de la stack. Le Compose du dépôt lui indique qu'il est derrière un frontal (`N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `N8N_WEBHOOK_URL=https://<RAG_FQDN>:5678/`) et réserve le cookie de session au HTTPS (`N8N_SECURE_COOKIE=true`). Avant la 2.21.0, l'accès se faisait en HTTP par `http://<IP-VM>:5678`, avec `N8N_SECURE_COOKIE=false`. Les workflows joignent toujours la RAG API par le réseau interne (`http://rag-api:8080`) : ils ne changent pas.
 
 ### §7.1.2 Importer un pipeline
 

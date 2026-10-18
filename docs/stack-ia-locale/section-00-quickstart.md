@@ -453,7 +453,6 @@ chmod 600 "$ENVF"
 for v in API_TOKEN ADMIN_TOKEN WEBUI_SECRET_KEY QDRANT_API_KEY LOG_HMAC_KEY MIP_TOKEN OWUI_JWT_SECRET; do
     sed -i "s|^${v}=.*|${v}=$(openssl rand -hex 32)|" "$ENVF"
 done
-sed -i "s|^N8N_BASIC_AUTH_PASSWORD=.*|N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)|" "$ENVF"
 grep -c changeme "$ENVF"
 ```
 
@@ -721,7 +720,7 @@ PYEOF
 
 ## Étape 15 : configurer n8n
 
-n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `https://<RAG_FQDN>:5678`. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 : corriger par `chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"` puis `docker compose up -d n8n`. `deploy.sh` et l'étape 6 le font déjà.
+n8n lance la synchronisation du corpus toutes les heures, et rappelle chaque mois la rotation du mot de passe de `svc-rag`. Ouvrir `https://<RAG_FQDN>:5678` **sans attendre** : la première ouverture crée le compte propriétaire de n8n, et tant qu'il n'existe pas, n'importe qui joignant l'adresse peut le créer (§7.1.1). Mot de passe fort, conservé dans le gestionnaire de mots de passe de l'organisation. Si la page ne répond pas et que `docker logs n8n` montre `EACCES: permission denied`, le dossier `n8n_data` n'appartient pas à l'utilisateur 1000 : corriger par `chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"` puis `docker compose up -d n8n`. `deploy.sh` et l'étape 6 le font déjà.
 
 **1. Créer les deux identifiants** (*Credentials → Add credential*). Le jeton d'administration n'est écrit dans aucun workflow : il reste dans l'identifiant (§16.7).
 

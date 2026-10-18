@@ -657,7 +657,19 @@ La configuration est dans `nginx/rag.conf` ([fichier dans le dépôt](../../scri
 - pas de mise en tampon des réponses et un délai de 600 secondes, pour qu'une réponse longue du modèle arrive au fil de l'eau et ne soit pas coupée ;
 - 50 Mo au plus par pièce jointe déposée dans Open WebUI.
 
-n8n est configuré pour se savoir derrière un frontal : `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `WEBHOOK_URL=https://<RAG_FQDN>:5678/` et `N8N_SECURE_COOKIE=true` (cookie de session envoyé en HTTPS seulement), dans le `docker-compose.yml`.
+n8n est configuré pour se savoir derrière un frontal : `N8N_PROTOCOL=https`, `N8N_PROXY_HOPS=1`, `N8N_WEBHOOK_URL=https://<RAG_FQDN>:5678/` et `N8N_SECURE_COOKIE=true` (cookie de session envoyé en HTTPS seulement), dans le `docker-compose.yml`. `N8N_WEBHOOK_URL` remplace `WEBHOOK_URL`, dépréciée depuis n8n 2.35 (2.21.1).
+
+**Ce que le frontal chiffre, et ce qu'il ne chiffre pas.** Le TLS s'arrête à Nginx. Derrière lui, les échanges restent en clair, sur le réseau interne de Docker de la VM, ou sur le réseau de l'organisation pour le serveur de modèles :
+
+| Liaison | Protection |
+|---|---|
+| Navigateur → Nginx (Open WebUI, n8n) | HTTPS (TLS 1.2 ou 1.3) |
+| Nginx → Open WebUI, Nginx → n8n, Open WebUI → RAG API | HTTP sur le réseau interne de Docker, sur la VM ; identité signée entre Open WebUI et la RAG API (§16.6) |
+| RAG API → Qdrant | HTTP sur le réseau interne de Docker, clé d'API (§15.2) |
+| RAG API → Active Directory | LDAPS (port 636) ; certificat vérifié si `LDAP_CA_CERT` désigne la chaîne de l'autorité, sinon chiffré sans vérification, avec un avertissement au journal (§9.2.1) |
+| RAG API → serveur de modèles (Ollama ou vLLM) | **HTTP sur le réseau de l'organisation** : questions, extraits de documents et clé d'API de vLLM circulent en clair (§2.4.10) |
+
+Le réseau interne de Docker ne sort pas de la VM : c'est une frontière de confiance acceptable pour une installation sur un seul serveur. La liaison vers le serveur de modèles, en revanche, traverse le réseau : en production, la protéger par un réseau dédié et filtré, un tunnel chiffré, ou le TLS du moteur. Aucune de ces options n'a été testée dans le lab (point 72 du suivi).
 
 ### §9.8.2 Le nom de la stack dans le DNS
 

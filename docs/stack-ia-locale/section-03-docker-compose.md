@@ -114,10 +114,6 @@ SMB_USER=svc-rag
 SMB_PASSWORD=REMPLACER
 SMB_DOMAIN=VOTREDOMAINE
 
-# n8n
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=changeme
-
 # Open WebUI
 WEBUI_SECRET_KEY=changeme-openwebui-secret
 JWT_EXPIRES_IN=4h
@@ -229,7 +225,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 | Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | `sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933` |
 | Nginx | `nginx:1.30.6-alpine` | `sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5` |
 
-Depuis la 2.21.0, le Compose du dépôt désigne chaque image par son numéro **et** son empreinte (`image: nginx:1.30.6-alpine@sha256:…`) : le contenu ne peut pas changer sous un même numéro. Toute mise à jour d'un composant se revalide : §16.8 en donne un exemple concret et la marche à suivre.
+Depuis la 2.21.0, le Compose du dépôt désigne chaque image du déploiement standard par son numéro **et** son empreinte (`image: nginx:1.30.6-alpine@sha256:…`) : le contenu ne peut pas changer sous un même numéro. Toute mise à jour d'un composant se revalide : §16.8 en donne un exemple concret et la marche à suivre. Exception : l'image du reranker (§10.8), profil facultatif désactivé par défaut, n'est désignée que par son numéro ; elle n'est pas qualifiée dans cette version.
 
 > **Extrait.** Le bloc ci-dessous reprend les services des Parties 1 et 2 ; les variables de la Partie 3 (Entra ID, Teams, SharePoint, Purview) sont dans le [Compose du dépôt](../../scripts/stack-ia-locale/docker-compose.yml), qui fait foi.
 
@@ -272,15 +268,15 @@ services:
     container_name: n8n
     # Aucun port publié : n8n est joint par Nginx, https://<RAG_FQDN>:5678 (§9.8)
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      # Pas de N8N_BASIC_AUTH_* : sans effet depuis n8n 1.0. L'accès est protégé
+      # par les comptes de n8n : compte propriétaire créé à la première ouverture.
       # Adresse publique de n8n, derrière Nginx (TLS terminé par Nginx, §9.8)
       - N8N_HOST=${RAG_FQDN}
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - N8N_PROXY_HOPS=1
-      - WEBHOOK_URL=https://${RAG_FQDN}:5678/
+      # N8N_WEBHOOK_URL (n8n 2.30 et suivantes) : WEBHOOK_URL est dépréciée depuis la 2.35
+      - N8N_WEBHOOK_URL=https://${RAG_FQDN}:5678/
       # Cookie de session réservé à HTTPS
       - N8N_SECURE_COOKIE=true
       # Fuseau des déclencheurs planifiés (défaut de n8n : America/New_York)

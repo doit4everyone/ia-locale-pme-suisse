@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.20.4)
+# Version : beta (2.21.1)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -534,10 +534,6 @@ MIP_CLIENT_ID=
 MIP_ETIQUETTES_EXCLUES=
 MIP_CACHE_TTL=3600
 
-# n8n
-N8N_BASIC_AUTH_USER=admin
-N8N_BASIC_AUTH_PASSWORD=$(openssl rand -hex 16)
-
 # Nom de la stack (§9.8) : certificat de Nginx, adresse annoncée par n8n
 RAG_FQDN=${RAG_FQDN}
 ENVEOF
@@ -775,6 +771,16 @@ if echo "$SANTE" | grep -q '"status":"ok"'; then
     ok "Accès HTTPS par Nginx : https://${RAG_FQDN}/sante répond"
 else
     PROBLEMES="${PROBLEMES}  - Nginx : https://${RAG_FQDN}/sante sans réponse (docker logs nginx --tail 30)\n"
+fi
+# -k ci-dessus ne vérifie pas le certificat. Certificat de l'autorité interne :
+# contrôle complet avec la chaîne de l'autorité, comme le ferait un poste client.
+if [ "$CERT_AUTOSIGNE" = "non" ] && [ -s /etc/ssl/certs/ad-chain.pem ]; then
+    if curl -s -m 10 --cacert /etc/ssl/certs/ad-chain.pem --resolve "${RAG_FQDN}:443:127.0.0.1" \
+            "https://${RAG_FQDN}/sante" 2>/dev/null | grep -q '"status":"ok"'; then
+        ok "Certificat de la stack vérifié avec la chaîne de l'autorité interne"
+    else
+        warn "Certificat de la stack NON vérifiable avec /etc/ssl/certs/ad-chain.pem : chaîne incomplète ou autre autorité (§9.8.4)"
+    fi
 fi
 
 # Contrôle des citations : tests unitaires, sans modèle ni Qdrant
