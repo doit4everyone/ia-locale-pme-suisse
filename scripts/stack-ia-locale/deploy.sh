@@ -291,6 +291,24 @@ if ! est_oui "$CONFIRM"; then
     exit 0
 fi
 
+# Un .env existe déjà : installation précédente. Le déploiement le remplace en
+# entier (nouveaux jetons, réglages Microsoft 365 perdus). Avant toute
+# modification : confirmation explicite, puis copie datée (point 125 du suivi).
+ENV_EXISTANT=$(readlink -f /root/rag-stack/.env 2>/dev/null || true)
+if [ -n "$ENV_EXISTANT" ] && [ -s "$ENV_EXISTANT" ]; then
+    warn "Un fichier .env existe déjà : ${ENV_EXISTANT}"
+    warn "Le déploiement va le REMPLACER : tous les jetons changent (identifiant n8n et"
+    warn "clé de la connexion rag-api d'Open WebUI à refaire), réglages Microsoft 365 perdus."
+    warn "Sur une installation en service, ne pas relancer deploy.sh : mettre à jour à la main."
+    ask "Remplacer le .env existant (une copie datée sera conservée) ? [o/N]"
+    read -r REMPLACER_ENV
+    est_oui "$REMPLACER_ENV" || { info "Annulé : le .env existant est conservé, rien n'a été modifié."; exit 0; }
+    SAUVEGARDE_ENV="${ENV_EXISTANT}.$(date +%Y%m%d-%H%M%S)"
+    cp -p "$ENV_EXISTANT" "$SAUVEGARDE_ENV"
+    chmod 600 "$SAUVEGARDE_ENV"
+    ok "Copie du .env existant : ${SAUVEGARDE_ENV} (contient des secrets : la supprimer une fois inutile)"
+fi
+
 # ─────────────────────────────────────────
 # Étape 1 : renommer les fichiers anon_*
 # ─────────────────────────────────────────

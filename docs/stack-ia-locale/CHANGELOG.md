@@ -12,7 +12,7 @@ Corrections à la suite d'une revue externe du dépôt publié en 2.21.0 : varia
 
 - `docker-compose.yml` : `N8N_WEBHOOK_URL` à la place de `WEBHOOK_URL`, dépréciée depuis n8n 2.35 (la 2.20.4 avait fait le changement inverse, à tort) ; `N8N_BASIC_AUTH_*` retirées, sans effet depuis n8n 1.0 ; reranker signalé comme seule image non figée par empreinte.
 - `env.example`, `deploy.sh` : `N8N_BASIC_AUTH_*` retirées.
-- `deploy.sh` : en-tête en 2.21.1 ; avec un certificat de l'autorité interne, `/sante` vérifié aussi avec la chaîne de l'autorité (`--cacert`), et non plus seulement avec `-k`.
+- `deploy.sh` : en-tête en 2.21.1 ; `.env` existant signalé avant toute modification, confirmation demandée (refus par défaut) et copie datée ; avec un certificat de l'autorité interne, `/sante` vérifié aussi avec la chaîne de l'autorité (`--cacert`), et non plus seulement avec `-k`.
 
 ### Documentation
 
@@ -20,7 +20,8 @@ Corrections à la suite d'une revue externe du dépôt publié en 2.21.0 : varia
 - `section-07-n8n.md`, `section-00-quickstart.md` : compte propriétaire de n8n à créer dès la première ouverture ; `N8N_BASIC_AUTH_*` retirées.
 - `section-03-docker-compose.md`, `section-16-cloisonnement.md` : extraits du `.env` et du Compose ; images du déploiement standard figées, reranker excepté.
 - `section-17-gouvernance.md` : §17.9, « A/R » sans retour à la ligne.
-- `suivi-corrections.md` : points 117 à 120 corrigés, point 98 rectifié, doc.3 clos ; point 121 ouvert.
+- `s10/mesure_s10.py`, `s10/charge_s10.py` : identité signée (les deux scripts recevaient 403 depuis la 2.21.0).
+- `suivi-corrections.md` : points 117 à 120, 125 et 126 corrigés, point 98 rectifié, doc.3 clos ; points 121 à 124 ouverts.
 
 ---
 
