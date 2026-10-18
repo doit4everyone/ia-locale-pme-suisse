@@ -42,6 +42,15 @@ import httpx
 
 API_URL = os.environ.get("CHARGE_API_URL", "http://localhost:8080/v1/chat/completions")
 API_TOKEN = os.environ.get("API_TOKEN", "")
+
+
+def identite(compte: str) -> str:
+    """Jeton d'identité signé comme le fait Open WebUI (2.21.0, §16.6) : la RAG
+    API refuse l'en-tête simple X-OpenWebUI-User-Email (403)."""
+    import jwt  # PyJWT, présent dans le conteneur rag-api
+    n = int(time.time())
+    return jwt.encode({"email": compte, "iss": "open-webui", "iat": n, "exp": n + 300},
+                      os.environ["OWUI_JWT_SECRET"], algorithm="HS256")
 REFUS = "ne figure pas dans les documents disponibles"
 AVERTISSEMENT = "le contrôle automatique n'a pas pu rattacher"
 
@@ -80,7 +89,7 @@ def poser(q: dict, compte: str, sortie: list, depart: threading.Event):
     try:
         r = httpx.post(API_URL, timeout=1800,
                        headers={"Authorization": f"Bearer {API_TOKEN}",
-                                "X-OpenWebUI-User-Email": compte},
+                                "X-OpenWebUI-User-Jwt": identite(compte)},
                        json={"model": "rag-api",
                              "messages": [{"role": "user", "content": q["question"]}]})
         r.raise_for_status()
