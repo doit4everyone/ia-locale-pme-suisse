@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.2] : Octobre 2026
+
+Rejeu complet du §0 avec la version 2.21.1 sur une VM Ubuntu 26.04 neuve, le 19 octobre 2026, avec Ollama : déploiement, certificat auto-signé puis certificat de l'autorité interne, indexation (70 fichiers, 1 692 extraits), droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou par un partage inexistant, ports exposés, redémarrage et supervision. Corrections issues de ce rejeu.
+
+### Scripts
+
+- `deploy.sh` : garde-fou du `.env` existant placé au début, avant les questions ; résumé final ouvert par la création du compte propriétaire de n8n ; `--rapport /var/log/rag/...` dans les commandes d'indexation et de droits ; en-tête en 2.21.2.
+- `docker-compose.yml` : `N8N_UNVERIFIED_PACKAGES_ENABLED=false`.
+
+### Documentation
+
+- `section-00-quickstart.md` : statut du rejeu ; étape 4, intermédiaire gardé en `ad-subca.pem` ; garde-fou des droits validé ; `--rapport` dans la checklist.
+- `section-09-securite.md` : statuts ; §9.8.1, liaison vers le serveur de modèles sur un serveur unique, l'exposition plutôt que le chiffrement ; §9.8.4, intermédiaire et autorité à un seul niveau ; §9.8.6, procédure rejouée.
+- `section-16-cloisonnement.md` : contrôle d'usurpation rejoué tel qu'écrit.
+- `section-03-docker-compose.md`, `section-07-n8n.md` : paquets communautaires.
+- `suivi-corrections.md` : points 127 à 131 corrigés ; points 106, 114, 72 et doc.5 mis à jour ; point 132 ouvert.
+
+---
+
 ## [2.21.1] : Octobre 2026
 
 Corrections à la suite d'une revue externe du dépôt publié en 2.21.0 : variables de n8n, contrôle du certificat en fin de déploiement, portée du chiffrement, formulation sur les images figées.

@@ -17,7 +17,7 @@ description: "UFW, certificat TLS LDAP, frontal HTTPS Nginx et renouvellement du
 
 [Retour au sommaire](index.md) | [Section précédente : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md) | [Section suivante : §10 Validation et performances sur GPU](section-10-gpu.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5. Frontal HTTPS Nginx (§9.8) validé sur la VM de test, octobre 2026 (2.21.0), sauf les refus par adresse IP, testés hors lab.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Tous les points documentés ont été testés en session, à l'exception de §9.5.2 Option A (JIT AD PAM, documentaire). Le certificat LDAP est en place et validé (`CERT_REQUIRED` actif). Les tests DENY et groupes imbriqués sont documentés en §9.4.5. Frontal HTTPS Nginx (§9.8) validé sur la VM de test, octobre 2026 (2.21.0), puis rejoué tel qu'écrit le 19 octobre 2026 (2.21.1).
 
 ---
 
@@ -637,7 +637,7 @@ Si plus de 20% des fichiers du partage sont illisibles lors d'une passe ACL (svc
 
 ## §9.8 Frontal HTTPS (Nginx) et certificats
 
-> **Depuis la 2.21.0 :** Open WebUI et n8n ne publient plus de port. Un conteneur Nginx est le seul point d'entrée de la stack, en HTTPS, sous un nom DNS propre au service. Validé sur la VM de test (Ubuntu 26.04, Nginx 1.30.6), octobre 2026, avec un certificat auto-signé puis un certificat de l'autorité interne du lab. Les refus par adresse IP (§9.8.7) ont été testés hors lab, avec Nginx 1.24 ; ils sont à valider sur la VM au prochain rejeu.
+> **Depuis la 2.21.0 :** Open WebUI et n8n ne publient plus de port. Un conteneur Nginx est le seul point d'entrée de la stack, en HTTPS, sous un nom DNS propre au service. Validé sur la VM de test (Ubuntu 26.04, Nginx 1.30.6), octobre 2026, avec un certificat auto-signé puis un certificat de l'autorité interne du lab. Rejoué sur un déploiement neuf le 19 octobre 2026 (2.21.1) : refus par adresse IP (§9.8.7), ports exposés (§9.8.8), remplacement de l'auto-signé par le certificat de l'autorité (§9.8.6).
 
 ### §9.8.1 Un seul point d'entrée
 
@@ -667,9 +667,9 @@ n8n est configuré pour se savoir derrière un frontal : `N8N_PROTOCOL=https`, `
 | Nginx → Open WebUI, Nginx → n8n, Open WebUI → RAG API | HTTP sur le réseau interne de Docker, sur la VM ; identité signée entre Open WebUI et la RAG API (§16.6) |
 | RAG API → Qdrant | HTTP sur le réseau interne de Docker, clé d'API (§15.2) |
 | RAG API → Active Directory | LDAPS (port 636) ; certificat vérifié si `LDAP_CA_CERT` désigne la chaîne de l'autorité, sinon chiffré sans vérification, avec un avertissement au journal (§9.2.1) |
-| RAG API → serveur de modèles (Ollama ou vLLM) | **HTTP sur le réseau de l'organisation** : questions, extraits de documents et clé d'API de vLLM circulent en clair (§2.4.10) |
+| RAG API → serveur de modèles (Ollama ou vLLM) | HTTP. Sur un serveur unique (serveur Ubuntu avec carte graphique, DGX Spark, ou VM sur le poste qui porte la carte), la liaison ne quitte pas la machine. **Sur deux machines séparées**, questions, extraits de documents et clé d'API de vLLM circulent en clair sur le réseau (§2.4.10) |
 
-Le réseau interne de Docker ne sort pas de la VM : c'est une frontière de confiance acceptable pour une installation sur un seul serveur. La liaison vers le serveur de modèles, en revanche, traverse le réseau : en production, la protéger par un réseau dédié et filtré, un tunnel chiffré, ou le TLS du moteur. Aucune de ces options n'a été testée dans le lab (point 72 du suivi).
+Le réseau interne de Docker ne sort pas de la VM : c'est une frontière de confiance acceptable pour une installation sur un seul serveur. Il en va de même pour le serveur de modèles quand il tourne sur la même machine, ce qui est le cas visé par ce guide : chiffrer cette liaison ne protégerait que d'un attaquant déjà présent sur la machine. Le point qui compte alors est **l'exposition** : le moteur ne doit pas être joignable depuis le réseau (§16.7, point 132 du suivi). Seul un serveur de modèles sur une machine séparée justifie de protéger la liaison (réseau dédié et filtré, tunnel chiffré, ou TLS natif de vLLM, options `--ssl-certfile` et `--ssl-keyfile`) ; aucune de ces options n'a été testée dans le lab (point 72 du suivi).
 
 ### §9.8.2 Le nom de la stack dans le DNS
 
@@ -757,7 +757,7 @@ openssl x509 -in rag.cer -noout -ext subjectAltName -enddate
 
 > Si `openssl` refuse de lire `rag.cer`, le fichier est au format binaire (DER) : ajouter `-inform DER` à la commande, ou le convertir une fois avec `openssl x509 -inform DER -in rag.cer -out rag.cer.pem`.
 
-Nginx doit présenter le certificat **suivi de l'autorité intermédiaire** : un poste qui connaît la racine, mais pas l'intermédiaire, ne pourrait pas reconstituer la chaîne. L'intermédiaire est celle exportée pour LDAP (§9.2.4) :
+Nginx doit présenter le certificat **suivi de l'autorité intermédiaire** : un poste qui connaît la racine, mais pas l'intermédiaire, ne pourrait pas reconstituer la chaîne. L'intermédiaire est `ad-subca.pem`, créé au §0 (étape 4) ou au §9.2.4. Sur une installation antérieure à la 2.21.2 qui n'a que `ad-chain.pem` (racine puis intermédiaire, ordre du §0), l'extraire : `awk '/BEGIN CERTIFICATE/{n++} n==2' /etc/ssl/certs/ad-chain.pem > /etc/ssl/certs/ad-subca.pem`, puis contrôler par `openssl x509 -in /etc/ssl/certs/ad-subca.pem -noout -subject -issuer` (sujet : l'intermédiaire ; émetteur : la racine). Avec une autorité à un seul niveau, il n'y a pas d'intermédiaire : `rag.crt` est alors `rag.cer` seul.
 
 ```bash
 cat rag.cer /etc/ssl/certs/ad-subca.pem > rag-nouveau.crt
@@ -803,7 +803,7 @@ openssl x509 -in /etc/rag-tls/rag.crt -noout -checkend 2592000 && echo "plus de 
 
 Prévoir le renouvellement au moins un mois avant l'échéance, et l'inscrire au calendrier des rotations (§17.3).
 
-> **Statut :** la mise en place d'un nouveau certificat sur une stack en service (étapes 2 à 5) a été suivie en lab, octobre 2026, pour passer de l'auto-signé au certificat de l'autorité. Le renouvellement d'un certificat proche de l'échéance n'a pas encore eu lieu : c'est la même procédure. Les commandes des étapes 1 à 6 ont été essayées hors lab (Nginx 1.24, certificats auto-signés) : remplacement, rechargement sans coupure et retour arrière conformes, nouvelle échéance visible aussitôt.
+> **Statut :** procédure rejouée telle qu'écrite le 19 octobre 2026, sur un déploiement neuf : nouvelle clé et demande (§9.8.4), certificat émis par la sous-CA du lab avec le modèle Serveur Web (échéance à deux ans), remplacement de l'auto-signé, rechargement sans recréer de conteneur, nouvel émetteur visible sur les ports 443 et 5678, `/sante` vérifié avec la chaîne de l'autorité. Le renouvellement d'un certificat proche de l'échéance n'a pas encore eu lieu : c'est la même procédure. Les commandes des étapes 1 à 6 ont été essayées hors lab (Nginx 1.24, certificats auto-signés) : remplacement, rechargement sans coupure et retour arrière conformes, nouvelle échéance visible aussitôt.
 
 **1. Nouvelle clé, demande et certificat.** Refaire §9.8.4, étapes 1 à 3. Une nouvelle clé à chaque renouvellement : si l'ancienne avait fuité, elle ne sert plus à rien. On obtient `rag-nouveau.key` et `rag-nouveau.crt` dans `/etc/rag-tls`.
 

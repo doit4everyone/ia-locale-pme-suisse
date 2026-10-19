@@ -279,6 +279,8 @@ services:
       - N8N_WEBHOOK_URL=https://${RAG_FQDN}:5678/
       # Cookie de session réservé à HTTPS
       - N8N_SECURE_COOKIE=true
+      # Aucun paquet communautaire non vérifié (valeur par défaut appelée à changer)
+      - N8N_UNVERIFIED_PACKAGES_ENABLED=false
       # Fuseau des déclencheurs planifiés (défaut de n8n : America/New_York)
       - GENERIC_TIMEZONE=Europe/Zurich
       - TZ=Europe/Zurich

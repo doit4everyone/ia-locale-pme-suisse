@@ -153,7 +153,7 @@ docker exec rag-api python3 -c "import os,json,urllib.request as u; d=json.dumps
 docker logs rag-api 2>&1 | grep "identité non signée" | tail -1
 ```
 
-> **Validé sur la VM de test, octobre 2026 (2.21.0) :** une question posée dans Open WebUI obtient sa réponse, avec les 17 groupes du compte de test ; un en-tête d'identité simple est refusé (403) ; `/query` avec `API_TOKEN` est refusé (401) ; `test_cloisonnement.py`, qui passe désormais par `ADMIN_TOKEN`, donne 6 cas conformes sur 6. Le test d'usurpation a été mené avec une commande équivalente ; la ligne ci-dessus est à rejouer telle quelle.
+> **Validé sur la VM de test, octobre 2026 (2.21.0) :** une question posée dans Open WebUI obtient sa réponse, avec les 17 groupes du compte de test ; un en-tête d'identité simple est refusé (403) ; `/query` avec `API_TOKEN` est refusé (401) ; `test_cloisonnement.py`, qui passe désormais par `ADMIN_TOKEN`, donne 6 cas conformes sur 6. Rejoué le 19 octobre 2026 sur un déploiement neuf (2.21.1), avec la commande ci-dessus telle quelle : `HTTP Error 403`, ligne `identité non signée reçue` au journal ; cloisonnement 72 verdicts, aucune fuite.
 
 ## §16.7 Open WebUI, n8n et le moteur d'inférence
 

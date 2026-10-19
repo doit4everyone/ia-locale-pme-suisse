@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.1)
+# Version : beta (2.21.2)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -74,6 +74,25 @@ echo "  Déploiement de la stack IA locale (conformité nLPD facilitée)"
 echo "  DoIt4Everyone | $(date '+%Y-%m-%d')"
 echo "============================================================"
 echo ""
+
+# Un .env existe déjà : installation précédente. Le déploiement le remplace en
+# entier (nouveaux jetons, réglages Microsoft 365 perdus). Avant toute
+# modification et avant les questions : confirmation explicite, puis copie
+# datée (point 125 du suivi).
+ENV_EXISTANT=$(readlink -f /root/rag-stack/.env 2>/dev/null || true)
+if [ -n "$ENV_EXISTANT" ] && [ -s "$ENV_EXISTANT" ]; then
+    warn "Un fichier .env existe déjà : ${ENV_EXISTANT}"
+    warn "Le déploiement va le REMPLACER : tous les jetons changent (identifiant n8n et"
+    warn "clé de la connexion rag-api d'Open WebUI à refaire), réglages Microsoft 365 perdus."
+    warn "Sur une installation en service, ne pas relancer deploy.sh : mettre à jour à la main."
+    ask "Remplacer le .env existant (une copie datée sera conservée) ? [o/N]"
+    read -r REMPLACER_ENV
+    est_oui "$REMPLACER_ENV" || { info "Annulé : le .env existant est conservé, rien n'a été modifié."; exit 0; }
+    SAUVEGARDE_ENV="${ENV_EXISTANT}.$(date +%Y%m%d-%H%M%S)"
+    cp -p "$ENV_EXISTANT" "$SAUVEGARDE_ENV"
+    chmod 600 "$SAUVEGARDE_ENV"
+    ok "Copie du .env existant : ${SAUVEGARDE_ENV} (contient des secrets : la supprimer une fois inutile)"
+fi
 
 # ─────────────────────────────────────────
 # Collecte des paramètres
@@ -291,23 +310,6 @@ if ! est_oui "$CONFIRM"; then
     exit 0
 fi
 
-# Un .env existe déjà : installation précédente. Le déploiement le remplace en
-# entier (nouveaux jetons, réglages Microsoft 365 perdus). Avant toute
-# modification : confirmation explicite, puis copie datée (point 125 du suivi).
-ENV_EXISTANT=$(readlink -f /root/rag-stack/.env 2>/dev/null || true)
-if [ -n "$ENV_EXISTANT" ] && [ -s "$ENV_EXISTANT" ]; then
-    warn "Un fichier .env existe déjà : ${ENV_EXISTANT}"
-    warn "Le déploiement va le REMPLACER : tous les jetons changent (identifiant n8n et"
-    warn "clé de la connexion rag-api d'Open WebUI à refaire), réglages Microsoft 365 perdus."
-    warn "Sur une installation en service, ne pas relancer deploy.sh : mettre à jour à la main."
-    ask "Remplacer le .env existant (une copie datée sera conservée) ? [o/N]"
-    read -r REMPLACER_ENV
-    est_oui "$REMPLACER_ENV" || { info "Annulé : le .env existant est conservé, rien n'a été modifié."; exit 0; }
-    SAUVEGARDE_ENV="${ENV_EXISTANT}.$(date +%Y%m%d-%H%M%S)"
-    cp -p "$ENV_EXISTANT" "$SAUVEGARDE_ENV"
-    chmod 600 "$SAUVEGARDE_ENV"
-    ok "Copie du .env existant : ${SAUVEGARDE_ENV} (contient des secrets : la supprimer une fois inutile)"
-fi
 
 # ─────────────────────────────────────────
 # Étape 1 : renommer les fichiers anon_*
@@ -890,6 +892,8 @@ echo "    Extension Entra ID     : ENTRA_* dans le .env, voir §11 du guide"
 echo "    Synthèse Teams         : TEAMS_* dans le .env, voir §12 du guide"
 echo ""
 echo "  Étapes suivantes :"
+echo "  0. TOUT DE SUITE : ouvrir https://${RAG_FQDN}:5678 et créer le compte propriétaire"
+echo "     de n8n (§7.1.1). Tant qu'il n'existe pas, n'importe quel poste peut le créer."
 echo "  1. Configurer Open WebUI (§0, étape 14) : connexion à la RAG API dans la section"
 echo "     API compatibles OpenAI, authentification LDAP (« Attribut pour l'e-mail » :"
 echo "     userPrincipalName ; « Attribut pour le nom d'utilisateur » : sAMAccountName),"
@@ -905,12 +909,12 @@ else
     echo "  2. Lancer la première indexation (§0, étape 12) :"
     echo "     cd /root/rag-pipeline && source .venv/bin/activate"
     echo "     set -a && source /root/rag-stack/.env && set +a"
-    echo "     python indexer.py --corpus ${SMB_MOUNT}"
+    echo "     python indexer.py --corpus ${SMB_MOUNT} --rapport /var/log/rag/rapport_indexation_initial.json"
     echo "  3. Lancer la résolution des droits (§0, étape 13) :"
-    echo "     python acl_resolver.py --share ${SMB_SHARE} --mount ${SMB_MOUNT}"
+    echo "     python acl_resolver.py --share ${SMB_SHARE} --mount ${SMB_MOUNT} --rapport /var/log/rag/rapport_acl_initial.json"
     N=4
 fi
-echo "  ${N}. Configurer n8n (§0, étape 15, https://${RAG_FQDN}:5678) :"
+echo "  ${N}. Configurer n8n (§0, étape 15, https://${RAG_FQDN}:5678), compte propriétaire créé :"
 echo "     a. Créer l'identifiant Header Auth « RAG API - ADMIN_TOKEN »"
 echo "        (Name : Authorization ; Value : Bearer <ADMIN_TOKEN du .env> ;"
 echo "        domaine autorisé : rag-api), puis l'identifiant SMTP."
