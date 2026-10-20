@@ -292,7 +292,7 @@ ls /mnt/corpus-root | head -5
 
 `acl_resolver.py` lit les ACL NTFS de chaque fichier via `smbcacls` et met à jour le champ `autorises[]` dans le payload Qdrant. Il tourne séparément de l'indexeur parce que les permissions peuvent changer sans que le contenu des fichiers ne change.
 
-> **Fenêtre de péremption :** entre deux passes du résolveur, un droit révoqué reste actif dans l'index. Si la cadence de resynchronisation est d'une heure, un utilisateur dont l'accès vient d'être révoqué peut encore interroger les documents concernés pendant au maximum une heure. C'est un arbitrage entre performance (éviter un appel smbcacls à chaque requête) et conformité. La cadence est à définir selon les exigences de l'organisation. La synchronisation récurrente est documentée dans §7.
+> **Fenêtre de péremption :** entre deux passes du résolveur, un droit révoqué reste actif dans l'index. Si la cadence de resynchronisation est d'une heure, un utilisateur dont l'accès vient d'être révoqué peut encore interroger les documents concernés pendant au maximum une heure. C'est un arbitrage entre performance (éviter un appel smbcacls à chaque requête) et conformité. La cadence est à définir selon les exigences de l'organisation. La synchronisation récurrente est documentée dans §7. Si l'écriture des droits échoue, le document est retiré de la recherche et une alerte part (§16.5.2).
 
 ### §5.4.1 Installation
 

@@ -146,6 +146,39 @@ Jusqu'à la v2.16, `acl_resolver.py` ne lisait que le début de la ligne : **tou
 
 > **Ce que la correction ne change pas.** La recherche suit désormais les droits enregistrés dans Qdrant. Elle ne suit pas en temps réel ceux du serveur de fichiers : un droit retiré sous Windows n'atteint Qdrant qu'au passage suivant de `acl_resolver.py`, à chaque synchronisation. C'est la fenêtre de péremption du §5.4, distincte du défaut corrigé ici.
 
+### §16.5.2 Troisième défaut : un échec d'écriture des droits passait inaperçu
+
+**Le défaut.** `acl_resolver.py` lit les droits sur le partage, puis les écrit dans Qdrant, document par document. Jusqu'à la 2.21.4, une erreur de Qdrant pendant cette écriture renvoyait la même valeur que « aucun extrait » : le document passait pour « non indexé », le script se terminait normalement (code 0), la synchronisation était déclarée réussie et **aucune alerte ne partait**. Le document gardait ses anciens droits dans Qdrant, jusqu'à une écriture réussie, ou indéfiniment si l'erreur persistait. La correction du §16.5.1 n'y pouvait rien : elle relit Qdrant, et c'est Qdrant qui avait des droits périmés.
+
+**Le scénario réaliste** : le disque de Qdrant plein (`/srv/rag-donnees`). Les lectures passent, les écritures échouent. Trois défauts de la même famille :
+
+- un fichier aux ACL illisibles est fermé (droits vidés) ; si cette fermeture échouait, il restait ouvert, sans signal ;
+- un fichier supprimé du partage voit ses extraits supprimés ; un échec était seulement affiché, et ses extraits restaient interrogeables ;
+- la liste des extraits orphelins était lue sans contrôle d'erreur : une lecture interrompue laissait des orphelins sans le dire.
+
+Défaut voisin, sans effet sur les droits : la synchronisation cherchait le statut `non_indexé`, alors que le script écrit `non_indexe`. Les fichiers non indexés n'étaient jamais comptés en quarantaine.
+
+**Comment il a été trouvé.** Par une troisième revue externe du code, en octobre 2026. Reproduit sur le code de la 2.21.4 avec un Qdrant simulé qui refuse les écritures : code de sortie 0, statut « non indexé », anciens droits conservés.
+
+**Correction (2.21.5).**
+
+- `acl_resolver.py` distingue trois issues : mis à jour, non indexé, **échec d'écriture**. Une seconde tentative est faite après deux secondes. Les échecs de fermeture, de suppression et de lecture des orphelins sont traités de la même façon.
+- En cas d'échec, le passage va à son terme, puis le script sort avec le **code 2**, et le rapport liste les documents concernés. La synchronisation est en échec : le courriel et le signal de supervision partent par le circuit existant (§7, §16.10).
+- **Fermeture par défaut, document par document** : la RAG API retire de toute recherche les documents dont les droits n'ont pas pu être écrits, jusqu'au prochain passage sans échec. Seuls ces documents disparaissent, pas le service. La liste est gardée dans `/var/log/rag/acl_bloques.json`, sur le disque chiffré, pour survivre à un redémarrage. Le contrôle d'accès du §16.2 applique la même exclusion : le test de non-divulgation signale alors un `REFUS À TORT` pour les comptes autorisés, ce qui est voulu.
+- Même règle pour SharePoint : un fichier en erreur dans le rapport de `sp_indexer.py` (code 2) est retiré de la recherche.
+- `deploy.sh` : les tests de sécurité des droits sont obligatoires. Absent ou en échec, la RAG API est arrêtée et le déploiement se termine en erreur.
+
+**Que faire en cas d'alerte.** Le courriel de synchronisation indique le nombre de documents retirés, et `docker logs rag-api 2>&1 | grep DROITS` les nomme. Corriger la cause (espace disque, état de Qdrant), puis relancer une synchronisation : les documents reviennent dès que leurs droits sont écrits.
+
+**Limites.**
+
+- Un passage interrompu (délai dépassé, plantage du script) ou abandonné par un garde-fou ne produit pas de liste : la liste précédente est gardée, et l'alerte part. Les droits écrits avant l'interruption sont à jour, les autres restent ceux du passage précédent.
+- Pour SharePoint, une erreur sur un site entier, avant la liste de ses fichiers, ne retire aucun document : l'alerte part, sans exclusion.
+- Un fichier `acl_bloques.json` illisible au démarrage est signalé (`[DROITS]`, niveau critique), sans exclusion jusqu'à la synchronisation suivante.
+- Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par 12 tests unitaires, Qdrant simulé (`test_echec_droits.py`).
+
+> **Validé sur la VM de test, 20 octobre 2026 :** `test_echec_droits.py` 12 tests OK et `test_revalidation_bm25.py` 14 tests OK, dans le conteneur ; synchronisation réelle avec le nouveau `acl_resolver.py` : `success=True`, aucun document retiré ; test du droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO) ; une question réelle dans Open WebUI, réponse citée.
+
 ## §16.6 Durcissement de la RAG API
 
 | Point | Avant | Après |
@@ -340,6 +373,8 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `12 tests OK` |
+| Documents retirés de la recherche | `docker logs rag-api 2>&1 \| grep DROITS` | Aucune ligne, ou documents nommés et alerte reçue |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |
 | Identité signée | Contrôle d'usurpation (§16.6) | HTTP 403 |

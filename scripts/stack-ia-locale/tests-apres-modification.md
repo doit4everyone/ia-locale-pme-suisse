@@ -327,6 +327,14 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 
 **Attendu :** `14 tests OK`.
 
+Échecs d'écriture des droits (§16.5.2), Qdrant simulé :
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
+```
+
+**Attendu :** `12 tests OK`.
+
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 
 ```bash

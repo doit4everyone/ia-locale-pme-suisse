@@ -126,6 +126,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 10 | Recherche par mots-clés (BM25) : les candidats étaient autorisés sur les droits mémorisés dans l'index, construit au démarrage et en fin de synchronisation. Un droit retiré dans Qdrant restait valable par ce chemin jusqu'à la reconstruction (pendant la synchronisation, ou jusqu'à une heure après un `acl_resolver.py` lancé à la main) ; un document supprimé restait trouvable. Gravité **sous-estimée** jusqu'ici (« faible ») : la relecture des voisins, censée arrêter l'extrait, le remettait quand elle revenait vide (`fenetre or extraits`), c'est-à-dire précisément quand le droit avait été retiré ; sans extension du contexte, aucune relecture. Signalé par une revue externe du code. Chaque candidat est relu dans Qdrant par son identifiant et ses droits contrôlés sur cette lecture (`revalider_bm25`), refus par défaut ; repli supprimé. Fuite reproduite sur le code de la 2.21.2 et absente après correction : `test_revalidation_bm25.py`, 11 tests. Sur le vrai Qdrant de la VM de test (`test_revocation_bm25.py`, §16.5.1) : FUITE en 2.21.2 par les deux chemins, OK en 2.21.3 ; test de non-divulgation inchangé (70 OK, 2 INFO) | v2.21.3 | 2026-10-20 |
 | 133 | `deploy.sh` : un échec des tests unitaires des droits sur la recherche par mots-clés (`test_revalidation_bm25.py`) n'affichait qu'un avertissement, et le déploiement se terminait normalement. Signalé par une seconde revue externe. L'échec arrête la RAG API et termine le script en erreur (« Déploiement incomplet ») ; vérifié en simulation | v2.21.4 | 2026-10-20 |
 | 134 | `search_qdrant`, `revalider_bm25`, `etendre_complements` : sans groupes, les contrôles d'accès étaient sautés. Aucun chemin exposé (`/query` et `/v1` refusent ce cas avant la recherche), mais une route future qui l'oublierait aurait servi une recherche sans filtre. Signalé par une seconde revue externe. Refus dans les fonctions elles-mêmes : 403 pour la recherche, aucun résultat pour les deux autres ; trois tests unitaires ajoutés (14 au total, tous OK sur la VM de test) | v2.21.4 | 2026-10-20 |
+| 135 | `acl_resolver.py` : une erreur de Qdrant pendant l'écriture des droits renvoyait 0, lu comme « non indexé » ; code de sortie 0, synchronisation réussie, aucune alerte, anciens droits conservés dans Qdrant. Même défaut pour la fermeture d'un fichier aux ACL illisibles, la suppression des extraits d'un fichier effacé et la lecture des orphelins. Signalé par une troisième revue externe ; reproduit sur le code de la 2.21.4 (Qdrant simulé). Trois issues distinctes, seconde tentative, code 2 et rapport ; synchronisation en échec et alerte ; documents retirés de la recherche jusqu'au prochain passage sans échec, liste gardée sur disque ; même règle pour les fichiers SharePoint en erreur (§16.5.2). VM de test : 12 tests unitaires OK, synchronisation réelle réussie ; échec réel d'écriture non provoqué | v2.21.5 | 2026-10-20 |
+| 136 | `/admin/sync` cherchait le statut `non_indexé` dans le rapport des droits, qui écrit `non_indexe` : les fichiers non indexés n'étaient jamais comptés en quarantaine. Les deux graphies sont acceptées | v2.21.5 | 2026-10-20 |
+| 137 | `deploy.sh` : un fichier de test de sécurité absent sautait le contrôle sans le dire. `test_revalidation_bm25.py` et `test_echec_droits.py` sont obligatoires : absent ou en échec, RAG API arrêtée et déploiement en erreur ; vérifié en simulation | v2.21.5 | 2026-10-20 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -272,6 +275,17 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.5 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.2 (nouveau) | Échecs d'écriture des droits : défaut, correction, conduite en cas d'alerte, limites ; checklist | v2.21.5 |
+| §8 | Encadré : principes et essais historiques, configuration retenue au §10 | v2.21.5 |
+| Sommaire du guide | Plus de consigne pour retirer le filtre des droits dans le code ; groupe large en lecture, sauf « Utilisateurs du domaine » (auth.1) | v2.21.5 |
+| §5.4 | Renvoi au §16.5.2 | v2.21.5 |
 
 ---
 

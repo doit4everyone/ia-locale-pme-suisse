@@ -19,6 +19,8 @@ description: "Détecter et prévenir les hallucinations dans un pipeline RAG : c
 
 **Statut :** validé en lab sur VM-RAG-LAB avec corpus Axonix SA, RAG API et Open WebUI, septembre 2026. Tous les cas de test documentés ont été reproduits en session, y compris le contrôle 3 (format de citation confirmé, voir §8.4).
 
+> **Principes et essais historiques.** Les mécanismes décrits ici (prompt, juge, citations, recherche hybride) restent en place. Les modèles et les temps cités sont ceux des essais de septembre 2026 sur CPU (`qwen2.5:14b`, juge `qwen3:4b`, temps GPU alors estimés). **La configuration retenue et les temps mesurés sur GPU sont au [§10](section-10-gpu.md)**.
+
 ---
 
 > **Ce que cette section documente :** un pipeline RAG peut produire des réponses incorrectes qui ressemblent à des réponses correctes. Cette section décrit comment les détecter, comment les prévenir côté utilisateur, et comment les intercepter côté technique. Les exemples sont issus de sessions de validation réelles sur le corpus Axonix SA, un corpus de documents fictifs créés pour le lab (voir §4, corpus de validation Axonix SA). Les noms de clients, montants et références de fichiers qui apparaissent dans cette section sont inventés.

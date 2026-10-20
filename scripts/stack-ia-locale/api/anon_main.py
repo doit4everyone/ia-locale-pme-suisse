@@ -208,6 +208,87 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────
+# Documents retirés de la recherche (2.21.5, §16.5.2)
+# ─────────────────────────────────────────
+# Quand acl_resolver.py ou sp_indexer.py n'a pas pu écrire les droits d'un
+# document dans Qdrant, ses droits dans Qdrant ne sont plus ceux de la source :
+# un droit retiré sur le partage y resterait accordé. Ces documents sont retirés
+# de toute recherche jusqu'à une écriture réussie. La liste est gardée sur le
+# disque chiffré, pour survivre à un redémarrage de la RAG API.
+FICHIER_BLOQUES = os.getenv("ACL_BLOQUES_FICHIER", "/var/log/rag/acl_bloques.json")
+_bloques: dict[str, set[str]] = {"smb": set(), "sharepoint": set()}
+
+
+def sources_bloquees() -> set[str]:
+    return _bloques["smb"] | _bloques["sharepoint"]
+
+
+def enregistrer_bloques(chemin: str | None = None) -> None:
+    chemin = chemin or FICHIER_BLOQUES
+    try:
+        with open(chemin, "w", encoding="utf-8") as f:
+            json.dump({"maj": datetime.now(timezone.utc).isoformat(),
+                       "smb": sorted(_bloques["smb"]),
+                       "sharepoint": sorted(_bloques["sharepoint"])}, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        logger.error(f"[DROITS] Liste des documents retirés non enregistrée ({e}) : "
+                     "elle serait perdue au prochain redémarrage")
+
+
+def charger_bloques(chemin: str | None = None) -> None:
+    chemin = chemin or FICHIER_BLOQUES
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        _bloques["smb"] = set(d.get("smb", []))
+        _bloques["sharepoint"] = set(d.get("sharepoint", []))
+    except FileNotFoundError:
+        _bloques["smb"], _bloques["sharepoint"] = set(), set()
+        return
+    except Exception as e:
+        logger.critical(f"[DROITS] {chemin} illisible ({e}) : aucun document retiré de la recherche. "
+                        "Lancer une synchronisation pour rétablir la liste")
+        return
+    if sources_bloquees():
+        logger.warning(f"[DROITS] {len(sources_bloquees())} document(s) retiré(s) de la recherche : "
+                       "droits non écrits lors de la dernière synchronisation")
+
+
+def appliquer_resultat_droits(origine: str, returncode: int, rapport_path: str) -> int:
+    """
+    Met à jour la liste des documents retirés après un passage de acl_resolver.py
+    (origine « smb ») ou de sp_indexer.py (« sharepoint »).
+      code 0 : tous les droits ont été écrits, la liste de cette origine est vidée ;
+      code 2 : passage terminé avec des échecs, la liste devient celle du rapport ;
+      autre  : aucun droit écrit (garde-fou) ou issue inconnue, liste inchangée.
+    Renvoie le nombre de documents retirés pour cette origine.
+    """
+    if returncode == 0:
+        nouveaux: set[str] = set()
+    elif returncode == 2:
+        try:
+            with open(rapport_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception as e:
+            logger.error(f"[DROITS] Rapport {rapport_path} illisible ({e}) : liste des documents retirés inchangée")
+            return len(_bloques[origine])
+        if origine == "smb":
+            nouveaux = set(d.get("echecs_ecriture", [])) | set(d.get("echecs_suppression", []))
+        else:
+            nouveaux = {f.get("source", "") for site in d.get("sites", [])
+                        for f in site.get("fichiers", []) if f.get("statut") == "erreur"} - {""}
+    else:
+        return len(_bloques[origine])
+    if nouveaux != _bloques[origine]:
+        _bloques[origine] = nouveaux
+        enregistrer_bloques()
+    if nouveaux:
+        logger.error(f"[DROITS] {origine} : {len(nouveaux)} document(s) retiré(s) de la recherche, "
+                     "droits non écrits dans Qdrant")
+    return len(nouveaux)
+
+
+# ─────────────────────────────────────────
 # Index BM25 : chargé au démarrage depuis Qdrant
 # ─────────────────────────────────────────
 # L'index BM25 tient en RAM : ~1 Mo pour 1 000 chunks,
@@ -424,7 +505,8 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
 
 @app.on_event("startup")
 async def startup_event():
-    """Construit l'index BM25 au démarrage du conteneur."""
+    """Recharge les documents retirés de la recherche, puis construit l'index BM25."""
+    charger_bloques()
     build_bm25_index()
 
 # ─────────────────────────────────────────
@@ -737,6 +819,11 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                 **champs_purview(r.payload),
             })
 
+        # Documents dont les droits n'ont pas pu être écrits : jamais renvoyés
+        bloques = sources_bloquees()
+        if bloques:
+            vec_results = [c for c in vec_results if c["source"] not in bloques]
+
         # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
         bm25_results = []
         if _bm25_index is not None and _bm25_chunks:
@@ -758,6 +845,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                 if len(bm25_results) >= top_k:
                     break
             bm25_results = revalider_bm25(bm25_results, user_groups)
+            if bloques:
+                bm25_results = [c for c in bm25_results if c["source"] not in bloques]
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
         # Clé = empreinte du texte (voir la docstring : choix mesuré).
@@ -1850,8 +1939,12 @@ async def calculer_acces(user_id: str, document: str, correspondance: str = "exa
         total += len(concernes)
         correspondantes.update(p.payload.get("source", "") for p in concernes)
         candidats = []
+        bloques = sources_bloquees()
         for p in filtres:
             if not _correspond(p.payload.get("source", ""), document, correspondance):
+                continue
+            # Document retiré de la recherche : droits non écrits (§16.5.2)
+            if p.payload.get("source", "") in bloques:
                 continue
             # Seconde partie de la première condition : DENY prioritaire
             if not check_access(user_groups, p.payload.get("autorises", []), p.payload.get("interdits", [])):
@@ -2058,7 +2151,13 @@ async def admin_sync(
                 }
             )
             rapport["acl_resolver"]["returncode"] = result.returncode
-            if result.returncode != 0:
+            retires = appliquer_resultat_droits("smb", result.returncode, "/var/log/rag/rapport_acl.json")
+            if result.returncode == 2:
+                rapport["errors"].append(
+                    f"acl_resolver.py : droits non écrits dans Qdrant, {retires} document(s) "
+                    "retiré(s) de la recherche jusqu'à une écriture réussie")
+                logger.error(f"[SYNC] acl_resolver.py échecs d'écriture : {result.stderr[-300:]}")
+            elif result.returncode != 0:
                 rapport["errors"].append(f"acl_resolver.py a retourné code {result.returncode}")
                 logger.error(f"[SYNC] acl_resolver.py erreur : {result.stderr[-200:]}")
             else:
@@ -2067,7 +2166,9 @@ async def admin_sync(
                     with open("/var/log/rag/rapport_acl.json", "r") as rf:
                         r_data = json.load(rf)
                     for doc in r_data.get("documents", []):
-                        if doc.get("statut") in ("non_indexé", "acl_illisible"):
+                        # acl_resolver.py écrit « non_indexe » (sans accent) : l'ancien
+                        # test sur « non_indexé » ne comptait jamais ces fichiers (2.21.5).
+                        if doc.get("statut") in ("non_indexe", "non_indexé", "acl_illisible"):
                             rapport["quarantine"].append(doc.get("fichier", doc.get("source_name", "")))
                 except Exception as e:
                     logger.warning(f"[SYNC] Rapport acl_resolver illisible : {e}")
@@ -2135,6 +2236,7 @@ async def admin_sync(
                     }
                 )
                 rapport["sharepoint"]["returncode"] = result.returncode
+                appliquer_resultat_droits("sharepoint", result.returncode, sp_rapport)
                 try:
                     with open(sp_rapport, "r", encoding="utf-8") as rf:
                         sp_data = json.load(rf)
@@ -2158,6 +2260,7 @@ async def admin_sync(
                 logger.error(f"[SYNC] {msg}")
 
         # ── Résumé ────────────────────────────────────────────────────────
+        rapport["documents_retires"] = sorted(sources_bloquees())
         rapport["success"] = len(rapport["errors"]) == 0
         rapport["quarantine_count"] = len(rapport["quarantine"])
 

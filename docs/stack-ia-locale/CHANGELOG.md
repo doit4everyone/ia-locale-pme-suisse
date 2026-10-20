@@ -4,6 +4,32 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.5] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une troisième revue externe du code : un échec d'écriture des droits dans Qdrant passait pour un fichier non indexé, sans alerte, et le document gardait ses anciens droits (points 135 à 137, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 12 et 14 tests unitaires OK, synchronisation réelle réussie sans document retiré, droit retiré sur le vrai Qdrant OK, test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Sécurité
+
+- `anon_acl_resolver.py` : trois issues par document (mis à jour, non indexé, échec d'écriture) ; seconde tentative ; échecs de fermeture, de suppression et de lecture des orphelins traités de même ; code de sortie 2 et liste des échecs dans le rapport.
+- `api/anon_main.py` : documents dont les droits n'ont pas pu être écrits retirés de la recherche et du contrôle d'accès jusqu'au prochain passage sans échec ; liste gardée dans `/var/log/rag/acl_bloques.json` ; même règle pour les fichiers SharePoint en erreur ; synchronisation en échec avec le nombre de documents retirés.
+- `api/anon_main.py` : statut `non_indexe` reconnu pour la quarantaine (point 136).
+- `deploy.sh` : `test_revalidation_bm25.py` et `test_echec_droits.py` obligatoires ; absent ou en échec, RAG API arrêtée et déploiement en erreur (point 137). En-tête en 2.21.5.
+
+### Tests
+
+- `test_echec_droits.py` (nouveau) : 12 tests unitaires, Qdrant simulé (résolveur et RAG API).
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.2 (nouveau), checklist.
+- `section-08-fiabilite.md` : encadré « principes et essais historiques », renvoi au §10.
+- `index.md` du guide : plus de consigne pour retirer le filtre des droits dans le code.
+- `section-05-connecteurs.md` : renvoi au §16.5.2.
+- `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md` : nouveau test.
+- `suivi-corrections.md` : points 135 à 137.
+
+---
+
 ## [2.21.4] : Octobre 2026
 
 Durcissement complémentaire, à la suite d'une seconde revue externe du correctif 2.21.3. Validé sur la VM de test le 20 octobre 2026 : 14 tests unitaires OK, test sur le vrai Qdrant OK, test de non-divulgation inchangé (70 OK, 2 INFO) ; blocage de `deploy.sh` vérifié en simulation.

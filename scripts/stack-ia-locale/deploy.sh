@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.4)
+# Version : beta (2.21.5)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -412,7 +412,7 @@ if [ -f "test_cloisonnement.py" ]; then
 fi
 # Tests unitaires du contrôle des citations et des droits sur la recherche par
 # mots-clés (lancés à l'étape 10), test en lab d'un droit retiré (§16.5.1)
-for f in test_citations.py test_revalidation_bm25.py test_revocation_bm25.py; do
+for f in test_citations.py test_revalidation_bm25.py test_revocation_bm25.py test_echec_droits.py; do
     [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
 done
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
@@ -815,17 +815,25 @@ if [ -f /root/rag-pipeline/test_citations.py ]; then
     fi
 fi
 
-# Droits sur la recherche par mots-clés : tests unitaires, Qdrant simulé (§16.5.1)
-if [ -f /root/rag-pipeline/test_revalidation_bm25.py ]; then
-    if docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py >/dev/null 2>&1; then
-        ok "Droits sur la recherche par mots-clés : tests unitaires OK"
+# Tests de sécurité des droits (§16.5.1, §16.5.2) : obligatoires (2.21.5).
+# Absent ou en échec : la RAG API est arrêtée, pour qu'aucune question ne soit
+# servie par un code non vérifié, et le déploiement se termine en erreur.
+# Rien n'est supprimé : corriger, puis redémarrer la RAG API.
+ECHEC_SECURITE=0
+for t in test_revalidation_bm25.py test_echec_droits.py; do
+    if [ ! -f "/root/rag-pipeline/$t" ]; then
+        ECHEC_SECURITE=1
+        PROBLEMES="${PROBLEMES}  - Test de sécurité $t ABSENT de /root/rag-pipeline (copier le fichier du dépôt ; §16.5)\n"
+    elif docker exec -w /app rag-api python3 "/rag-pipeline/$t" >/dev/null 2>&1; then
+        ok "Test de sécurité $t : OK"
     else
-        # Test de sécurité (2.21.4) : un échec bloque le déploiement et arrête la
-        # RAG API, pour qu'aucune question ne soit servie par un code qui laisserait
-        # passer un droit retiré. Rien n'est supprimé : corriger, puis la redémarrer.
-        ( cd /root/rag-stack && docker compose stop rag-api ) >/dev/null 2>&1
-        PROBLEMES="${PROBLEMES}  - Droits sur la recherche par mots-clés : tests en ÉCHEC, RAG API arrêtée (détail : cd /root/rag-stack && docker compose start rag-api, puis docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py ; §16.5.1)\n"
+        ECHEC_SECURITE=1
+        PROBLEMES="${PROBLEMES}  - Test de sécurité $t en ÉCHEC (détail : docker exec -w /app rag-api python3 /rag-pipeline/$t ; §16.5)\n"
     fi
+done
+if [ "$ECHEC_SECURITE" = 1 ]; then
+    ( cd /root/rag-stack && docker compose stop rag-api ) >/dev/null 2>&1
+    PROBLEMES="${PROBLEMES}  - RAG API ARRÊTÉE à cause du test de sécurité ci-dessus ; après correction : cd /root/rag-stack && docker compose start rag-api\n"
 fi
 
 QDRANT=$(curl -s -H "api-key: ${QDRANT_API_KEY}" http://localhost:6333/collections 2>/dev/null || echo "")

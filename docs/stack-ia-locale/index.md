@@ -43,7 +43,7 @@ Ce guide documente un déploiement avec cloisonnement documentaire réel basé s
 
 Ce guide est adapté aux organisations dont les utilisateurs ont des droits différenciés sur les documents : données RH, financières, clients, direction.
 
-Pour un corpus sans restriction d'accès (base de connaissances commune, documentation technique interne), le cloisonnement peut être désactivé en retirant le filtre Qdrant dans `main.py`.
+Pour un corpus sans restriction d'accès (base de connaissances commune, documentation technique interne), **ne pas modifier le code** pour retirer le cloisonnement : le jour où un document sensible arrive sur le partage, il serait visible de tous. Donner plutôt la lecture NTFS à un groupe large dont les utilisateurs sont membres. Attention : « Utilisateurs du domaine », groupe principal des comptes, n'est pas lu par la RAG API (point auth.1 du suivi).
 
 ### Avertissements
 

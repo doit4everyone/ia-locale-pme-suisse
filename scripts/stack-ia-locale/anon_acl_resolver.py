@@ -54,6 +54,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
@@ -281,6 +282,13 @@ def get_collection_for_path(source_name: str) -> str:
     return COLLECTION
 
 
+# Échec d'écriture des droits (2.21.5) : distinct de « aucun chunk » (0).
+# Jusqu'à la 2.21.4, une erreur de Qdrant renvoyait 0 : le document passait pour
+# « non indexé », la synchronisation réussissait, et il gardait ses anciens droits.
+ECHEC_ECRITURE = -1
+PAUSE_NOUVELLE_TENTATIVE = 2  # secondes avant la seconde tentative
+
+
 def mettre_a_jour_qdrant(
     qdrant: QdrantClient,
     source_name: str,
@@ -292,58 +300,120 @@ def mettre_a_jour_qdrant(
     """
     Met à jour le champ autorisés[] dans le payload de tous les chunks
     dont le champ source correspond à source_name.
-    Retourne le nombre de chunks mis à jour.
+    Retourne le nombre de chunks mis à jour, 0 si le document n'a aucun chunk,
+    ECHEC_ECRITURE si Qdrant a refusé la lecture ou l'écriture deux fois.
     """
-    try:
-        # Chercher TOUS les chunks du document par pagination
-        # limit=100 raterait les documents de plus de 100 chunks
-        all_points = []
-        next_offset = None
-        while True:
-            batch, next_offset = qdrant.scroll(
-                collection_name=collection_name,
-                scroll_filter=Filter(must=[
-                    FieldCondition(key="source", match=MatchValue(value=source_name))
-                ]),
-                limit=100,
-                offset=next_offset,
-                with_payload=True
-            )
-            all_points.extend(batch)
-            if next_offset is None:
-                break
-        points = all_points
+    for tentative in (1, 2):
+        try:
+            return _ecrire_droits_document(qdrant, source_name, collection_name,
+                                           autorisés, interdits, dry_run)
+        except Exception as e:
+            print(f"  Erreur Qdrant sur '{source_name}' (tentative {tentative}/2) : {e}")
+            if tentative == 1:
+                time.sleep(PAUSE_NOUVELLE_TENTATIVE)
+    print(f"  [ECHEC ECRITURE] {source_name} : droits NON mis à jour dans Qdrant")
+    return ECHEC_ECRITURE
 
-        if not points:
-            return 0
 
-        if dry_run:
-            print(f"    [DRY-RUN] {len(points)} chunks")
-            print(f"      autorisés  : {autorisés}")
-            if interdits:
-                print(f"      interdits  : {interdits}")
-            return len(points)
-
-        # Mettre à jour le payload de chaque chunk
-        ids = [p.id for p in points]
-        # interdits est toujours écrit, même vide.
-        # Si on ne l'écrit que quand non vide, un DENY retiré sur le file server
-        # reste actif indéfiniment dans Qdrant.
-        payload = {
-            "autorises": autorisés,
-            "interdits": interdits,
-            "acl_updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        qdrant.set_payload(
+def _ecrire_droits_document(qdrant, source_name, collection_name, autorisés, interdits, dry_run) -> int:
+    """Une tentative ; les erreurs de Qdrant remontent à l'appelant."""
+    # Chercher TOUS les chunks du document par pagination
+    # limit=100 raterait les documents de plus de 100 chunks
+    all_points = []
+    next_offset = None
+    while True:
+        batch, next_offset = qdrant.scroll(
             collection_name=collection_name,
-            payload=payload,
-            points=ids
+            scroll_filter=Filter(must=[
+                FieldCondition(key="source", match=MatchValue(value=source_name))
+            ]),
+            limit=100,
+            offset=next_offset,
+            with_payload=True
         )
+        all_points.extend(batch)
+        if next_offset is None:
+            break
+    points = all_points
+
+    if not points:
+        return 0
+
+    if dry_run:
+        print(f"    [DRY-RUN] {len(points)} chunks")
+        print(f"      autorisés  : {autorisés}")
+        if interdits:
+            print(f"      interdits  : {interdits}")
         return len(points)
 
-    except Exception as e:
-        print(f"  Erreur Qdrant sur '{source_name}' : {e}")
-        return 0
+    # Mettre à jour le payload de chaque chunk
+    ids = [p.id for p in points]
+    # interdits est toujours écrit, même vide.
+    # Si on ne l'écrit que quand non vide, un DENY retiré sur le file server
+    # reste actif indéfiniment dans Qdrant.
+    payload = {
+        "autorises": autorisés,
+        "interdits": interdits,
+        "acl_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    qdrant.set_payload(
+        collection_name=collection_name,
+        payload=payload,
+        points=ids
+    )
+    return len(points)
+
+
+def ecrire_droits(qdrant: QdrantClient, lectures: list, dry_run: bool = False) -> dict:
+    """
+    Phase 2 : écrit dans Qdrant les droits lus en phase 1.
+    Trois issues par document : mis à jour, non indexé (aucun chunk), échec
+    d'écriture. Un fichier aux ACL illisibles est fermé (droits vidés) ; si cette
+    fermeture échoue, il est lui aussi en échec d'écriture.
+    """
+    res = {"rapport": [], "total": 0, "sans_chunks": [], "echecs": []}
+    for chemin_smb, source_name, autorises_f, interdits_f, illisible in lectures:
+        col = get_collection_for_path(source_name)
+        if illisible:
+            # ACL illisible : deny by default.
+            # On vide autorises dans Qdrant pour bloquer l'acces jusqu'au
+            # prochain passage ou les ACL redeviennent lisibles.
+            nb = mettre_a_jour_qdrant(qdrant, source_name, col, [], [], dry_run)
+            statut = "acl_illisible"
+            if nb == ECHEC_ECRITURE:
+                statut = "echec_ecriture"
+                res["echecs"].append(source_name)
+            res["rapport"].append({
+                "fichier": chemin_smb,
+                "source_name": source_name,
+                "statut": statut,
+                "autorises": [],
+                "interdits": []
+            })
+            continue
+
+        nb = mettre_a_jour_qdrant(qdrant, source_name, col, autorises_f, interdits_f, dry_run)
+        if nb == ECHEC_ECRITURE:
+            statut = "echec_ecriture"
+            res["echecs"].append(source_name)
+        elif nb == 0:
+            print(f"  [{source_name}] Aucun chunk trouve dans Qdrant")
+            res["sans_chunks"].append(source_name)
+            statut = "non_indexe"
+        else:
+            print(f"  [{source_name}] {nb} chunks mis a jour")
+            res["total"] += nb
+            statut = "mis_a_jour"
+
+        res["rapport"].append({
+            "fichier": chemin_smb,
+            "source_name": source_name,
+            "statut": statut,
+            "autorises": autorises_f,
+            "interdits": interdits_f,
+            "chunks_mis_a_jour": max(nb, 0)
+        })
+    return res
 
 
 # ─────────────────────────────────────────
@@ -467,39 +537,11 @@ def resoudre_acl(
         sys.exit(1)
 
     # Phase 2 : ecriture dans Qdrant.
-    for chemin_smb, source_name, autorises_f, interdits_f, illisible in lectures:
-        col = get_collection_for_path(source_name)
-        if illisible:
-            # ACL illisible : deny by default.
-            # On vide autorises dans Qdrant pour bloquer l'acces jusqu'au
-            # prochain passage ou les ACL redeviennent lisibles.
-            mettre_a_jour_qdrant(qdrant, source_name, col, [], [], dry_run)
-            rapport.append({
-                "fichier": chemin_smb,
-                "statut": "acl_illisible",
-                "autorises": [],
-                "interdits": []
-            })
-            continue
-
-        nb = mettre_a_jour_qdrant(qdrant, source_name, col, autorises_f, interdits_f, dry_run)
-        if nb == 0:
-            print(f"  [{source_name}] Aucun chunk trouve dans Qdrant")
-            fichiers_sans_chunks.append(source_name)
-            statut = "non_indexe"
-        else:
-            print(f"  [{source_name}] {nb} chunks mis a jour")
-            total_chunks_mis_a_jour += nb
-            statut = "mis_a_jour"
-
-        rapport.append({
-            "fichier": chemin_smb,
-            "source_name": source_name,
-            "statut": statut,
-            "autorises": autorises_f,
-            "interdits": interdits_f,
-            "chunks_mis_a_jour": nb
-        })
+    ecriture = ecrire_droits(qdrant, lectures, dry_run)
+    rapport = ecriture["rapport"]
+    total_chunks_mis_a_jour = ecriture["total"]
+    fichiers_sans_chunks = ecriture["sans_chunks"]
+    echecs_ecriture = ecriture["echecs"]
 
     # Resume
     print(f"\n{'='*60}")
@@ -509,6 +551,7 @@ def resoudre_acl(
     print(f"Chunks mis a jour       : {total_chunks_mis_a_jour}")
     print(f"Fichiers sans ACL       : {len(fichiers_sans_acl)}")
     print(f"Fichiers non indexes    : {len(fichiers_sans_chunks)}")
+    print(f"Echecs d'ecriture       : {len(echecs_ecriture)}")
 
     if fichiers_sans_chunks:
         print("\nFichiers présents sur le partage mais absents de Qdrant :")
@@ -538,7 +581,10 @@ def resoudre_acl(
 
     # Récupérer tous les source_names présents dans les deux collections
     sources_qdrant = set()
+    echecs_lecture_orphelins = []
     for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
+        if col not in collections:
+            continue  # collection absente, signalée au démarrage
         next_offset = None
         while True:
             try:
@@ -558,11 +604,16 @@ def resoudre_acl(
                         sources_qdrant.add(src)
                 if next_offset is None:
                     break
-            except Exception:
+            except Exception as e:
+                # Liste incomplète : des orphelins resteraient interrogeables
+                # sans que personne ne le sache (2.21.5).
+                print(f"  [ECHEC] Lecture de '{col}' pour les orphelins impossible : {e}")
+                echecs_lecture_orphelins.append(col)
                 break
 
     # Orphelins : dans Qdrant mais absents du partage
     orphelins = sources_qdrant - sources_partage
+    echecs_suppression = []
 
     if not orphelins:
         print("Aucun chunk orphelin détecté.")
@@ -573,7 +624,7 @@ def resoudre_acl(
 
         if not dry_run:
             nb_supprimes = 0
-            for src in orphelins:
+            for src in sorted(orphelins):
                 try:
                     # Filtre : cette source, et jamais un chunk non SMB.
                     col_src = get_collection_for_path(src)
@@ -594,7 +645,10 @@ def resoudre_acl(
                         nb_supprimes += nb
                         print(f"  → {nb} chunks supprimés : {src}")
                 except Exception as e:
-                    print(f"  Erreur suppression '{src}' : {e}")
+                    # Fichier supprimé du partage, extraits encore interrogeables :
+                    # échec signalé, document retiré de la recherche (2.21.5).
+                    print(f"  [ECHEC SUPPRESSION] '{src}' : {e}")
+                    echecs_suppression.append(src)
             print(f"\nTotal chunks orphelins supprimés : {nb_supprimes}")
         else:
             print("  [DRY-RUN] Aucune suppression effectuée.")
@@ -622,7 +676,14 @@ def resoudre_acl(
                 "fichiers_non_indexés": len(fichiers_sans_chunks),
                 "sources_orphelines": len(orphelins),
                 "entrees_allowed_sans_lecture": STATS_MASQUE["allowed_sans_lecture"],
+                "echecs_ecriture": len(echecs_ecriture),
+                "echecs_suppression": len(echecs_suppression),
             },
+            # Documents dont les droits dans Qdrant ne sont PAS ceux du partage :
+            # la RAG API les retire de la recherche jusqu'à une écriture réussie.
+            "echecs_ecriture": sorted(echecs_ecriture),
+            "echecs_suppression": sorted(echecs_suppression),
+            "echecs_lecture_orphelins": echecs_lecture_orphelins,
             "fichiers_avec_entree_allowed_ignoree": sorted(STATS_MASQUE["fichiers"]),
             "documents": rapport,
             "orphelins": sorted(orphelins),
@@ -631,6 +692,17 @@ def resoudre_acl(
     for f_ignore in sorted(STATS_MASQUE["fichiers"]):
         print(f"  {f_ignore}")
     print(f"\nRapport sauvegardé : {rapport_path}")
+
+    # Code 2 : passage terminé, mais des droits n'ont pas pu être écrits.
+    # La synchronisation est en échec et l'alerte part (courriel, supervision).
+    if echecs_ecriture or echecs_suppression or echecs_lecture_orphelins:
+        msg = (f"[ECHEC] Droits non écrits : {len(echecs_ecriture)} document(s) ; "
+               f"suppressions en échec : {len(echecs_suppression)} ; "
+               f"lectures des orphelins en échec : {len(echecs_lecture_orphelins)}. "
+               "Ces documents sont retirés de la recherche jusqu'à une écriture réussie (§16.5.2).")
+        print(f"\n{msg}")
+        print(msg, file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
