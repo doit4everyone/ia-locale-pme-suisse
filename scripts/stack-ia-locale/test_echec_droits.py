@@ -14,12 +14,14 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
   - 2.21.6 : un passage incomplet ne vide jamais la liste (orphelins illisibles,
     site SharePoint en erreur, passage interrompu), option ACL_INCERTAIN_FERME,
     registre atomique, refus des questions si le registre est absent ou illisible,
-    fichier SharePoint devenu trop volumineux retiré de l'index.
+    fichier SharePoint devenu trop volumineux retiré de l'index ;
+  - 2.21.7 : échec d'écriture du registre puis redémarrage, marqueur de
+    synchronisation inachevée, validation stricte du registre.
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 23 tests OK », code de sortie 0.
+Attendu : « 31 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -184,7 +186,10 @@ def ecrire_json(donnees) -> str:
 def remise_a_zero():
     main._etat = main._etat_vide()
     main._registre_incertain = False
+    main._persistance_ko = False
     main.ACL_INCERTAIN_FERME = False
+    if os.path.exists(main.fichier_marqueur()):
+        os.remove(main.fichier_marqueur())
 
 
 def tests_api():
@@ -314,6 +319,64 @@ def tests_api():
     verifier("2.21.6 : écriture du registre impossible, incident signalé, ancienne version intacte",
              ok_retour and intact, f"signalé {ok_retour}, intacte {intact}")
 
+    # ── 2.21.7 : un échec d'écriture ne doit jamais redevenir une fuite ──
+    def question_refusee():
+        try:
+            asyncio.run(main.search_qdrant("grille salaires", user_groups=[G], user_email="t@x.ch"))
+            return False
+        except main.HTTPException as e:
+            return e.status_code == 503
+
+    remise_a_zero()
+    main.enregistrer_bloques()                                   # registre sain, vide
+    main.poser_marqueur()                                        # début de synchronisation
+    os.makedirs(main.FICHIER_BLOQUES + ".tmp", exist_ok=True)    # disque qui refuse l'écriture
+    main.appliquer_resultat_droits("smb", 2, rapport_acl)        # Salaires à retirer, non enregistré
+    refus_en_cours = question_refusee()
+    os.rmdir(main.FICHIER_BLOQUES + ".tmp")
+    main._persistance_ko = False                                  # redémarrage simulé :
+    main.charger_bloques()                                        # ancien registre + marqueur présent
+    refus_apres_redemarrage = main._registre_incertain and question_refusee()
+    verifier("2.21.7 : registre non enregistré, questions refusées, et encore après redémarrage",
+             refus_en_cours and refus_apres_redemarrage,
+             f"en cours {refus_en_cours}, après redémarrage {refus_apres_redemarrage}")
+
+    main.appliquer_resultat_droits("smb", 2, rapport_acl)        # synchronisation suivante, terminée
+    if main.enregistrer_bloques():
+        main.retirer_marqueur()
+        main.lever_incertitude_registre()
+    main.charger_bloques()                                        # nouveau redémarrage
+    verifier("2.21.7 : synchronisation terminée et enregistrée, Salaires retiré et questions servies",
+             not main._registre_incertain and main.est_bloque("RH/Salaires.xlsx") and not question_refusee())
+
+    remise_a_zero()
+    main.enregistrer_bloques()
+    os.makedirs(main.fichier_marqueur() + ".tmp", exist_ok=True)
+    pose = main.poser_marqueur()
+    os.rmdir(main.fichier_marqueur() + ".tmp")
+    verifier("2.21.7 : marqueur impossible à écrire, questions refusées", pose is False and question_refusee())
+
+    for nom, contenu in (("vide {}", "{}"),
+                         ("smb en chaîne", '{"version": 2, "smb": "RH/Salaires.xlsx", "sharepoint": [], "prefixes": [], '
+                                           '"smb_tout": false, "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}'),
+                         ("version inconnue", '{"version": 9, "smb": [], "sharepoint": [], "prefixes": [], '
+                                              '"smb_tout": false, "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}'),
+                         ("indicateur non booléen", '{"version": 2, "smb": [], "sharepoint": [], "prefixes": [], '
+                                                    '"smb_tout": "non", "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}')):
+        remise_a_zero()
+        with open(main.FICHIER_BLOQUES, "w", encoding="utf-8") as f:
+            f.write(contenu)
+        main.charger_bloques()
+        verifier(f"2.21.7 : registre mal formé ({nom}), état inconnu", main._registre_incertain)
+
+    remise_a_zero()
+    with open(main.FICHIER_BLOQUES, "w", encoding="utf-8") as f:
+        f.write('{"version": 2, "smb": ["RH/Salaires.xlsx"], "sharepoint": [], "prefixes": [], '
+                '"smb_tout": false, "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}')
+    main.charger_bloques()
+    verifier("2.21.7 : registre conforme accepté", not main._registre_incertain and main.est_bloque("RH/Salaires.xlsx"))
+
+    remise_a_zero()
     for f in (main.FICHIER_BLOQUES, rapport_acl, rapport_sp, incomplet, site_ko):
         if os.path.exists(f):
             os.remove(f)
@@ -361,6 +424,7 @@ def tests_sharepoint():
 if __name__ == "__main__":
     qdrant_reel, fichier_reel = main.qdrant, main.FICHIER_BLOQUES
     etat_reel, incertain_reel, ferme_reel = main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME
+    persistance_reelle = main._persistance_ko
     try:
         tests_resolveur()
         tests_passage()
@@ -369,6 +433,7 @@ if __name__ == "__main__":
     finally:
         main.qdrant, main.FICHIER_BLOQUES = qdrant_reel, fichier_reel
         main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME = etat_reel, incertain_reel, ferme_reel
+        main._persistance_ko = persistance_reelle
     total, ok = len(RESULTATS), sum(RESULTATS)
     print(f"{ok} tests OK" if ok == total else f"{total - ok} test(s) en échec sur {total}")
     sys.exit(0 if ok == total else 1)

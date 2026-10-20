@@ -225,10 +225,11 @@ logger = logging.getLogger(__name__)
 # question n'est servie jusqu'à une synchronisation complète. deploy.sh le crée
 # vide à l'installation ; son absence ensuite est anormale.
 FICHIER_BLOQUES = os.getenv("ACL_BLOQUES_FICHIER", "/var/log/rag/acl_bloques.json")
-# Option : périmètre incertain fermé. Avec 1, un passage incomplet suspend tous
-# les documents de son origine (partage ou SharePoint) jusqu'à un passage
-# complet. Par défaut 0 : derniers droits connus conservés (§5.4, §16.5.2).
-ACL_INCERTAIN_FERME = os.getenv("ACL_INCERTAIN_FERME", "0").strip() == "1"
+# Option : périmètre incertain fermé. Avec 1 (défaut depuis la 2.21.7), un
+# passage abandonné ou interrompu suspend tous les documents de son origine
+# (partage ou SharePoint) jusqu'à un passage complet. Avec 0 : derniers droits
+# connus conservés, plus disponible, moins sûr (§5.4, §16.5.2).
+ACL_INCERTAIN_FERME = os.getenv("ACL_INCERTAIN_FERME", "1").strip() != "0"
 PREFIXE_SP = "SharePoint/"
 
 
@@ -239,8 +240,63 @@ def _etat_vide() -> dict:
 
 
 _etat = _etat_vide()
-_registre_incertain = False   # registre absent ou illisible au démarrage
+_registre_incertain = False   # registre absent, illisible, ou synchronisation inachevée au démarrage
 _registre_ok = True           # dernière écriture du registre réussie
+_persistance_ko = False       # liste en mémoire non écrite sur le disque (2.21.7)
+
+
+def fichier_marqueur() -> str:
+    """Marqueur « synchronisation des droits en cours » (2.21.7) : posé avant de
+    lancer acl_resolver.py et sp_indexer.py, retiré quand le registre qui en
+    résulte est écrit. Présent au démarrage : le dernier résultat n'a peut-être
+    pas été enregistré, état des droits inconnu."""
+    return FICHIER_BLOQUES + ".en_cours"
+
+
+def _ecrire_atomique(chemin: str, contenu: str) -> None:
+    """Fichier temporaire complet, fsync, renommage, puis fsync du dossier pour
+    que le renommage lui-même survive à une coupure. Lève OSError en cas d'échec ;
+    l'ancien fichier reste alors en place."""
+    tmp = f"{chemin}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(contenu)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, chemin)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    dossier = os.open(os.path.dirname(os.path.abspath(chemin)), os.O_RDONLY)
+    try:
+        os.fsync(dossier)
+    finally:
+        os.close(dossier)
+
+
+def poser_marqueur() -> bool:
+    global _persistance_ko
+    try:
+        _ecrire_atomique(fichier_marqueur(), json.dumps({"debut": datetime.now(timezone.utc).isoformat()}))
+        return True
+    except OSError as e:
+        _persistance_ko = True
+        logger.error(f"[DROITS] Marqueur de synchronisation impossible à écrire ({e}) : "
+                     "droits NON synchronisés, questions refusées")
+        return False
+
+
+def retirer_marqueur() -> None:
+    try:
+        os.remove(fichier_marqueur())
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        logger.error(f"[DROITS] Marqueur de synchronisation non retiré ({e}) : "
+                     "au prochain démarrage, questions refusées jusqu'à une synchronisation")
 
 
 def sources_bloquees() -> set[str]:
@@ -263,57 +319,74 @@ def nombre_retires() -> int:
 
 
 def enregistrer_bloques(chemin: str | None = None) -> bool:
-    """Écriture atomique : fichier temporaire complet, fsync, puis renommage.
-    En cas d'échec, l'ancienne version reste en place et l'incident est signalé."""
-    global _registre_ok
+    """Écriture atomique (_ecrire_atomique). En cas d'échec, l'ancienne version
+    reste en place, l'incident est signalé, et AUCUNE question n'est servie tant
+    qu'une écriture n'a pas réussi (2.21.7) : sinon un redémarrage relirait
+    l'ancien registre, sans les documents retirés depuis."""
+    global _registre_ok, _persistance_ko
     chemin = chemin or FICHIER_BLOQUES
-    tmp = f"{chemin}.tmp"
+    contenu = json.dumps({"version": 2, "maj": datetime.now(timezone.utc).isoformat(),
+                          "smb": sorted(_etat["smb"]), "sharepoint": sorted(_etat["sharepoint"]),
+                          "prefixes": sorted(_etat["prefixes"]),
+                          "smb_tout": _etat["smb_tout"], "sharepoint_tout": _etat["sharepoint_tout"],
+                          "incertain": _etat["incertain"]}, ensure_ascii=False, indent=2)
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"version": 2, "maj": datetime.now(timezone.utc).isoformat(),
-                       "smb": sorted(_etat["smb"]), "sharepoint": sorted(_etat["sharepoint"]),
-                       "prefixes": sorted(_etat["prefixes"]),
-                       "smb_tout": _etat["smb_tout"], "sharepoint_tout": _etat["sharepoint_tout"],
-                       "incertain": _etat["incertain"]}, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, chemin)
+        _ecrire_atomique(chemin, contenu)
         _registre_ok = True
+        _persistance_ko = False
     except OSError as e:
         _registre_ok = False
+        _persistance_ko = True
         logger.error(f"[DROITS] Registre des documents retirés NON enregistré ({e}) : "
-                     "l'ancienne version reste en place ; la liste en mémoire s'applique jusqu'au redémarrage")
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+                     "l'ancienne version reste en place ; questions refusées jusqu'à une écriture réussie")
     return _registre_ok
 
 
+def _valider_registre(d) -> None:
+    """Structure exacte attendue (2.21.7) ; toute anomalie lève ValueError."""
+    if not isinstance(d, dict) or d.get("version") != 2:
+        raise ValueError("version de schéma inconnue")
+    for cle in ("smb", "sharepoint", "prefixes"):
+        v = d.get(cle)
+        if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
+            raise ValueError(f"« {cle} » : liste de chemins attendue")
+    for cle in ("smb_tout", "sharepoint_tout"):
+        if not isinstance(d.get(cle), bool):
+            raise ValueError(f"« {cle} » : booléen attendu")
+    inc = d.get("incertain")
+    if not isinstance(inc, dict) or set(inc) != {"smb", "sharepoint"} \
+            or not all(isinstance(v, bool) for v in inc.values()):
+        raise ValueError("« incertain » : structure attendue {smb, sharepoint}")
+
+
 def charger_bloques(chemin: str | None = None) -> None:
-    """Au démarrage. Absent ou illisible : état inconnu, questions suspendues."""
+    """Au démarrage. Absent, illisible, mal formé, ou synchronisation inachevée :
+    état inconnu, questions suspendues."""
     global _etat, _registre_incertain
     chemin = chemin or FICHIER_BLOQUES
     _etat = _etat_vide()
     try:
         with open(chemin, "r", encoding="utf-8") as f:
             d = json.load(f)
-        if not isinstance(d, dict):
-            raise ValueError("contenu inattendu")
-        _etat["smb"] = set(d.get("smb", []))
-        _etat["sharepoint"] = set(d.get("sharepoint", []))
-        _etat["prefixes"] = set(d.get("prefixes", []))
-        _etat["smb_tout"] = bool(d.get("smb_tout", False))
-        _etat["sharepoint_tout"] = bool(d.get("sharepoint_tout", False))
-        inc = d.get("incertain", {})
-        _etat["incertain"] = {"smb": bool(inc.get("smb", False)),
-                              "sharepoint": bool(inc.get("sharepoint", False))}
+        _valider_registre(d)
+        _etat["smb"] = set(d["smb"])
+        _etat["sharepoint"] = set(d["sharepoint"])
+        _etat["prefixes"] = set(d["prefixes"])
+        _etat["smb_tout"] = d["smb_tout"]
+        _etat["sharepoint_tout"] = d["sharepoint_tout"]
+        _etat["incertain"] = dict(d["incertain"])
         _registre_incertain = False
     except Exception as e:
         _registre_incertain = True
         motif = "absent" if isinstance(e, FileNotFoundError) else f"illisible ({e})"
         logger.critical(f"[DROITS] Registre {chemin} {motif} : état des droits inconnu, "
                         "AUCUNE question servie jusqu'à une synchronisation complète (§16.5.2)")
+        return
+    if os.path.exists(fichier_marqueur()):
+        # Synchronisation des droits interrompue avant l'écriture de son résultat
+        _registre_incertain = True
+        logger.critical("[DROITS] Synchronisation des droits inachevée (marqueur présent) : état des droits "
+                        "inconnu, AUCUNE question servie jusqu'à une synchronisation terminée (§16.5.2)")
         return
     if nombre_retires():
         logger.warning(f"[DROITS] {nombre_retires()} document(s) ou périmètre(s) retiré(s) de la recherche "
@@ -891,8 +964,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     if not user_groups:
         logger.error("[AUTH] Recherche demandée sans groupes : refus")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
-    if _registre_incertain:
-        logger.error("[DROITS] Registre des documents retirés absent ou illisible : question refusée")
+    if _registre_incertain or _persistance_ko:
+        logger.error("[DROITS] État des documents retirés inconnu ou non enregistré : question refusée")
         raise HTTPException(status_code=503, detail="Vérification des droits en cours : "
                             "réessayer après la prochaine synchronisation")
     try:
@@ -2049,8 +2122,8 @@ async def calculer_acces(user_id: str, document: str, correspondance: str = "exa
     user_groups = get_user_groups(user_id)
     if not user_groups:
         raise PermissionError("Résolution des droits impossible")
-    if _registre_incertain:
-        raise RuntimeError("Registre des documents retirés absent ou illisible (§16.5.2)")
+    if _registre_incertain or _persistance_ko:
+        raise RuntimeError("État des documents retirés inconnu ou non enregistré (§16.5.2)")
     filtre = Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=user_groups))])
     try:
         existantes = {c.name for c in qdrant.get_collections().collections}
@@ -2250,169 +2323,192 @@ async def admin_sync(
             rapport["errors"].append(msg)
             logger.error(f"[SYNC] {msg}")
 
-        # ── Étape 2 : acl_resolver.py ────────────────────────────────────
-        resolver_script = f"{SYNC_SCRIPTS_DIR}/acl_resolver.py"
+        # Marqueur posé AVANT toute modification des droits (2.21.7). S'il ne peut
+        # pas être écrit, les droits ne sont pas synchronisés et les questions sont
+        # refusées : un résultat qu'on ne pourrait pas enregistrer serait perdu au
+        # prochain redémarrage.
         passages_droits: set[str] = set()   # origines dont le résultat a été appliqué
-        try:
-            logger.info("[SYNC] Lancement de acl_resolver.py")
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [venv_python, resolver_script,
-                 "--share", SMB_SHARE,
-                 "--mount", SMB_MOUNT,
-                 "--rapport", "/var/log/rag/rapport_acl.json"],
-                capture_output=True,
-                text=True,
-                timeout=_env_nombre("SYNC_TIMEOUT_ACL", "300"),
-                env={
-                    "PATH": os.environ.get("PATH", ""),
-                    "HOME": os.environ.get("HOME", ""),
-                    "LANG": os.environ.get("LANG", "C.UTF-8"),
-                    "PYTHONIOENCODING": "utf-8",
-                    "SMB_USER": SMB_USER,
-                    "SMB_PASSWORD": SMB_PASSWORD,
-                    "SMB_DOMAIN": SMB_DOMAIN,
-                    "QDRANT_URL": QDRANT_HOST,
-                    "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
-                    "EMBED_NUM_GPU": EMBED_NUM_GPU,
-                    "QDRANT_COLLECTION": COLLECTION,
-                    # Variables de routage des collections
-                    "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
-                    "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
-                }
-            )
-            rapport["acl_resolver"]["returncode"] = result.returncode
-            retires = appliquer_resultat_droits("smb", result.returncode, "/var/log/rag/rapport_acl.json")
-            passages_droits.add("smb")
-            if result.returncode == 2:
-                rapport["errors"].append(
-                    f"acl_resolver.py : droits non écrits dans Qdrant, {retires} document(s) "
-                    "retiré(s) de la recherche jusqu'à une écriture réussie")
-                logger.error(f"[SYNC] acl_resolver.py échecs d'écriture : {result.stderr[-300:]}")
-            elif result.returncode != 0:
-                rapport["errors"].append(f"acl_resolver.py a retourné code {result.returncode}")
-                logger.error(f"[SYNC] acl_resolver.py erreur : {result.stderr[-200:]}")
-            else:
-                logger.info("[SYNC] acl_resolver.py terminé avec succès")
-                try:
-                    with open("/var/log/rag/rapport_acl.json", "r") as rf:
-                        r_data = json.load(rf)
-                    for doc in r_data.get("documents", []):
-                        # acl_resolver.py écrit « non_indexe » (sans accent) : l'ancien
-                        # test sur « non_indexé » ne comptait jamais ces fichiers (2.21.5).
-                        if doc.get("statut") in ("non_indexe", "non_indexé", "acl_illisible"):
-                            rapport["quarantine"].append(doc.get("fichier", doc.get("source_name", "")))
-                except Exception as e:
-                    logger.warning(f"[SYNC] Rapport acl_resolver illisible : {e}")
-
-        except subprocess.TimeoutExpired:
-            msg = "acl_resolver.py timeout (>5 min)"
-            rapport["errors"].append(msg)
-            logger.error(f"[SYNC] {msg}")
-            if "smb" not in passages_droits:
-                appliquer_resultat_droits("smb", None, "")   # passage interrompu : incertain
-        except Exception as e:
-            msg = f"acl_resolver.py exception : {e}"
-            rapport["errors"].append(msg)
-            if "smb" not in passages_droits:
-                appliquer_resultat_droits("smb", None, "")
-            logger.error(f"[SYNC] {msg}")
-
-        # ── Étape 3 : sp_indexer.py (SharePoint Online, Partie 3) ────────
-        sp_sites = os.getenv("SP_SITES", "")
-        if sp_sites and os.getenv("SP_CLIENT_ID", ""):
-            sp_script = f"{SYNC_SCRIPTS_DIR}/sp_indexer.py"
-            sp_rapport = "/var/log/rag/rapport_sharepoint.json"
+        codes_droits: dict[str, int | None] = {}
+        droits_autorises = poser_marqueur()
+        if not droits_autorises:
+            rapport["errors"].append("Marqueur de synchronisation impossible à écrire (/var/log/rag) : "
+                                     "droits non synchronisés, questions refusées")
+        if droits_autorises:
+            # ── Étape 2 : acl_resolver.py ────────────────────────────────────
+            resolver_script = f"{SYNC_SCRIPTS_DIR}/acl_resolver.py"
             try:
-                logger.info("[SYNC] Lancement de sp_indexer.py")
+                logger.info("[SYNC] Lancement de acl_resolver.py")
                 result = await asyncio.to_thread(
                     subprocess.run,
-                    [venv_python, sp_script, "--rapport", sp_rapport],
+                    [venv_python, resolver_script,
+                     "--share", SMB_SHARE,
+                     "--mount", SMB_MOUNT,
+                     "--rapport", "/var/log/rag/rapport_acl.json"],
                     capture_output=True,
                     text=True,
-                    timeout=int(os.getenv("SYNC_TIMEOUT_SHAREPOINT", "") or "900"),
+                    timeout=_env_nombre("SYNC_TIMEOUT_ACL", "300"),
                     env={
                         "PATH": os.environ.get("PATH", ""),
                         "HOME": os.environ.get("HOME", ""),
                         "LANG": os.environ.get("LANG", "C.UTF-8"),
                         "PYTHONIOENCODING": "utf-8",
-                        # auth.py (RAG-Identity-Resolver) est importé depuis /app
-                        "PYTHONPATH": "/app",
-                        "OLLAMA_URL": EMBED_BASE_URL,
-                        "EMBED_MODEL": EMBED_MODEL,
+                        "SMB_USER": SMB_USER,
+                        "SMB_PASSWORD": SMB_PASSWORD,
+                        "SMB_DOMAIN": SMB_DOMAIN,
                         "QDRANT_URL": QDRANT_HOST,
                         "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                         "EMBED_NUM_GPU": EMBED_NUM_GPU,
-                        "EMBED_API": EMBED_API,
-                        "VLLM_API_KEY": VLLM_API_KEY,
                         "QDRANT_COLLECTION": COLLECTION,
-                        "ORG_OWNER": ORG_NAME,
-                        "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
-                        "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
-                        "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
+                        # Variables de routage des collections
                         "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
                         "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
-                        "REPORT_DIR": "/var/log/rag",
-                        # Application d'identité (§11) : UPN, groupes, propriétaires
-                        "ENTRA_TENANT_ID": os.environ.get("ENTRA_TENANT_ID", ""),
-                        "ENTRA_CLIENT_ID": os.environ.get("ENTRA_CLIENT_ID", ""),
-                        "ENTRA_CERT_PATH": os.environ.get("ENTRA_CERT_PATH", ""),
-                        "ENTRA_KEY_PATH": os.environ.get("ENTRA_KEY_PATH", ""),
-                        "ENTRA_CERT_THUMBPRINT": os.environ.get("ENTRA_CERT_THUMBPRINT", ""),
-                        # Application d'indexation SharePoint (§13)
-                        "SP_CLIENT_ID": os.environ.get("SP_CLIENT_ID", ""),
-                        "SP_CERT_THUMBPRINT": os.environ.get("SP_CERT_THUMBPRINT", ""),
-                        "SP_KEY_PATH": os.environ.get("SP_KEY_PATH", ""),
-                        "SP_SITES": sp_sites,
-                        "SP_EXCLUDE_DRIVES": os.environ.get("SP_EXCLUDE_DRIVES", ""),
-                        "SP_MAX_FILE_MB": os.environ.get("SP_MAX_FILE_MB", ""),
-                        # Déchiffrement Purview (§14)
-                        "MIP_URL": MIP_URL,
-                        "MIP_TOKEN": MIP_TOKEN,
                     }
                 )
-                rapport["sharepoint"]["returncode"] = result.returncode
-                appliquer_resultat_droits("sharepoint", result.returncode, sp_rapport)
-                passages_droits.add("sharepoint")
-                try:
-                    with open(sp_rapport, "r", encoding="utf-8") as rf:
-                        sp_data = json.load(rf)
-                    rapport["sharepoint"]["totaux"] = sp_data.get("totaux", {})
-                    rapport["sharepoint"]["identifiants_introuvables"] = len(
-                        sp_data.get("identifiants_introuvables", {}))
-                except Exception as e:
-                    logger.warning(f"[SYNC] Rapport SharePoint illisible : {e}")
-                if result.returncode != 0:
-                    rapport["errors"].append(f"sp_indexer.py a retourné code {result.returncode}")
-                    logger.error(f"[SYNC] sp_indexer.py erreur : {(result.stderr or result.stdout)[-300:]}")
+                rapport["acl_resolver"]["returncode"] = result.returncode
+                retires = appliquer_resultat_droits("smb", result.returncode, "/var/log/rag/rapport_acl.json")
+                passages_droits.add("smb")
+                codes_droits["smb"] = result.returncode
+                if result.returncode == 2:
+                    rapport["errors"].append(
+                        f"acl_resolver.py : droits non écrits dans Qdrant, {retires} document(s) "
+                        "retiré(s) de la recherche jusqu'à une écriture réussie")
+                    logger.error(f"[SYNC] acl_resolver.py échecs d'écriture : {result.stderr[-300:]}")
+                elif result.returncode != 0:
+                    rapport["errors"].append(f"acl_resolver.py a retourné code {result.returncode}")
+                    logger.error(f"[SYNC] acl_resolver.py erreur : {result.stderr[-200:]}")
                 else:
-                    logger.info("[SYNC] sp_indexer.py terminé avec succès")
+                    logger.info("[SYNC] acl_resolver.py terminé avec succès")
+                    try:
+                        with open("/var/log/rag/rapport_acl.json", "r") as rf:
+                            r_data = json.load(rf)
+                        for doc in r_data.get("documents", []):
+                            # acl_resolver.py écrit « non_indexe » (sans accent) : l'ancien
+                            # test sur « non_indexé » ne comptait jamais ces fichiers (2.21.5).
+                            if doc.get("statut") in ("non_indexe", "non_indexé", "acl_illisible"):
+                                rapport["quarantine"].append(doc.get("fichier", doc.get("source_name", "")))
+                    except Exception as e:
+                        logger.warning(f"[SYNC] Rapport acl_resolver illisible : {e}")
+
             except subprocess.TimeoutExpired:
-                msg = "sp_indexer.py timeout"
+                msg = "acl_resolver.py timeout (>5 min)"
                 rapport["errors"].append(msg)
                 logger.error(f"[SYNC] {msg}")
-                if "sharepoint" not in passages_droits:
-                    appliquer_resultat_droits("sharepoint", None, "")
+                if "smb" not in passages_droits:
+                    appliquer_resultat_droits("smb", None, "")   # passage interrompu : incertain
+                    codes_droits["smb"] = None
             except Exception as e:
-                msg = f"sp_indexer.py exception : {e}"
+                msg = f"acl_resolver.py exception : {e}"
                 rapport["errors"].append(msg)
+                if "smb" not in passages_droits:
+                    appliquer_resultat_droits("smb", None, "")
+                    codes_droits["smb"] = None
                 logger.error(f"[SYNC] {msg}")
-                if "sharepoint" not in passages_droits:
-                    appliquer_resultat_droits("sharepoint", None, "")
+
+            # ── Étape 3 : sp_indexer.py (SharePoint Online, Partie 3) ────────
+            sp_sites = os.getenv("SP_SITES", "")
+            if sp_sites and os.getenv("SP_CLIENT_ID", ""):
+                sp_script = f"{SYNC_SCRIPTS_DIR}/sp_indexer.py"
+                sp_rapport = "/var/log/rag/rapport_sharepoint.json"
+                try:
+                    logger.info("[SYNC] Lancement de sp_indexer.py")
+                    result = await asyncio.to_thread(
+                        subprocess.run,
+                        [venv_python, sp_script, "--rapport", sp_rapport],
+                        capture_output=True,
+                        text=True,
+                        timeout=int(os.getenv("SYNC_TIMEOUT_SHAREPOINT", "") or "900"),
+                        env={
+                            "PATH": os.environ.get("PATH", ""),
+                            "HOME": os.environ.get("HOME", ""),
+                            "LANG": os.environ.get("LANG", "C.UTF-8"),
+                            "PYTHONIOENCODING": "utf-8",
+                            # auth.py (RAG-Identity-Resolver) est importé depuis /app
+                            "PYTHONPATH": "/app",
+                            "OLLAMA_URL": EMBED_BASE_URL,
+                            "EMBED_MODEL": EMBED_MODEL,
+                            "QDRANT_URL": QDRANT_HOST,
+                            "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+                            "EMBED_NUM_GPU": EMBED_NUM_GPU,
+                            "EMBED_API": EMBED_API,
+                            "VLLM_API_KEY": VLLM_API_KEY,
+                            "QDRANT_COLLECTION": COLLECTION,
+                            "ORG_OWNER": ORG_NAME,
+                            "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
+                            "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
+                            "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
+                            "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
+                            "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
+                            "REPORT_DIR": "/var/log/rag",
+                            # Application d'identité (§11) : UPN, groupes, propriétaires
+                            "ENTRA_TENANT_ID": os.environ.get("ENTRA_TENANT_ID", ""),
+                            "ENTRA_CLIENT_ID": os.environ.get("ENTRA_CLIENT_ID", ""),
+                            "ENTRA_CERT_PATH": os.environ.get("ENTRA_CERT_PATH", ""),
+                            "ENTRA_KEY_PATH": os.environ.get("ENTRA_KEY_PATH", ""),
+                            "ENTRA_CERT_THUMBPRINT": os.environ.get("ENTRA_CERT_THUMBPRINT", ""),
+                            # Application d'indexation SharePoint (§13)
+                            "SP_CLIENT_ID": os.environ.get("SP_CLIENT_ID", ""),
+                            "SP_CERT_THUMBPRINT": os.environ.get("SP_CERT_THUMBPRINT", ""),
+                            "SP_KEY_PATH": os.environ.get("SP_KEY_PATH", ""),
+                            "SP_SITES": sp_sites,
+                            "SP_EXCLUDE_DRIVES": os.environ.get("SP_EXCLUDE_DRIVES", ""),
+                            "SP_MAX_FILE_MB": os.environ.get("SP_MAX_FILE_MB", ""),
+                            # Déchiffrement Purview (§14)
+                            "MIP_URL": MIP_URL,
+                            "MIP_TOKEN": MIP_TOKEN,
+                        }
+                    )
+                    rapport["sharepoint"]["returncode"] = result.returncode
+                    appliquer_resultat_droits("sharepoint", result.returncode, sp_rapport)
+                    passages_droits.add("sharepoint")
+                    codes_droits["sharepoint"] = result.returncode
+                    try:
+                        with open(sp_rapport, "r", encoding="utf-8") as rf:
+                            sp_data = json.load(rf)
+                        rapport["sharepoint"]["totaux"] = sp_data.get("totaux", {})
+                        rapport["sharepoint"]["identifiants_introuvables"] = len(
+                            sp_data.get("identifiants_introuvables", {}))
+                    except Exception as e:
+                        logger.warning(f"[SYNC] Rapport SharePoint illisible : {e}")
+                    if result.returncode != 0:
+                        rapport["errors"].append(f"sp_indexer.py a retourné code {result.returncode}")
+                        logger.error(f"[SYNC] sp_indexer.py erreur : {(result.stderr or result.stdout)[-300:]}")
+                    else:
+                        logger.info("[SYNC] sp_indexer.py terminé avec succès")
+                except subprocess.TimeoutExpired:
+                    msg = "sp_indexer.py timeout"
+                    rapport["errors"].append(msg)
+                    logger.error(f"[SYNC] {msg}")
+                    if "sharepoint" not in passages_droits:
+                        appliquer_resultat_droits("sharepoint", None, "")
+                        codes_droits["sharepoint"] = None
+                except Exception as e:
+                    msg = f"sp_indexer.py exception : {e}"
+                    rapport["errors"].append(msg)
+                    logger.error(f"[SYNC] {msg}")
+                    if "sharepoint" not in passages_droits:
+                        appliquer_resultat_droits("sharepoint", None, "")
+                        codes_droits["sharepoint"] = None
 
         # ── Résumé ────────────────────────────────────────────────────────
-        # Registre absent ou illisible au démarrage : levé seulement quand chaque
-        # origine configurée vient de faire un passage complet (2.21.6).
+        # Résultat enregistré, puis marqueur retiré (2.21.7). L'état inconnu du
+        # démarrage (registre absent, illisible, ou synchronisation inachevée) est
+        # levé quand chaque origine configurée a TERMINÉ son passage (code 0 ou 2) :
+        # un passage terminé réécrit les droits de tous les documents et retrouve
+        # tous les échecs, il reconstruit donc la liste complète.
         sp_actif = bool(os.getenv("SP_SITES", "") and os.getenv("SP_CLIENT_ID", ""))
         origines = {"smb", "sharepoint"} if sp_actif else {"smb"}
-        if origines <= passages_droits and not any(_etat["incertain"][o] for o in origines):
-            lever_incertitude_registre()
-            enregistrer_bloques()
+        if droits_autorises:
+            if enregistrer_bloques():
+                retirer_marqueur()
+                if all(codes_droits.get(o) in (0, 2) for o in origines):
+                    lever_incertitude_registre()
         if _registre_incertain:
-            rapport["errors"].append("Registre des documents retirés absent ou illisible : "
-                                     "questions suspendues jusqu'à une synchronisation complète")
-        if not _registre_ok:
-            rapport["errors"].append("Registre des documents retirés non enregistré sur le disque (/var/log/rag)")
+            rapport["errors"].append("État des documents retirés inconnu (registre absent ou illisible, ou "
+                                     "synchronisation inachevée) : questions suspendues jusqu'à une "
+                                     "synchronisation terminée")
+        if _persistance_ko:
+            rapport["errors"].append("Registre des documents retirés non enregistré sur le disque (/var/log/rag) : "
+                                     "questions suspendues jusqu'à une écriture réussie")
         if any(_etat["incertain"].values()):
             rapport["errors"].append("Dernier passage des droits incomplet : les documents retirés restent retirés "
                                      "jusqu'à un passage complet" + (" ; origine suspendue (ACL_INCERTAIN_FERME=1)"

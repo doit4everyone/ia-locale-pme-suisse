@@ -177,12 +177,25 @@ Défaut voisin, sans effet sur les droits : la synchronisation cherchait le stat
 - **SharePoint : site ou bibliothèque illisible.** Le rapport nomme le périmètre dont l'inventaire n'a pas abouti ; la RAG API le retire de la recherche jusqu'à un passage complet, sans vider la liste existante ;
 - **registre atomique.** `acl_bloques.json` est écrit dans un fichier temporaire, forcé sur le disque, puis renommé : une coupure laisse l'ancienne version intacte. Un échec d'écriture est signalé dans la synchronisation ;
 - **registre absent ou illisible au démarrage : aucune question servie** (HTTP 503, « Vérification des droits en cours ») jusqu'à une synchronisation complète. `deploy.sh` le crée vide à l'installation : son absence ensuite est anormale. Le contrôle d'accès du §16.2 refuse aussi, et le test de non-divulgation affiche une `ERREUR` ;
-- **option `ACL_INCERTAIN_FERME`.** Un passage abandonné (annuaire ou partage injoignable, garde-fou) ou interrompu garde par défaut les derniers droits connus : c'est l'arbitrage du §5.4 entre disponibilité et fraîcheur des droits. Avec `ACL_INCERTAIN_FERME=1` dans le `.env`, tous les documents de l'origine concernée (partage ou SharePoint) sont suspendus jusqu'à un passage complet. Plus sûr, mais une panne de l'annuaire rend alors l'assistant muet.
+- **option `ACL_INCERTAIN_FERME`.** Un passage abandonné (annuaire ou partage injoignable, garde-fou) ou interrompu : avec 1, tous les documents de l'origine concernée (partage ou SharePoint) sont suspendus jusqu'à un passage complet ; avec 0, les derniers droits connus sont conservés. C'est l'arbitrage du §5.4 entre disponibilité et fraîcheur des droits. **Depuis la 2.21.7, la valeur par défaut est 1** (voir plus bas).
+
+**Compléments de la 2.21.7**, à la suite d'une cinquième revue :
+
+- **un registre non enregistré n'est plus jamais perdu au redémarrage.** En 2.21.6, un échec d'écriture du registre était signalé, mais les questions restaient servies, et un redémarrage relisait l'ancien registre, sans les documents retirés depuis. Désormais, tant que le registre n'a pas pu être écrit, **aucune question n'est servie**. Et un **marqueur** « synchronisation des droits en cours » est posé avant toute modification des droits, puis retiré seulement quand le résultat est écrit : présent au démarrage, il signale un résultat peut-être perdu, et les questions sont refusées jusqu'à une synchronisation terminée. Si le marqueur ne peut pas être écrit, les droits ne sont pas synchronisés du tout ;
+- **registre validé strictement** : version de schéma, listes de chemins, indicateurs booléens. Un registre lisible mais mal formé (`{}`, une chaîne à la place d'une liste) est traité comme illisible : questions refusées ;
+- **dossier synchronisé après le renommage**, pour que le remplacement du registre survive à une coupure brutale ;
+- **`ACL_INCERTAIN_FERME=1` par défaut.** Le guide vise des documents RH, financiers et clients : la fermeture est le bon défaut. Une organisation qui préfère la disponibilité met 0 dans le `.env`, en connaissance de cause ;
+- **reprise sans intervention** : une synchronisation terminée (code 0 ou 2) réécrit les droits de tous les documents et retrouve tous les échecs. Elle reconstruit donc la liste complète et lève le refus, même si le registre avait été perdu.
 
 **Limites.**
 
-- Par défaut (`ACL_INCERTAIN_FERME=0`), un passage abandonné ou interrompu laisse en place les droits du passage précédent pour les documents qui n'étaient pas déjà retirés. L'alerte part à chaque synchronisation tant qu'aucun passage complet n'a abouti.
-- Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par les tests unitaires, Qdrant simulé (`test_echec_droits.py`, 23 tests).
+- Avec `ACL_INCERTAIN_FERME=0`, un passage abandonné ou interrompu laisse en place les droits du passage précédent pour les documents qui n'étaient pas déjà retirés. L'alerte part à chaque synchronisation tant qu'aucun passage complet n'a abouti.
+- Un redémarrage de la RAG API pendant une synchronisation laisse le marqueur : les questions sont refusées jusqu'à la synchronisation suivante, au plus une heure, ou tout de suite par une synchronisation lancée à la main.
+- Le registre et le marqueur sont sur le même disque (`/var/log/rag`, disque chiffré) : un disque plein les rend impossibles à écrire, et l'assistant refuse alors toute question. C'est voulu : un état qu'on ne peut pas enregistrer ne protège rien.
+- L'alerte Push vers la supervision n'existe que si le nœud n8n correspondant a été activé (§16.10) ; le courriel, lui, part sans réglage supplémentaire.
+- Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par les tests unitaires, Qdrant simulé (`test_echec_droits.py`, 31 tests).
+
+> **Validé sur la VM de test, 20 octobre 2026 (2.21.7) :** 31 et 14 tests unitaires OK dans le conteneur ; registre de la 2.21.6 accepté au démarrage ; synchronisation interrompue simulée (marqueur posé à la main, RAG API redémarrée) : `Synchronisation des droits inachevée`, question refusée dans Open WebUI ; synchronisation lancée : `questions de nouveau servies`, `success=True`, question de nouveau servie ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO).
 
 > **Validé sur la VM de test, 20 octobre 2026 :** 23 et 14 tests unitaires OK dans le conteneur. Le registre n'existait pas sur cette installation, antérieure à la 2.21.6 : au démarrage, la RAG API a journalisé `Registre ... absent : ... AUCUNE question servie`. Une synchronisation a levé le refus (`questions de nouveau servies`, `success=True`) et créé le registre (droits 640). Après un redémarrage de la RAG API, le registre a été relu sans nouvelle alerte. Registre mis de côté puis RAG API redémarrée : une question posée dans Open WebUI a reçu « Vérification des droits en cours : réessayer après la prochaine synchronisation », sans réponse. La synchronisation horaire suivante a recréé le registre et levé le refus d'elle-même. Droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO).
 
@@ -382,8 +395,9 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
-| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `23 tests OK` |
-| Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json` | Présent ; s'il manque, questions refusées jusqu'à une synchronisation complète |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `31 tests OK` |
+| Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json*` | Registre présent, pas de `.en_cours` hors synchronisation ; sinon, questions refusées jusqu'à une synchronisation terminée |
+| Fermeture si les droits sont incertains | `grep ACL_INCERTAIN_FERME /root/rag-stack/.env` | 1, ou absent (1 par défaut) ; 0 seulement par choix documenté |
 | Documents retirés de la recherche | `docker logs rag-api 2>&1 \| grep DROITS` | Aucune ligne, ou documents nommés et alerte reçue |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |

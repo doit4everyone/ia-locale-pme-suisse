@@ -4,6 +4,29 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.7] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une cinquième revue externe : un registre des documents retirés qui n'avait pas pu être écrit était perdu au redémarrage, et les documents retirés depuis redevenaient visibles (points 141 à 143, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 31 et 14 tests unitaires OK ; synchronisation interrompue simulée, questions refusées puis servies après une synchronisation ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Sécurité
+
+- `api/anon_main.py` : questions refusées tant que le registre n'est pas écrit ; marqueur « synchronisation des droits en cours » posé avant les étapes des droits, retiré après l'écriture du résultat, et contrôlé au démarrage ; marqueur impossible à écrire, droits non synchronisés ; validation stricte du registre ; dossier synchronisé après le renommage ; refus levé par une synchronisation terminée (code 0 ou 2).
+- `api/anon_main.py`, `docker-compose.yml`, `env.example` : `ACL_INCERTAIN_FERME` à 1 par défaut.
+- `deploy.sh` : en-tête en 2.21.7.
+
+### Tests
+
+- `test_echec_droits.py` : 8 tests ajoutés, 31 au total.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.2, compléments de la 2.21.7 et limites ; checklist.
+- `section-03-docker-compose.md` : nouvelle valeur par défaut.
+- `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md` : 31 tests.
+- `suivi-corrections.md` : points 141 à 143.
+
+---
+
 ## [2.21.6] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une quatrième revue externe : deux chemins rendaient encore visibles des documents aux droits périmés, dont un introduit par la 2.21.5 (points 138 à 140, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 23 et 14 tests unitaires OK ; registre absent, questions refusées au démarrage (Open WebUI : « Vérification des droits en cours ») puis servies après une synchronisation complète ; registre relu après redémarrage ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).

@@ -132,6 +132,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 138 | `sp_indexer.py` : un fichier déjà indexé qui dépassait ensuite `SP_MAX_FILE_MB` sortait sans relecture des droits ni suppression : anciens extraits et anciens droits conservés, sans alerte. Extraits supprimés ; suppression refusée = fichier en erreur, retiré de la recherche. Signalé par une quatrième revue externe | v2.21.6 | 2026-10-20 |
 | 139 | RAG API (2.21.5) : un passage avec le code 2 remplaçait la liste des documents retirés ; une lecture des orphelins en échec, seul incident, la vidait et rendait visibles des documents retirés. Seul un passage complet retire des documents de la liste ; un passage incomplet ajoute les orphelins probables, ou tout le partage si leur inventaire échoue ; site ou bibliothèque SharePoint illisible retiré par périmètre. Signalé par une quatrième revue externe | v2.21.6 | 2026-10-20 |
 | 140 | Registre `acl_bloques.json` : écriture non atomique ; absent ou illisible au démarrage, la RAG API démarrait sans rien retirer. Écriture atomique avec incident signalé ; registre créé vide par `deploy.sh` ; absent ou illisible, questions refusées (503) jusqu'à une synchronisation complète. Option `ACL_INCERTAIN_FERME` pour suspendre une origine après un passage abandonné ou interrompu. Signalé par une quatrième revue externe. VM de test : refus au démarrage sans registre, levée par une synchronisation complète, registre relu après redémarrage | v2.21.6 | 2026-10-20 |
+| 141 | RAG API (2.21.6) : un échec d'écriture du registre était signalé mais les questions restaient servies ; après un redémarrage, l'ancien registre était relu comme valide, sans les documents retirés depuis. Questions refusées tant que le registre n'est pas écrit ; marqueur « synchronisation des droits en cours » posé avant toute modification des droits et retiré après l'écriture du résultat ; présent au démarrage, questions refusées jusqu'à une synchronisation terminée ; marqueur impossible à écrire, droits non synchronisés. Dossier synchronisé après le renommage. Signalé par une cinquième revue externe. VM de test : synchronisation interrompue simulée, questions refusées puis servies après une synchronisation | v2.21.7 | 2026-10-20 |
+| 142 | Registre lisible mais mal formé (`{}`, chaîne au lieu d'une liste, version inconnue) accepté sans contrôle. Validation stricte du schéma ; toute anomalie = état inconnu, questions refusées. Signalé par une cinquième revue externe | v2.21.7 | 2026-10-20 |
+| 143 | `ACL_INCERTAIN_FERME` valait 0 par défaut : après un passage abandonné ou interrompu, les derniers droits connus restaient appliqués. Défaut à 1 : origine suspendue jusqu'à un passage complet ; 0 reste possible par choix documenté | v2.21.7 | 2026-10-20 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -278,6 +281,15 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.7 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.2 | Compléments de la 2.21.7, limites revues (redémarrage pendant une synchronisation, disque plein, alerte Push) ; checklist | v2.21.7 |
+| §3 | `ACL_INCERTAIN_FERME` à 1 par défaut dans l'extrait du Compose | v2.21.7 |
 
 ---
 
