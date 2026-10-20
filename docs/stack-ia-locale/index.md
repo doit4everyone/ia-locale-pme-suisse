@@ -83,7 +83,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | [§9 Sécurité et durcissement](section-09-securite.md) | UFW, TLS LDAP, frontal HTTPS Nginx et renouvellement du certificat, journalisation nLPD, rotation svc-rag, injection prompt | Publié |
 | [§10 Validation et performances sur GPU](section-10-gpu.md) | Passage sur GPU, placement des modèles, méthode de mesure, choix des modèles, construction du contexte, reranker, limites du corpus, Ollama contre vLLM | Publié |
 
-> **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés en lab pour ces sections sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les scripts du dossier principal évoluent avec la Partie 3, en restant compatibles avec la stack SMB.
+> **Version à utiliser :** la [dernière Release](https://github.com/doit4everyone/ia-locale-pme-suisse/releases/latest), pour toutes les parties. Elle contient les correctifs de sécurité du cloisonnement (§16.5), qui concernent aussi le partage de fichiers des Parties 1 et 2. **Référence historique :** les scripts tels qu'ils avaient été validés pour les Parties 1 et 2 restent consultables dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale), sans ces correctifs.
 
 ### Partie 3 : Microsoft 365
 

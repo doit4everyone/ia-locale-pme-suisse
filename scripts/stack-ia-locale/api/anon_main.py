@@ -208,84 +208,212 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────
-# Documents retirés de la recherche (2.21.5, §16.5.2)
+# Documents retirés de la recherche (2.21.5, 2.21.6, §16.5.2)
 # ─────────────────────────────────────────
 # Quand acl_resolver.py ou sp_indexer.py n'a pas pu écrire les droits d'un
 # document dans Qdrant, ses droits dans Qdrant ne sont plus ceux de la source :
 # un droit retiré sur le partage y resterait accordé. Ces documents sont retirés
-# de toute recherche jusqu'à une écriture réussie. La liste est gardée sur le
-# disque chiffré, pour survivre à un redémarrage de la RAG API.
+# de toute recherche jusqu'à une écriture réussie.
+#
+# Règle (2.21.6) : seul un passage COMPLET (code 0) retire des documents de la
+# liste. Un passage incomplet (inventaire des orphelins en échec, site ou
+# bibliothèque illisible, garde-fou, interruption) ne fait qu'ajouter : il ne
+# prouve pas que les documents retirés sont redevenus sûrs.
+#
+# Le registre est gardé sur le disque chiffré (écriture atomique). S'il est
+# absent ou illisible au démarrage, l'état des droits est inconnu : aucune
+# question n'est servie jusqu'à une synchronisation complète. deploy.sh le crée
+# vide à l'installation ; son absence ensuite est anormale.
 FICHIER_BLOQUES = os.getenv("ACL_BLOQUES_FICHIER", "/var/log/rag/acl_bloques.json")
-_bloques: dict[str, set[str]] = {"smb": set(), "sharepoint": set()}
+# Option : périmètre incertain fermé. Avec 1, un passage incomplet suspend tous
+# les documents de son origine (partage ou SharePoint) jusqu'à un passage
+# complet. Par défaut 0 : derniers droits connus conservés (§5.4, §16.5.2).
+ACL_INCERTAIN_FERME = os.getenv("ACL_INCERTAIN_FERME", "0").strip() == "1"
+PREFIXE_SP = "SharePoint/"
+
+
+def _etat_vide() -> dict:
+    return {"smb": set(), "sharepoint": set(), "prefixes": set(),
+            "smb_tout": False, "sharepoint_tout": False,
+            "incertain": {"smb": False, "sharepoint": False}}
+
+
+_etat = _etat_vide()
+_registre_incertain = False   # registre absent ou illisible au démarrage
+_registre_ok = True           # dernière écriture du registre réussie
 
 
 def sources_bloquees() -> set[str]:
-    return _bloques["smb"] | _bloques["sharepoint"]
+    """Documents retirés nommément (pour le rapport de synchronisation)."""
+    return _etat["smb"] | _etat["sharepoint"]
 
 
-def enregistrer_bloques(chemin: str | None = None) -> None:
+def est_bloque(source: str) -> bool:
+    if source in _etat["smb"] or source in _etat["sharepoint"]:
+        return True
+    if any(source.startswith(p) for p in _etat["prefixes"]):
+        return True
+    est_sp = source.startswith(PREFIXE_SP)
+    return (_etat["smb_tout"] and not est_sp) or (_etat["sharepoint_tout"] and est_sp)
+
+
+def nombre_retires() -> int:
+    return (len(sources_bloquees()) + len(_etat["prefixes"])
+            + int(_etat["smb_tout"]) + int(_etat["sharepoint_tout"]))
+
+
+def enregistrer_bloques(chemin: str | None = None) -> bool:
+    """Écriture atomique : fichier temporaire complet, fsync, puis renommage.
+    En cas d'échec, l'ancienne version reste en place et l'incident est signalé."""
+    global _registre_ok
     chemin = chemin or FICHIER_BLOQUES
+    tmp = f"{chemin}.tmp"
     try:
-        with open(chemin, "w", encoding="utf-8") as f:
-            json.dump({"maj": datetime.now(timezone.utc).isoformat(),
-                       "smb": sorted(_bloques["smb"]),
-                       "sharepoint": sorted(_bloques["sharepoint"])}, f, ensure_ascii=False, indent=2)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": 2, "maj": datetime.now(timezone.utc).isoformat(),
+                       "smb": sorted(_etat["smb"]), "sharepoint": sorted(_etat["sharepoint"]),
+                       "prefixes": sorted(_etat["prefixes"]),
+                       "smb_tout": _etat["smb_tout"], "sharepoint_tout": _etat["sharepoint_tout"],
+                       "incertain": _etat["incertain"]}, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, chemin)
+        _registre_ok = True
     except OSError as e:
-        logger.error(f"[DROITS] Liste des documents retirés non enregistrée ({e}) : "
-                     "elle serait perdue au prochain redémarrage")
+        _registre_ok = False
+        logger.error(f"[DROITS] Registre des documents retirés NON enregistré ({e}) : "
+                     "l'ancienne version reste en place ; la liste en mémoire s'applique jusqu'au redémarrage")
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return _registre_ok
 
 
 def charger_bloques(chemin: str | None = None) -> None:
+    """Au démarrage. Absent ou illisible : état inconnu, questions suspendues."""
+    global _etat, _registre_incertain
     chemin = chemin or FICHIER_BLOQUES
+    _etat = _etat_vide()
     try:
         with open(chemin, "r", encoding="utf-8") as f:
             d = json.load(f)
-        _bloques["smb"] = set(d.get("smb", []))
-        _bloques["sharepoint"] = set(d.get("sharepoint", []))
-    except FileNotFoundError:
-        _bloques["smb"], _bloques["sharepoint"] = set(), set()
-        return
+        if not isinstance(d, dict):
+            raise ValueError("contenu inattendu")
+        _etat["smb"] = set(d.get("smb", []))
+        _etat["sharepoint"] = set(d.get("sharepoint", []))
+        _etat["prefixes"] = set(d.get("prefixes", []))
+        _etat["smb_tout"] = bool(d.get("smb_tout", False))
+        _etat["sharepoint_tout"] = bool(d.get("sharepoint_tout", False))
+        inc = d.get("incertain", {})
+        _etat["incertain"] = {"smb": bool(inc.get("smb", False)),
+                              "sharepoint": bool(inc.get("sharepoint", False))}
+        _registre_incertain = False
     except Exception as e:
-        logger.critical(f"[DROITS] {chemin} illisible ({e}) : aucun document retiré de la recherche. "
-                        "Lancer une synchronisation pour rétablir la liste")
+        _registre_incertain = True
+        motif = "absent" if isinstance(e, FileNotFoundError) else f"illisible ({e})"
+        logger.critical(f"[DROITS] Registre {chemin} {motif} : état des droits inconnu, "
+                        "AUCUNE question servie jusqu'à une synchronisation complète (§16.5.2)")
         return
-    if sources_bloquees():
-        logger.warning(f"[DROITS] {len(sources_bloquees())} document(s) retiré(s) de la recherche : "
-                       "droits non écrits lors de la dernière synchronisation")
+    if nombre_retires():
+        logger.warning(f"[DROITS] {nombre_retires()} document(s) ou périmètre(s) retiré(s) de la recherche "
+                       "lors de la dernière synchronisation")
 
 
-def appliquer_resultat_droits(origine: str, returncode: int, rapport_path: str) -> int:
+def _orphelins_probables(rapport: dict) -> set[str] | None:
+    """Inventaire des orphelins en échec côté acl_resolver.py : sources du partage
+    présentes dans Qdrant mais absentes de la liste des fichiers lus. None si
+    Qdrant ne peut pas être lu non plus."""
+    partage = {d.get("source_name") for d in rapport.get("documents", []) if d.get("source_name")}
+    try:
+        existantes = {c.name for c in qdrant.get_collections().collections}
+        sources = set()
+        for collection in (COLLECTION, DOCUMENTATION_COLLECTION):
+            if collection in existantes:
+                for pt in _scroll_tout(collection):
+                    src = pt.payload.get("source", "")
+                    if src and not src.startswith(PREFIXE_SP) and pt.payload.get("source_type", "smb") != "sharepoint":
+                        sources.add(src)
+    except Exception as e:
+        logger.error(f"[DROITS] Inventaire des orphelins impossible depuis la RAG API ({e})")
+        return None
+    return sources - partage
+
+
+def appliquer_resultat_droits(origine: str, returncode, rapport_path: str) -> int:
     """
     Met à jour la liste des documents retirés après un passage de acl_resolver.py
     (origine « smb ») ou de sp_indexer.py (« sharepoint »).
-      code 0 : tous les droits ont été écrits, la liste de cette origine est vidée ;
-      code 2 : passage terminé avec des échecs, la liste devient celle du rapport ;
-      autre  : aucun droit écrit (garde-fou) ou issue inconnue, liste inchangée.
-    Renvoie le nombre de documents retirés pour cette origine.
+      code 0 : passage complet, tous les droits écrits : la liste de cette origine
+               est remplacée (vidée) ;
+      code 2 : passage avec échecs. Inventaire complet : la liste devient celle du
+               rapport. Inventaire incomplet : elle ne fait que grandir ;
+      autre  : passage abandonné ou interrompu : liste inchangée, origine marquée
+               incertaine (et fermée si ACL_INCERTAIN_FERME=1).
+    Renvoie le nombre de documents et de périmètres retirés, toutes origines.
     """
+    tout = f"{origine}_tout"
     if returncode == 0:
-        nouveaux: set[str] = set()
-    elif returncode == 2:
-        try:
-            with open(rapport_path, "r", encoding="utf-8") as f:
-                d = json.load(f)
-        except Exception as e:
-            logger.error(f"[DROITS] Rapport {rapport_path} illisible ({e}) : liste des documents retirés inchangée")
-            return len(_bloques[origine])
-        if origine == "smb":
+        _etat[origine] = set()
+        _etat[tout] = False
+        _etat["incertain"][origine] = False
+        if origine == "sharepoint":
+            _etat["prefixes"] = set()
+    else:
+        complet = False
+        d = None
+        if returncode == 2:
+            try:
+                with open(rapport_path, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+            except Exception as e:
+                logger.error(f"[DROITS] Rapport {rapport_path} illisible ({e}) : passage traité comme incomplet")
+        if d is not None and origine == "smb":
             nouveaux = set(d.get("echecs_ecriture", [])) | set(d.get("echecs_suppression", []))
-        else:
+            if d.get("echecs_lecture_orphelins"):
+                probables = _orphelins_probables(d)
+                if probables is None:
+                    _etat["smb_tout"] = True   # inventaire impossible : tout le partage
+                else:
+                    nouveaux |= probables
+                _etat["smb"] |= nouveaux
+            else:
+                complet = True
+                _etat["smb"] = nouveaux
+                _etat["smb_tout"] = False
+        elif d is not None:
             nouveaux = {f.get("source", "") for site in d.get("sites", [])
                         for f in site.get("fichiers", []) if f.get("statut") == "erreur"} - {""}
-    else:
-        return len(_bloques[origine])
-    if nouveaux != _bloques[origine]:
-        _bloques[origine] = nouveaux
-        enregistrer_bloques()
-    if nouveaux:
-        logger.error(f"[DROITS] {origine} : {len(nouveaux)} document(s) retiré(s) de la recherche, "
-                     "droits non écrits dans Qdrant")
-    return len(nouveaux)
+            prefixes = {p for site in d.get("sites", []) for p in site.get("prefixes_incomplets", [])}
+            sites_sans_perimetre = [site for site in d.get("sites", [])
+                                    if site.get("erreurs") and not site.get("prefixes_incomplets")]
+            if prefixes or sites_sans_perimetre:
+                _etat["sharepoint"] |= nouveaux
+                _etat["prefixes"] |= prefixes
+                if sites_sans_perimetre:
+                    _etat["sharepoint_tout"] = True
+            else:
+                complet = True
+                _etat["sharepoint"] = nouveaux
+                _etat["prefixes"] = set()
+                _etat["sharepoint_tout"] = False
+        _etat["incertain"][origine] = not complet
+        if not complet and ACL_INCERTAIN_FERME:
+            _etat[tout] = True
+    enregistrer_bloques()
+    n = nombre_retires()
+    if n:
+        logger.error(f"[DROITS] {n} document(s) ou périmètre(s) retiré(s) de la recherche "
+                     f"(dernier passage {origine} : code {returncode})")
+    return n
+
+
+def lever_incertitude_registre() -> None:
+    """Après une synchronisation complète : l'état des droits est de nouveau connu."""
+    global _registre_incertain
+    if _registre_incertain:
+        _registre_incertain = False
+        logger.warning("[DROITS] Synchronisation complète : questions de nouveau servies")
 
 
 # ─────────────────────────────────────────
@@ -763,6 +891,10 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     if not user_groups:
         logger.error("[AUTH] Recherche demandée sans groupes : refus")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
+    if _registre_incertain:
+        logger.error("[DROITS] Registre des documents retirés absent ou illisible : question refusée")
+        raise HTTPException(status_code=503, detail="Vérification des droits en cours : "
+                            "réessayer après la prochaine synchronisation")
     try:
         embedding = await get_embedding(query)
 
@@ -820,9 +952,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
             })
 
         # Documents dont les droits n'ont pas pu être écrits : jamais renvoyés
-        bloques = sources_bloquees()
-        if bloques:
-            vec_results = [c for c in vec_results if c["source"] not in bloques]
+        vec_results = [c for c in vec_results if not est_bloque(c["source"])]
 
         # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
         bm25_results = []
@@ -845,8 +975,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                 if len(bm25_results) >= top_k:
                     break
             bm25_results = revalider_bm25(bm25_results, user_groups)
-            if bloques:
-                bm25_results = [c for c in bm25_results if c["source"] not in bloques]
+            bm25_results = [c for c in bm25_results if not est_bloque(c["source"])]
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
         # Clé = empreinte du texte (voir la docstring : choix mesuré).
@@ -1920,6 +2049,8 @@ async def calculer_acces(user_id: str, document: str, correspondance: str = "exa
     user_groups = get_user_groups(user_id)
     if not user_groups:
         raise PermissionError("Résolution des droits impossible")
+    if _registre_incertain:
+        raise RuntimeError("Registre des documents retirés absent ou illisible (§16.5.2)")
     filtre = Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=user_groups))])
     try:
         existantes = {c.name for c in qdrant.get_collections().collections}
@@ -1939,12 +2070,11 @@ async def calculer_acces(user_id: str, document: str, correspondance: str = "exa
         total += len(concernes)
         correspondantes.update(p.payload.get("source", "") for p in concernes)
         candidats = []
-        bloques = sources_bloquees()
         for p in filtres:
             if not _correspond(p.payload.get("source", ""), document, correspondance):
                 continue
             # Document retiré de la recherche : droits non écrits (§16.5.2)
-            if p.payload.get("source", "") in bloques:
+            if est_bloque(p.payload.get("source", "")):
                 continue
             # Seconde partie de la première condition : DENY prioritaire
             if not check_access(user_groups, p.payload.get("autorises", []), p.payload.get("interdits", [])):
@@ -2122,6 +2252,7 @@ async def admin_sync(
 
         # ── Étape 2 : acl_resolver.py ────────────────────────────────────
         resolver_script = f"{SYNC_SCRIPTS_DIR}/acl_resolver.py"
+        passages_droits: set[str] = set()   # origines dont le résultat a été appliqué
         try:
             logger.info("[SYNC] Lancement de acl_resolver.py")
             result = await asyncio.to_thread(
@@ -2152,6 +2283,7 @@ async def admin_sync(
             )
             rapport["acl_resolver"]["returncode"] = result.returncode
             retires = appliquer_resultat_droits("smb", result.returncode, "/var/log/rag/rapport_acl.json")
+            passages_droits.add("smb")
             if result.returncode == 2:
                 rapport["errors"].append(
                     f"acl_resolver.py : droits non écrits dans Qdrant, {retires} document(s) "
@@ -2177,9 +2309,13 @@ async def admin_sync(
             msg = "acl_resolver.py timeout (>5 min)"
             rapport["errors"].append(msg)
             logger.error(f"[SYNC] {msg}")
+            if "smb" not in passages_droits:
+                appliquer_resultat_droits("smb", None, "")   # passage interrompu : incertain
         except Exception as e:
             msg = f"acl_resolver.py exception : {e}"
             rapport["errors"].append(msg)
+            if "smb" not in passages_droits:
+                appliquer_resultat_droits("smb", None, "")
             logger.error(f"[SYNC] {msg}")
 
         # ── Étape 3 : sp_indexer.py (SharePoint Online, Partie 3) ────────
@@ -2237,6 +2373,7 @@ async def admin_sync(
                 )
                 rapport["sharepoint"]["returncode"] = result.returncode
                 appliquer_resultat_droits("sharepoint", result.returncode, sp_rapport)
+                passages_droits.add("sharepoint")
                 try:
                     with open(sp_rapport, "r", encoding="utf-8") as rf:
                         sp_data = json.load(rf)
@@ -2254,13 +2391,35 @@ async def admin_sync(
                 msg = "sp_indexer.py timeout"
                 rapport["errors"].append(msg)
                 logger.error(f"[SYNC] {msg}")
+                if "sharepoint" not in passages_droits:
+                    appliquer_resultat_droits("sharepoint", None, "")
             except Exception as e:
                 msg = f"sp_indexer.py exception : {e}"
                 rapport["errors"].append(msg)
                 logger.error(f"[SYNC] {msg}")
+                if "sharepoint" not in passages_droits:
+                    appliquer_resultat_droits("sharepoint", None, "")
 
         # ── Résumé ────────────────────────────────────────────────────────
+        # Registre absent ou illisible au démarrage : levé seulement quand chaque
+        # origine configurée vient de faire un passage complet (2.21.6).
+        sp_actif = bool(os.getenv("SP_SITES", "") and os.getenv("SP_CLIENT_ID", ""))
+        origines = {"smb", "sharepoint"} if sp_actif else {"smb"}
+        if origines <= passages_droits and not any(_etat["incertain"][o] for o in origines):
+            lever_incertitude_registre()
+            enregistrer_bloques()
+        if _registre_incertain:
+            rapport["errors"].append("Registre des documents retirés absent ou illisible : "
+                                     "questions suspendues jusqu'à une synchronisation complète")
+        if not _registre_ok:
+            rapport["errors"].append("Registre des documents retirés non enregistré sur le disque (/var/log/rag)")
+        if any(_etat["incertain"].values()):
+            rapport["errors"].append("Dernier passage des droits incomplet : les documents retirés restent retirés "
+                                     "jusqu'à un passage complet" + (" ; origine suspendue (ACL_INCERTAIN_FERME=1)"
+                                                                     if ACL_INCERTAIN_FERME else ""))
         rapport["documents_retires"] = sorted(sources_bloquees())
+        rapport["perimetres_retires"] = sorted(_etat["prefixes"]) + \
+            (["partage entier"] if _etat["smb_tout"] else []) + (["SharePoint entier"] if _etat["sharepoint_tout"] else [])
         rapport["success"] = len(rapport["errors"]) == 0
         rapport["quarantine_count"] = len(rapport["quarantine"])
 

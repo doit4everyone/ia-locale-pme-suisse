@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.6] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une quatrième revue externe : deux chemins rendaient encore visibles des documents aux droits périmés, dont un introduit par la 2.21.5 (points 138 à 140, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 23 et 14 tests unitaires OK ; registre absent, questions refusées au démarrage (Open WebUI : « Vérification des droits en cours ») puis servies après une synchronisation complète ; registre relu après redémarrage ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Sécurité
+
+- `sp_indexer.py` : fichier devenu trop volumineux, extraits supprimés au lieu d'être conservés avec leurs anciens droits ; périmètres incomplets (site ou bibliothèque illisible) nommés dans le rapport.
+- `api/anon_main.py` : seul un passage complet retire des documents de la liste ; un passage incomplet ajoute (orphelins probables, tout le partage si leur inventaire échoue, périmètres SharePoint incomplets) ; registre écrit de façon atomique, échec signalé ; registre absent ou illisible au démarrage, questions refusées (503) jusqu'à une synchronisation complète ; option `ACL_INCERTAIN_FERME`.
+- `deploy.sh` : registre créé vide à l'installation ; en-tête en 2.21.6.
+- `docker-compose.yml`, `env.example` : `ACL_INCERTAIN_FERME` (0 par défaut).
+
+### Tests
+
+- `test_echec_droits.py` : 11 tests ajoutés, 23 au total.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.2, compléments et limites ; checklist.
+- `index.md` du guide : dernière Release à utiliser ; v2.12.0 en référence historique.
+- `section-03-docker-compose.md`, `section-13-sharepoint.md` : nouvelle variable, limite de taille.
+- `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md` : 23 tests.
+- `suivi-corrections.md` : points 138 à 140.
+
+---
+
 ## [2.21.5] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une troisième revue externe du code : un échec d'écriture des droits dans Qdrant passait pour un fichier non indexé, sans alerte, et le document gardait ses anciens droits (points 135 à 137, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 12 et 14 tests unitaires OK, synchronisation réelle réussie sans document retiré, droit retiré sur le vrai Qdrant OK, test de non-divulgation inchangé (70 OK, 2 INFO).

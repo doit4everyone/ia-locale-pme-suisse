@@ -129,6 +129,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 135 | `acl_resolver.py` : une erreur de Qdrant pendant l'écriture des droits renvoyait 0, lu comme « non indexé » ; code de sortie 0, synchronisation réussie, aucune alerte, anciens droits conservés dans Qdrant. Même défaut pour la fermeture d'un fichier aux ACL illisibles, la suppression des extraits d'un fichier effacé et la lecture des orphelins. Signalé par une troisième revue externe ; reproduit sur le code de la 2.21.4 (Qdrant simulé). Trois issues distinctes, seconde tentative, code 2 et rapport ; synchronisation en échec et alerte ; documents retirés de la recherche jusqu'au prochain passage sans échec, liste gardée sur disque ; même règle pour les fichiers SharePoint en erreur (§16.5.2). VM de test : 12 tests unitaires OK, synchronisation réelle réussie ; échec réel d'écriture non provoqué | v2.21.5 | 2026-10-20 |
 | 136 | `/admin/sync` cherchait le statut `non_indexé` dans le rapport des droits, qui écrit `non_indexe` : les fichiers non indexés n'étaient jamais comptés en quarantaine. Les deux graphies sont acceptées | v2.21.5 | 2026-10-20 |
 | 137 | `deploy.sh` : un fichier de test de sécurité absent sautait le contrôle sans le dire. `test_revalidation_bm25.py` et `test_echec_droits.py` sont obligatoires : absent ou en échec, RAG API arrêtée et déploiement en erreur ; vérifié en simulation | v2.21.5 | 2026-10-20 |
+| 138 | `sp_indexer.py` : un fichier déjà indexé qui dépassait ensuite `SP_MAX_FILE_MB` sortait sans relecture des droits ni suppression : anciens extraits et anciens droits conservés, sans alerte. Extraits supprimés ; suppression refusée = fichier en erreur, retiré de la recherche. Signalé par une quatrième revue externe | v2.21.6 | 2026-10-20 |
+| 139 | RAG API (2.21.5) : un passage avec le code 2 remplaçait la liste des documents retirés ; une lecture des orphelins en échec, seul incident, la vidait et rendait visibles des documents retirés. Seul un passage complet retire des documents de la liste ; un passage incomplet ajoute les orphelins probables, ou tout le partage si leur inventaire échoue ; site ou bibliothèque SharePoint illisible retiré par périmètre. Signalé par une quatrième revue externe | v2.21.6 | 2026-10-20 |
+| 140 | Registre `acl_bloques.json` : écriture non atomique ; absent ou illisible au démarrage, la RAG API démarrait sans rien retirer. Écriture atomique avec incident signalé ; registre créé vide par `deploy.sh` ; absent ou illisible, questions refusées (503) jusqu'à une synchronisation complète. Option `ACL_INCERTAIN_FERME` pour suspendre une origine après un passage abandonné ou interrompu. Signalé par une quatrième revue externe. VM de test : refus au démarrage sans registre, levée par une synchronisation complète, registre relu après redémarrage | v2.21.6 | 2026-10-20 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -275,6 +278,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.6 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.2 | Compléments de la 2.21.6, limites revues ; checklist | v2.21.6 |
+| Sommaire du guide | Dernière Release à utiliser pour toutes les parties ; v2.12.0 présentée comme référence historique | v2.21.6 |
+| §3, §13 | `ACL_INCERTAIN_FERME` dans l'extrait du Compose ; `SP_MAX_FILE_MB` commenté | v2.21.6 |
 
 ---
 

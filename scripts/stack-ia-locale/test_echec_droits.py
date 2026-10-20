@@ -1,5 +1,5 @@
 """
-test_echec_droits.py : tests unitaires des échecs d'écriture des droits (2.21.5, §16.5.2).
+test_echec_droits.py : tests unitaires des échecs d'écriture des droits (2.21.5, 2.21.6, §16.5.2).
 
 Jusqu'à la 2.21.4, une erreur de Qdrant pendant l'écriture des droits d'un
 document le faisait passer pour « non indexé » : acl_resolver.py se terminait
@@ -10,12 +10,16 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
   - acl_resolver.py : trois issues distinctes (mis à jour, non indexé, échec),
     une seconde tentative, le code de sortie 2 et le rapport ;
   - la RAG API : liste des documents retirés de la recherche (code 0, 2, autre),
-    conservation sur disque, exclusion de la recherche et du contrôle d'accès.
+    conservation sur disque, exclusion de la recherche et du contrôle d'accès ;
+  - 2.21.6 : un passage incomplet ne vide jamais la liste (orphelins illisibles,
+    site SharePoint en erreur, passage interrompu), option ACL_INCERTAIN_FERME,
+    registre atomique, refus des questions si le registre est absent ou illisible,
+    fichier SharePoint devenu trop volumineux retiré de l'index.
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 12 tests OK », code de sortie 0.
+Attendu : « 23 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -77,7 +81,8 @@ class QdrantPannes(tb.QdrantSimule):
             self.points[collection_name][i].update(payload)
 
     def delete(self, collection_name, points_selector):
-        source = points_selector.filter.must[0].match.value
+        filtre = getattr(points_selector, "filter", None) or points_selector
+        source = filtre.must[0].match.value
         if source in self.suppression_refusee:
             raise RuntimeError("No space left on device (simulé)")
         for i in [i for i, p in self.points[collection_name].items() if p["source"] == source]:
@@ -169,31 +174,40 @@ def tests_passage():
 # ─────────────────────────────────────────
 # RAG API
 # ─────────────────────────────────────────
+def ecrire_json(donnees) -> str:
+    chemin = tempfile.mktemp(suffix=".json")
+    with open(chemin, "w", encoding="utf-8") as f:
+        json.dump(donnees, f)
+    return chemin
+
+
+def remise_a_zero():
+    main._etat = main._etat_vide()
+    main._registre_incertain = False
+    main.ACL_INCERTAIN_FERME = False
+
+
 def tests_api():
     main.FICHIER_BLOQUES = tempfile.mktemp(suffix=".json")
-    rapport_acl = tempfile.mktemp(suffix=".json")
-    with open(rapport_acl, "w", encoding="utf-8") as f:
-        json.dump({"echecs_ecriture": ["RH/Salaires.xlsx"], "echecs_suppression": ["RH/Supprime.docx"]}, f)
-
-    main._bloques["smb"] = set()
+    remise_a_zero()
+    rapport_acl = ecrire_json({"echecs_ecriture": ["RH/Salaires.xlsx"], "echecs_suppression": ["RH/Supprime.docx"],
+                               "echecs_lecture_orphelins": []})
     main.appliquer_resultat_droits("smb", 2, rapport_acl)
     ok_2 = main.sources_bloquees() == {"RH/Salaires.xlsx", "RH/Supprime.docx"}
     main.appliquer_resultat_droits("smb", 1, rapport_acl + ".absent")
     ok_1 = main.sources_bloquees() == {"RH/Salaires.xlsx", "RH/Supprime.docx"}
-    main._bloques["smb"] = set()
+    main._etat = main._etat_vide()
     main.charger_bloques()
-    ok_disque = main.sources_bloquees() == {"RH/Salaires.xlsx", "RH/Supprime.docx"}
+    ok_disque = main.sources_bloquees() == {"RH/Salaires.xlsx", "RH/Supprime.docx"} and not main._registre_incertain
     verifier("API : code 2 retire, code 1 garde, liste relue du disque", ok_2 and ok_1 and ok_disque,
              f"code 2 {ok_2}, code 1 {ok_1}, disque {ok_disque}")
 
-    rapport_sp = tempfile.mktemp(suffix=".json")
-    with open(rapport_sp, "w", encoding="utf-8") as f:
-        json.dump({"sites": [{"fichiers": [{"source": "SharePoint/RH/Docs/Grille.xlsx", "statut": "erreur"},
-                                            {"source": "SharePoint/RH/Docs/Note.docx", "statut": "inchangé"}]}]}, f)
+    rapport_sp = ecrire_json({"sites": [{"fichiers": [{"source": "SharePoint/RH/Docs/Grille.xlsx", "statut": "erreur"},
+                                                      {"source": "SharePoint/RH/Docs/Note.docx", "statut": "inchangé"}],
+                                         "erreurs": [], "prefixes_incomplets": []}]})
     main.appliquer_resultat_droits("sharepoint", 2, rapport_sp)
     verifier("API : SharePoint, fichier en erreur retiré",
-             "SharePoint/RH/Docs/Grille.xlsx" in main.sources_bloquees()
-             and "SharePoint/RH/Docs/Note.docx" not in main.sources_bloquees())
+             main.est_bloque("SharePoint/RH/Docs/Grille.xlsx") and not main.est_bloque("SharePoint/RH/Docs/Note.docx"))
     main.appliquer_resultat_droits("sharepoint", 0, rapport_sp)
 
     # Recherche : Salaires.xlsx autorisé dans Qdrant, mais retiré de la recherche
@@ -226,21 +240,135 @@ def tests_api():
     main.appliquer_resultat_droits("smb", 0, rapport_acl)
     verifier("API : code 0, liste vidée", main.sources_bloquees() == set())
 
-    for f in (main.FICHIER_BLOQUES, rapport_acl, rapport_sp):
+    # ── 2.21.6 : un passage incomplet ne vide jamais la liste ──
+    remise_a_zero()
+    main.appliquer_resultat_droits("smb", 2, rapport_acl)            # Salaires et Supprime retirés
+    q.points[main.COLLECTION][50] = tb.payload("RH/Efface.docx", 0, "fichier effacé du partage", [G])
+    incomplet = ecrire_json({"echecs_ecriture": [], "echecs_suppression": [], "echecs_lecture_orphelins": ["documents"],
+                             "documents": [{"source_name": s} for s in
+                                           ["RH/Salaires.xlsx", "DIRECTION/Budget.docx"] + [f"DIVERS/Note_{i}.docx" for i in range(20)]]})
+    main.appliquer_resultat_droits("smb", 2, incomplet)
+    verifier("2.21.6 : orphelins illisibles, liste gardée et orphelin probable retiré",
+             {"RH/Salaires.xlsx", "RH/Supprime.docx", "RH/Efface.docx"} <= main.sources_bloquees()
+             and main._etat["incertain"]["smb"], f"liste {sorted(main.sources_bloquees())}")
+
+    remise_a_zero()
+    main.qdrant = QdrantPannes({main.COLLECTION: {}})
+    main.qdrant.erreur = True
+    main.appliquer_resultat_droits("smb", 2, incomplet)
+    verifier("2.21.6 : orphelins illisibles et Qdrant illisible, tout le partage retiré",
+             main.est_bloque("RH/Note.docx") and not main.est_bloque("SharePoint/RH/Docs/Note.docx"))
+    main.qdrant = q
+
+    remise_a_zero()
+    main.appliquer_resultat_droits("sharepoint", 2, rapport_sp)       # Grille.xlsx retiré
+    site_ko = ecrire_json({"sites": [{"site": "https://x/sites/RH", "fichiers": [], "erreurs": ["site inaccessible"],
+                                      "prefixes_incomplets": ["SharePoint/RH/"]}]})
+    main.appliquer_resultat_droits("sharepoint", 2, site_ko)
+    verifier("2.21.6 : site SharePoint en erreur, site retiré et liste gardée",
+             main.est_bloque("SharePoint/RH/Docs/Autre.docx") and main.est_bloque("SharePoint/RH/Docs/Grille.xlsx")
+             and not main.est_bloque("SharePoint/Direction/Docs/Plan.docx"))
+    main.appliquer_resultat_droits("sharepoint", 0, site_ko)
+    verifier("2.21.6 : passage SharePoint complet, site rétabli", not main.est_bloque("SharePoint/RH/Docs/Autre.docx"))
+
+    remise_a_zero()
+    main.appliquer_resultat_droits("smb", 2, rapport_acl)
+    main.appliquer_resultat_droits("smb", None, "")
+    garde = main.sources_bloquees() == {"RH/Salaires.xlsx", "RH/Supprime.docx"} and not main.est_bloque("RH/Note.docx")
+    main.ACL_INCERTAIN_FERME = True
+    main.appliquer_resultat_droits("smb", 1, "")
+    ferme = main.est_bloque("RH/Note.docx")
+    main.appliquer_resultat_droits("smb", 0, "")
+    rouvert = not main.est_bloque("RH/Note.docx") and main.sources_bloquees() == set()
+    verifier("2.21.6 : passage interrompu, liste gardée ; ACL_INCERTAIN_FERME ferme le partage ; code 0 rétablit",
+             garde and ferme and rouvert, f"gardée {garde}, fermé {ferme}, rétabli {rouvert}")
+
+    # ── 2.21.6 : registre ──
+    remise_a_zero()
+    with open(main.FICHIER_BLOQUES, "w", encoding="utf-8") as f:
+        f.write('{"smb": ["RH/Sal')          # écriture interrompue
+    main.charger_bloques()
+    refus = False
+    try:
+        asyncio.run(main.search_qdrant("grille salaires", user_groups=[G], user_email="t@x.ch"))
+    except main.HTTPException as e:
+        refus = e.status_code == 503
+    verifier("2.21.6 : registre tronqué au démarrage, questions refusées (503)", main._registre_incertain and refus)
+
+    os.remove(main.FICHIER_BLOQUES)
+    main.charger_bloques()
+    verifier("2.21.6 : registre absent au démarrage, état inconnu", main._registre_incertain)
+    main.lever_incertitude_registre()
+    chunks = asyncio.run(main.search_qdrant("grille salaires", user_groups=[G], user_email="t@x.ch"))
+    verifier("2.21.6 : après une synchronisation complète, questions servies", not main._registre_incertain and bool(chunks))
+
+    remise_a_zero()
+    main._etat["smb"] = {"RH/Salaires.xlsx"}
+    main.enregistrer_bloques()
+    os.makedirs(main.FICHIER_BLOQUES + ".tmp", exist_ok=True)   # écriture impossible
+    main._etat["smb"] = set()
+    ok_retour = main.enregistrer_bloques() is False and main._registre_ok is False
+    with open(main.FICHIER_BLOQUES, encoding="utf-8") as f:
+        intact = json.load(f).get("smb") == ["RH/Salaires.xlsx"]
+    os.rmdir(main.FICHIER_BLOQUES + ".tmp")
+    verifier("2.21.6 : écriture du registre impossible, incident signalé, ancienne version intacte",
+             ok_retour and intact, f"signalé {ok_retour}, intacte {intact}")
+
+    for f in (main.FICHIER_BLOQUES, rapport_acl, rapport_sp, incomplet, site_ko):
         if os.path.exists(f):
             os.remove(f)
 
 
+# ─────────────────────────────────────────
+# sp_indexer.py : fichier devenu trop volumineux
+# ─────────────────────────────────────────
+def charger_sp():
+    """sp_indexer.py importe indexer et auth : dépôt ou conteneur."""
+    if not os.path.exists(os.path.join(ICI, "indexer.py")) and os.path.exists(os.path.join(ICI, "anon_indexer.py")):
+        spec = importlib.util.spec_from_file_location("indexer", os.path.join(ICI, "anon_indexer.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules["indexer"] = mod
+    spec = importlib.util.spec_from_file_location("sp_indexer", os.path.join(ICI, "sp_indexer.py"))
+    sp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sp)
+    return sp
+
+
+def tests_sharepoint():
+    import argparse
+    sp = charger_sp()
+    source = "SharePoint/RH/Docs/Grille.docx"
+    coll = sp.idx.COLLECTION
+    e = {"name": "Grille.docx", "size": sp.SP_MAX_BYTES + 1, "id": "x"}
+    args = argparse.Namespace(dry_run=False, force=False)
+    q = QdrantPannes({coll: {1: p(source, ["BSCULIER\\RH"]), 2: p("SharePoint/RH/Docs/Autre.docx", [G])}})
+    entree = sp.traiter_fichier(None, q, None, {}, set(), "https://x/sites/RH", {"id": "d"}, "Grille.docx", e, source, args)
+    restants = {v["source"] for v in q.points[coll].values()}
+    verifier("2.21.6 : SharePoint, fichier devenu trop volumineux retiré de l'index",
+             source not in restants and "SharePoint/RH/Docs/Autre.docx" in restants
+             and entree["statut"].startswith("trop volumineux"), f"statut {entree.get('statut')}, restants {restants}")
+
+    q = QdrantPannes({coll: {1: p(source, [G])}}, suppression_refusee={source})
+    try:
+        sp.traiter_fichier(None, q, None, {}, set(), "https://x/sites/RH", {"id": "d"}, "Grille.docx", e, source, args)
+        remonte = False
+    except RuntimeError:
+        remonte = True   # indexer_site en fait un fichier « erreur », retiré de la recherche
+    verifier("2.21.6 : SharePoint, suppression refusée remontée en erreur", remonte)
+
+
 if __name__ == "__main__":
     qdrant_reel, fichier_reel = main.qdrant, main.FICHIER_BLOQUES
-    bloques_reels = {k: set(v) for k, v in main._bloques.items()}
+    etat_reel, incertain_reel, ferme_reel = main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME
     try:
         tests_resolveur()
         tests_passage()
         tests_api()
+        tests_sharepoint()
     finally:
         main.qdrant, main.FICHIER_BLOQUES = qdrant_reel, fichier_reel
-        main._bloques.update(bloques_reels)
+        main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME = etat_reel, incertain_reel, ferme_reel
     total, ok = len(RESULTATS), sum(RESULTATS)
     print(f"{ok} tests OK" if ok == total else f"{total - ok} test(s) en échec sur {total}")
     sys.exit(0 if ok == total else 1)

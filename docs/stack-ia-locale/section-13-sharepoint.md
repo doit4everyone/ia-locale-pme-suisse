@@ -262,6 +262,7 @@ SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
 # URL complètes, séparées par des virgules ; vide = étape désactivée
 SP_SITES=https://<tenant>.sharepoint.com/sites/RH,https://<tenant>.sharepoint.com/
 SP_EXCLUDE_DRIVES=Preservation Hold Library
+# Au-delà, fichier non indexé ; déjà indexé, ses extraits sont supprimés (2.21.6)
 SP_MAX_FILE_MB=50
 SYNC_TIMEOUT_SHAREPOINT=900
 LLM_NUM_CTX=16384

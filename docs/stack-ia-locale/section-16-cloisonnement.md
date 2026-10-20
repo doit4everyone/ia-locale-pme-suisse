@@ -170,12 +170,21 @@ Défaut voisin, sans effet sur les droits : la synchronisation cherchait le stat
 
 **Que faire en cas d'alerte.** Le courriel de synchronisation indique le nombre de documents retirés, et `docker logs rag-api 2>&1 | grep DROITS` les nomme. Corriger la cause (espace disque, état de Qdrant), puis relancer une synchronisation : les documents reviennent dès que leurs droits sont écrits.
 
+**Compléments de la 2.21.6**, à la suite d'une quatrième revue, qui a trouvé deux chemins encore ouverts, dont un introduit par la 2.21.5 :
+
+- **un passage incomplet ne vide plus jamais la liste.** En 2.21.5, une lecture des orphelins en échec donnait le code 2 avec une liste vide, qui **remplaçait** la précédente : des documents retirés redevenaient visibles. Désormais, seul un passage complet retire des documents de la liste. Un passage incomplet ne fait qu'ajouter : orphelins probables (sources du partage présentes dans Qdrant mais absentes du partage), ou tout le partage si même cet inventaire échoue ;
+- **SharePoint : fichier devenu trop volumineux.** Au-delà de `SP_MAX_FILE_MB`, `sp_indexer.py` sortait sans relire les droits ni supprimer les anciens extraits : un fichier déjà indexé qui grossissait gardait ses anciens droits. Ses extraits sont désormais supprimés, comme pour un fichier vide ou chiffré ; une suppression refusée en fait un fichier en erreur, retiré de la recherche ;
+- **SharePoint : site ou bibliothèque illisible.** Le rapport nomme le périmètre dont l'inventaire n'a pas abouti ; la RAG API le retire de la recherche jusqu'à un passage complet, sans vider la liste existante ;
+- **registre atomique.** `acl_bloques.json` est écrit dans un fichier temporaire, forcé sur le disque, puis renommé : une coupure laisse l'ancienne version intacte. Un échec d'écriture est signalé dans la synchronisation ;
+- **registre absent ou illisible au démarrage : aucune question servie** (HTTP 503, « Vérification des droits en cours ») jusqu'à une synchronisation complète. `deploy.sh` le crée vide à l'installation : son absence ensuite est anormale. Le contrôle d'accès du §16.2 refuse aussi, et le test de non-divulgation affiche une `ERREUR` ;
+- **option `ACL_INCERTAIN_FERME`.** Un passage abandonné (annuaire ou partage injoignable, garde-fou) ou interrompu garde par défaut les derniers droits connus : c'est l'arbitrage du §5.4 entre disponibilité et fraîcheur des droits. Avec `ACL_INCERTAIN_FERME=1` dans le `.env`, tous les documents de l'origine concernée (partage ou SharePoint) sont suspendus jusqu'à un passage complet. Plus sûr, mais une panne de l'annuaire rend alors l'assistant muet.
+
 **Limites.**
 
-- Un passage interrompu (délai dépassé, plantage du script) ou abandonné par un garde-fou ne produit pas de liste : la liste précédente est gardée, et l'alerte part. Les droits écrits avant l'interruption sont à jour, les autres restent ceux du passage précédent.
-- Pour SharePoint, une erreur sur un site entier, avant la liste de ses fichiers, ne retire aucun document : l'alerte part, sans exclusion.
-- Un fichier `acl_bloques.json` illisible au démarrage est signalé (`[DROITS]`, niveau critique), sans exclusion jusqu'à la synchronisation suivante.
-- Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par 12 tests unitaires, Qdrant simulé (`test_echec_droits.py`).
+- Par défaut (`ACL_INCERTAIN_FERME=0`), un passage abandonné ou interrompu laisse en place les droits du passage précédent pour les documents qui n'étaient pas déjà retirés. L'alerte part à chaque synchronisation tant qu'aucun passage complet n'a abouti.
+- Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par les tests unitaires, Qdrant simulé (`test_echec_droits.py`, 23 tests).
+
+> **Validé sur la VM de test, 20 octobre 2026 :** 23 et 14 tests unitaires OK dans le conteneur. Le registre n'existait pas sur cette installation, antérieure à la 2.21.6 : au démarrage, la RAG API a journalisé `Registre ... absent : ... AUCUNE question servie`. Une synchronisation a levé le refus (`questions de nouveau servies`, `success=True`) et créé le registre (droits 640). Après un redémarrage de la RAG API, le registre a été relu sans nouvelle alerte. Registre mis de côté puis RAG API redémarrée : une question posée dans Open WebUI a reçu « Vérification des droits en cours : réessayer après la prochaine synchronisation », sans réponse. La synchronisation horaire suivante a recréé le registre et levé le refus d'elle-même. Droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO).
 
 > **Validé sur la VM de test, 20 octobre 2026 :** `test_echec_droits.py` 12 tests OK et `test_revalidation_bm25.py` 14 tests OK, dans le conteneur ; synchronisation réelle avec le nouveau `acl_resolver.py` : `success=True`, aucun document retiré ; test du droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO) ; une question réelle dans Open WebUI, réponse citée.
 
@@ -373,7 +382,8 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
-| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `12 tests OK` |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `23 tests OK` |
+| Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json` | Présent ; s'il manque, questions refusées jusqu'à une synchronisation complète |
 | Documents retirés de la recherche | `docker logs rag-api 2>&1 \| grep DROITS` | Aucune ligne, ou documents nommés et alerte reçue |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |

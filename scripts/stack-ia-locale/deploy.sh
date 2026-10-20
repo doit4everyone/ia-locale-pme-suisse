@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.5)
+# Version : beta (2.21.6)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -360,6 +360,13 @@ mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
 chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
+# Registre des documents retirés de la recherche (§16.5.2), vide à l'installation.
+# Son absence ensuite est anormale : la RAG API refuse alors les questions jusqu'à
+# une synchronisation complète. Jamais écrasé s'il existe.
+if [ ! -f /var/log/rag/acl_bloques.json ]; then
+    echo '{"version": 2, "smb": [], "sharepoint": [], "prefixes": [], "smb_tout": false, "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}' > /var/log/rag/acl_bloques.json
+    chmod 640 /var/log/rag/acl_bloques.json
+fi
 mkdir -p /etc/smbcredentials
 # Certificats des applications Microsoft 365 (Partie 3, §11 et §12).
 # Monté en lecture seule dans rag-api : créé ici avec des droits restreints,

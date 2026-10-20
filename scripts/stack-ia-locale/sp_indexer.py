@@ -485,7 +485,11 @@ def indexer_site(site_url: str, jetons: Jetons, annuaire: Annuaire, qdrant: Qdra
     chemin = u.path.rstrip("/")
     base = f"https://{u.hostname}{chemin}"
     label = libelle_site(site_url)
-    site_rapport = {"site": site_url, "fichiers": [], "notes_groupes": [], "erreurs": []}
+    # prefixes_incomplets (2.21.6) : périmètres dont l'inventaire n'a pas abouti
+    # (site ou bibliothèque illisible). La RAG API les retire de la recherche
+    # jusqu'à un passage complet : leurs fichiers n'ont été ni relus ni nettoyés.
+    site_rapport = {"site": site_url, "fichiers": [], "notes_groupes": [], "erreurs": [],
+                    "prefixes_incomplets": []}
     rapport["sites"].append(site_rapport)
     print(f"\n=== Site : {site_url}")
 
@@ -498,6 +502,7 @@ def indexer_site(site_url: str, jetons: Jetons, annuaire: Annuaire, qdrant: Qdra
         r = requete(c, "GET", f"{GRAPH}/sites/{u.hostname}:{chemin}" if chemin else f"{GRAPH}/sites/{u.hostname}")
         if r.status_code != 200:
             site_rapport["erreurs"].append(f"site inaccessible : {erreur_http(r)}")
+            site_rapport["prefixes_incomplets"].append(f"SharePoint/{label}/")
             print(f"  Site inaccessible : {erreur_http(r)}")
             return False
         site = r.json()
@@ -515,6 +520,7 @@ def indexer_site(site_url: str, jetons: Jetons, annuaire: Annuaire, qdrant: Qdra
                 fichiers = lister_fichiers(c, d["id"])
             except RuntimeError as e:
                 site_rapport["erreurs"].append(f"{d['name']} : {e}")
+                site_rapport["prefixes_incomplets"].append(f"SharePoint/{label}/{d['name']}/")
                 complet = False
                 continue
             print(f"  Bibliothèque {d['name']} : {len(fichiers)} fichier(s)")
@@ -552,7 +558,14 @@ def traiter_fichier(c, qdrant, annuaire, groupes, groupes_prop, site_url, drive,
         entree["statut"] = "format ignoré"
         return entree
     if e.get("size", 0) > SP_MAX_BYTES:
-        entree["statut"] = "trop volumineux"
+        # Retiré de l'index (2.21.6) : un fichier déjà indexé qui dépasse ensuite
+        # la limite gardait ses anciens extraits ET ses anciens droits, sans que
+        # ses permissions soient relues. Même traitement qu'un fichier vide ou
+        # chiffré. Une erreur de suppression remonte : fichier « erreur », retiré
+        # de la recherche par la RAG API.
+        entree["statut"] = "trop volumineux, non indexé"
+        if not args.dry_run:
+            qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
         return entree
 
     # Permissions : calculées à chaque passage
@@ -741,7 +754,8 @@ def main() -> int:
                 code = 2
         except Exception as e:
             print(f"  ERREUR sur {site_url} : {e}")
-            rapport["sites"].append({"site": site_url, "erreurs": [str(e)]})
+            rapport["sites"].append({"site": site_url, "erreurs": [str(e)],
+                                     "prefixes_incomplets": [f"SharePoint/{libelle_site(site_url)}/"]})
             code = 2
 
     rapport["fin"] = datetime.now(timezone.utc).isoformat()

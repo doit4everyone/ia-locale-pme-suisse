@@ -322,6 +322,8 @@ services:
       - REPORT_DIR=${REPORT_DIR}
       - TOP_K=${TOP_K}
       - CONTEXT_THRESHOLD=${CONTEXT_THRESHOLD}
+      # Passage des droits incomplet : 1 = suspendre l'origine concernée (§16.5.2)
+      - ACL_INCERTAIN_FERME=${ACL_INCERTAIN_FERME:-0}
       - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
       - CANDIDATS=${CANDIDATS:-30}
       - PRINCIPAL_MAX=${PRINCIPAL_MAX:-9}
