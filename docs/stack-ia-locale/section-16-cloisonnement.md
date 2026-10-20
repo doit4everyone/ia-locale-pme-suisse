@@ -137,6 +137,15 @@ Jusqu'à la v2.16, `acl_resolver.py` ne lisait que le début de la ligne : **tou
 > - **en 2.21.3 : OK par les deux chemins.** Le journal de la RAG API indique `[BM25] Relecture : 0 candidat(s) disparu(s) ou illisible(s), 1 refusé(s) par les droits actuels` ;
 > - droits d'origine restaurés et contrôlés après chaque passage ; tests unitaires : 11 OK ; test de non-divulgation inchangé après correction (70 OK, 2 INFO, aucune fuite).
 
+**Compléments de la 2.21.4**, à la suite d'une seconde revue du correctif :
+
+- **un échec de ces tests bloque le déploiement.** `deploy.sh` les lance à l'étape 10 ; jusqu'ici, un échec n'affichait qu'un avertissement. Désormais, il arrête la RAG API, pour qu'aucune question ne soit servie par un code qui laisserait passer un droit retiré, et le script se termine en erreur ;
+- **sans groupes, aucune recherche.** La recherche, la relecture des candidats et l'extension du contexte ne désactivaient leurs contrôles qu'en l'absence de groupes. `/query` et `/v1` refusent déjà ce cas avant de chercher ; ces fonctions le refusent aussi elles-mêmes (403, ou aucun résultat), pour qu'une route future qui l'oublierait ne serve jamais une recherche sans filtre. Les tests unitaires passent de 11 à 14.
+
+> **Validé sur la VM de test, 20 octobre 2026 :** 14 tests unitaires OK ; test sur le vrai Qdrant `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO) ; une question réelle dans Open WebUI, réponse citée. Le blocage de `deploy.sh` a été vérifié en simulation (test réussi : rien ne change ; test en échec : RAG API arrêtée, script en erreur), pas par un nouveau déploiement complet.
+
+> **Ce que la correction ne change pas.** La recherche suit désormais les droits enregistrés dans Qdrant. Elle ne suit pas en temps réel ceux du serveur de fichiers : un droit retiré sous Windows n'atteint Qdrant qu'au passage suivant de `acl_resolver.py`, à chaque synchronisation. C'est la fenêtre de péremption du §5.4, distincte du défaut corrigé ici.
+
 ## §16.6 Durcissement de la RAG API
 
 | Point | Avant | Après |
@@ -329,7 +338,7 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Contrôle après synchronisation | `docker logs rag-api \| grep CLOISONNEMENT` | `N/N conformes, fuites=0` |
 | Alerte | Contre-épreuve (fuite simulée) | Courriel « FUITE DE CLOISONNEMENT » reçu |
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
-| Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `11 tests OK` |
+| Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |

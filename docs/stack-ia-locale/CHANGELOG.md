@@ -4,6 +4,27 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.4] : Octobre 2026
+
+Durcissement complémentaire, à la suite d'une seconde revue externe du correctif 2.21.3. Validé sur la VM de test le 20 octobre 2026 : 14 tests unitaires OK, test sur le vrai Qdrant OK, test de non-divulgation inchangé (70 OK, 2 INFO) ; blocage de `deploy.sh` vérifié en simulation.
+
+### Sécurité
+
+- `deploy.sh` : un échec de `test_revalidation_bm25.py` bloque le déploiement ; la RAG API est arrêtée et le script se termine en erreur (point 133). En-tête en 2.21.4.
+- `api/anon_main.py` : sans groupes, `search_qdrant` refuse avant toute recherche (403), `revalider_bm25` et `etendre_complements` ne renvoient rien ; les contrôles d'accès ne sont plus jamais sautés faute d'identité (point 134).
+
+### Tests
+
+- `test_revalidation_bm25.py` : trois tests ajoutés (sans groupes), 14 au total ; sur le code de la 2.21.2, les 14 échouent.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.1, compléments de la 2.21.4 et limite de la correction (fenêtre de péremption du §5.4) ; checklist.
+- `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md` : 14 tests.
+- `suivi-corrections.md` : points 133 et 134.
+
+---
+
 ## [2.21.3] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une revue externe du code : un droit retiré restait valable par la recherche par mots-clés jusqu'à la reconstruction de son index (point 10, §16.5.1). Validé sur la VM de test le 20 octobre 2026 : fuite reproduite sur le vrai Qdrant en 2.21.2, absente en 2.21.3, test de non-divulgation inchangé (70 OK, 2 INFO).

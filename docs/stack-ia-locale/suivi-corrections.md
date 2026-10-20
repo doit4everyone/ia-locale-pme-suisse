@@ -124,6 +124,8 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 130 | Rapports d'`indexer.py` et d'`acl_resolver.py` lancés à la main : sans `--rapport`, écrits dans `/root/rag-pipeline`, sur le disque système non chiffré (noms de fichiers et groupes autorisés). Le résumé de `deploy.sh` et la checklist du §0 donnent `--rapport /var/log/rag/...` | v2.21.2 | 2026-10-19 |
 | 131 | n8n 2.36.9 annonce que les paquets communautaires non vérifiés seront refusés par défaut dans une version future. `N8N_UNVERIFIED_PACKAGES_ENABLED=false` fixé dès maintenant dans le Compose | v2.21.2 | 2026-10-19 |
 | 10 | Recherche par mots-clés (BM25) : les candidats étaient autorisés sur les droits mémorisés dans l'index, construit au démarrage et en fin de synchronisation. Un droit retiré dans Qdrant restait valable par ce chemin jusqu'à la reconstruction (pendant la synchronisation, ou jusqu'à une heure après un `acl_resolver.py` lancé à la main) ; un document supprimé restait trouvable. Gravité **sous-estimée** jusqu'ici (« faible ») : la relecture des voisins, censée arrêter l'extrait, le remettait quand elle revenait vide (`fenetre or extraits`), c'est-à-dire précisément quand le droit avait été retiré ; sans extension du contexte, aucune relecture. Signalé par une revue externe du code. Chaque candidat est relu dans Qdrant par son identifiant et ses droits contrôlés sur cette lecture (`revalider_bm25`), refus par défaut ; repli supprimé. Fuite reproduite sur le code de la 2.21.2 et absente après correction : `test_revalidation_bm25.py`, 11 tests. Sur le vrai Qdrant de la VM de test (`test_revocation_bm25.py`, §16.5.1) : FUITE en 2.21.2 par les deux chemins, OK en 2.21.3 ; test de non-divulgation inchangé (70 OK, 2 INFO) | v2.21.3 | 2026-10-20 |
+| 133 | `deploy.sh` : un échec des tests unitaires des droits sur la recherche par mots-clés (`test_revalidation_bm25.py`) n'affichait qu'un avertissement, et le déploiement se terminait normalement. Signalé par une seconde revue externe. L'échec arrête la RAG API et termine le script en erreur (« Déploiement incomplet ») ; vérifié en simulation | v2.21.4 | 2026-10-20 |
+| 134 | `search_qdrant`, `revalider_bm25`, `etendre_complements` : sans groupes, les contrôles d'accès étaient sautés. Aucun chemin exposé (`/query` et `/v1` refusent ce cas avant la recherche), mais une route future qui l'oublierait aurait servi une recherche sans filtre. Signalé par une seconde revue externe. Refus dans les fonctions elles-mêmes : 403 pour la recherche, aucun résultat pour les deux autres ; trois tests unitaires ajoutés (14 au total, tous OK sur la VM de test) | v2.21.4 | 2026-10-20 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -270,6 +272,14 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.4 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.1 | Compléments de la 2.21.4 ; ce que la correction ne change pas (fenêtre de péremption du §5.4) ; checklist à 14 tests | v2.21.4 |
 
 ---
 

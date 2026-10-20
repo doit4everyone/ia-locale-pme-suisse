@@ -6,7 +6,8 @@ synchronisation. Ces tests vérifient qu'un droit retiré dans Qdrant APRÈS la
 construction de l'index n'est plus contourné par ce chemin :
   - revalider_bm25 : relecture du payload actuel, refus par défaut ;
   - etendre_complements : plus de repli sur des extraits non relus ;
-  - search_qdrant, de bout en bout, avec et sans extension du contexte.
+  - search_qdrant, de bout en bout, avec et sans extension du contexte ;
+  - sans groupes : aucun résultat, jamais de contrôle désactivé (2.21.4).
 
 Sans Qdrant, sans modèle, sans annuaire : Qdrant est simulé en mémoire.
 Ces tests ne remplacent pas le test en lab (test_revocation_bm25.py), qui
@@ -15,7 +16,7 @@ travaille sur le vrai Qdrant.
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 
-Attendu : « 11 tests OK », code de sortie 0.
+Attendu : « 14 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -134,7 +135,7 @@ def verifier(nom, ok, detail=""):
 # ─────────────────────────────────────────
 def tests_revalidation():
     if not hasattr(main, "revalider_bm25"):
-        for nom in ("revalider : droit inchangé", "revalider : droit retiré",
+        for nom in ("revalider : sans groupes", "revalider : droit inchangé", "revalider : droit retiré",
                     "revalider : refus ajouté", "revalider : point supprimé",
                     "revalider : Qdrant indisponible", "revalider : sans identifiant",
                     "revalider : payload actuel repris"):
@@ -145,6 +146,8 @@ def tests_revalidation():
 
     q = QdrantSimule({COLL: {1: dict(instantane)}})
     main.qdrant = q
+    verifier("revalider : sans groupes",
+             main.revalider_bm25([c], []) == [] and main.revalider_bm25([c], None) == [])
     verifier("revalider : droit inchangé", len(main.revalider_bm25([c], [GROUPE])) == 1)
 
     q.points[COLL][1]["autorises"] = [AUTRE]
@@ -188,6 +191,11 @@ def tests_extension():
     r = asyncio.run(main.etendre_complements([c], [GROUPE], "test@exemple.ch"))
     verifier("extension : erreur Qdrant, document écarté", r == [],
              f"{len(r)} extrait(s) réinjecté(s) : repli sur l'extrait d'origine")
+
+    main.qdrant = QdrantSimule({COLL: {1: dict(instantane)}})
+    r = asyncio.run(main.etendre_complements([c], [], "test@exemple.ch"))
+    verifier("extension : sans groupes, aucun extrait", r == [],
+             f"{len(r)} extrait(s) renvoyé(s) sans contrôle des droits")
     main.COMPLEMENT_VOISINS = ancien
 
 
@@ -229,6 +237,14 @@ def tests_recherche():
         verifier(f"recherche {nom} : droit retiré respecté",
                  "RH/Salaires.xlsx" not in sources,
                  f"FUITE : sources renvoyées {sources}")
+
+    # Sans groupes : refus avant toute recherche, jamais une recherche sans filtre
+    try:
+        chunks = asyncio.run(main.search_qdrant(q_budget, user_groups=None, user_email="test@exemple.ch"))
+        verifier("recherche sans groupes : refus", False,
+                 f"recherche servie sans contrôle des droits ({len(chunks)} extraits)")
+    except main.HTTPException as e:
+        verifier("recherche sans groupes : refus", e.status_code == 403, f"code {e.status_code}")
 
 
 if __name__ == "__main__":

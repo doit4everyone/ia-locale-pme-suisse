@@ -368,10 +368,11 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
     l'autorisation se décide ici, sur l'état actuel de Qdrant.
 
     Refus par défaut : point disparu, identifiant absent, erreur de lecture de
-    Qdrant, droit retiré ou refus ajouté → candidat écarté.
+    Qdrant, droit retiré ou refus ajouté → candidat écarté. Sans groupes
+    (2.21.4) : aucun candidat, le contrôle n'est jamais désactivé.
     Le texte, la source et les champs Purview sont repris du payload actuel.
     """
-    if not candidats:
+    if not candidats or not user_groups:
         return []
     par_collection: dict[str, list] = {}
     for c in candidats:
@@ -396,13 +397,12 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
             continue
         autorises = payload.get("autorises", [])
         interdits = payload.get("interdits", [])
-        if user_groups:
-            # Mêmes règles que la branche vectorielle : filtre ALLOW de Qdrant
-            # (MatchAny, sensible à la casse), puis check_access (DENY prioritaire).
-            if not any(g in autorises for g in user_groups) \
-                    or not check_access(user_groups, autorises, interdits):
-                refuses += 1
-                continue
+        # Mêmes règles que la branche vectorielle : filtre ALLOW de Qdrant
+        # (MatchAny, sensible à la casse), puis check_access (DENY prioritaire).
+        if not any(g in autorises for g in user_groups) \
+                or not check_access(user_groups, autorises, interdits):
+            refuses += 1
+            continue
         texte = payload.get("text", "")
         resultat.append({
             **c,
@@ -563,6 +563,8 @@ async def etendre_complements(complements: list[dict], user_groups: list[str],
     chunk_index garde les extraits reçus, qui ont été relus dans Qdrant pour
     cette question (branche vectorielle, ou revalider_bm25).
     """
+    if not user_groups:
+        return []  # sans groupes, aucun complément (2.21.4)
     par_source: dict[str, list[dict]] = {}
     for c in complements:
         par_source.setdefault(c["source"], []).append(c)
@@ -654,9 +656,13 @@ def selectionner_complements(chunks: list[dict], best_source: str,
     return complements, copies
 
 
-async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[str] = None,
+async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[str] | None = None,
                         user_email: str | None = None) -> list[dict]:
     """
+    Sans groupes, refus (403) avant toute recherche (2.21.4) : les filtres
+    d'accès ne sont jamais désactivés faute d'identité. /query et /v1 refusent
+    déjà ce cas ; ce garde-fou protège une route future qui l'oublierait.
+
     Recherche hybride : vectorielle (Qdrant, deux collections) + mots-clés (BM25),
     fusionnée par Reciprocal Rank Fusion (RRF, k=60).
 
@@ -672,6 +678,9 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère tous les chunks
     du même document via scroll (dans la bonne collection).
     """
+    if not user_groups:
+        logger.error("[AUTH] Recherche demandée sans groupes : refus")
+        raise HTTPException(status_code=403, detail="Résolution des droits impossible")
     try:
         embedding = await get_embedding(query)
 

@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.3)
+# Version : beta (2.21.4)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -820,7 +820,11 @@ if [ -f /root/rag-pipeline/test_revalidation_bm25.py ]; then
     if docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py >/dev/null 2>&1; then
         ok "Droits sur la recherche par mots-clés : tests unitaires OK"
     else
-        warn "Droits sur la recherche par mots-clés : tests en échec (docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py)"
+        # Test de sécurité (2.21.4) : un échec bloque le déploiement et arrête la
+        # RAG API, pour qu'aucune question ne soit servie par un code qui laisserait
+        # passer un droit retiré. Rien n'est supprimé : corriger, puis la redémarrer.
+        ( cd /root/rag-stack && docker compose stop rag-api ) >/dev/null 2>&1
+        PROBLEMES="${PROBLEMES}  - Droits sur la recherche par mots-clés : tests en ÉCHEC, RAG API arrêtée (détail : cd /root/rag-stack && docker compose start rag-api, puis docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py ; §16.5.1)\n"
     fi
 fi
 
