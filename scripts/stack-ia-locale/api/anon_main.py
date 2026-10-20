@@ -306,6 +306,9 @@ def _load_collection_chunks(collection_name: str) -> list[dict]:
                 # Empreinte du texte (chunk_key) : clé de fusion des classements et
                 # détection des copies (§8.9). Voir search_qdrant pour le choix.
                 "chunk_key":   hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
+                # Identifiant du point : chaque candidat BM25 est relu dans Qdrant
+                # avant usage (revalider_bm25), ses droits ne viennent jamais d'ici.
+                "point_id":    p.id,
                 "text":        p.payload.get("text", ""),
                 "source":      p.payload.get("source", "inconnu"),
                 "source_id":   p.payload.get("source_id", ""),
@@ -350,6 +353,73 @@ def build_bm25_index() -> None:
         logger.warning(f"[BM25] Impossible de construire l'index : {e}")
         _bm25_index = None
         _bm25_chunks = []
+
+
+def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list[dict]:
+    """
+    Relit dans Qdrant le payload ACTUEL de chaque candidat BM25 et réapplique
+    les droits (ALLOW, DENY) sur ce payload (2.21.3, point 10).
+
+    L'index BM25 est un instantané : texte, droits et étiquette Purview datent de
+    sa dernière construction (démarrage ou fin de synchronisation). Entre deux
+    constructions, un droit retiré dans Qdrant (synchronisation en cours,
+    acl_resolver.py lancé à la main) restait valable sur ce chemin. Les droits
+    de l'instantané ne servent donc plus qu'à présélectionner les candidats ;
+    l'autorisation se décide ici, sur l'état actuel de Qdrant.
+
+    Refus par défaut : point disparu, identifiant absent, erreur de lecture de
+    Qdrant, droit retiré ou refus ajouté → candidat écarté.
+    Le texte, la source et les champs Purview sont repris du payload actuel.
+    """
+    if not candidats:
+        return []
+    par_collection: dict[str, list] = {}
+    for c in candidats:
+        if c.get("point_id") is not None:
+            par_collection.setdefault(c.get("collection", ""), []).append(c["point_id"])
+    actuels: dict[tuple[str, str], dict] = {}
+    for collection, ids in par_collection.items():
+        try:
+            points = qdrant.retrieve(collection_name=collection, ids=ids,
+                                     with_payload=True, with_vectors=False)
+        except Exception as e:
+            logger.warning(f"[BM25] Relecture impossible dans '{collection}' "
+                           f"({type(e).__name__}) : candidats BM25 de cette collection écartés")
+            continue
+        for p in points:
+            actuels[(collection, str(p.id))] = p.payload or {}
+    resultat, disparus, refuses = [], 0, 0
+    for c in candidats:
+        payload = actuels.get((c.get("collection", ""), str(c.get("point_id"))))
+        if payload is None:
+            disparus += 1
+            continue
+        autorises = payload.get("autorises", [])
+        interdits = payload.get("interdits", [])
+        if user_groups:
+            # Mêmes règles que la branche vectorielle : filtre ALLOW de Qdrant
+            # (MatchAny, sensible à la casse), puis check_access (DENY prioritaire).
+            if not any(g in autorises for g in user_groups) \
+                    or not check_access(user_groups, autorises, interdits):
+                refuses += 1
+                continue
+        texte = payload.get("text", "")
+        resultat.append({
+            **c,
+            "chunk_key":   hashlib.md5(texte.encode()).hexdigest(),
+            "text":        texte,
+            "source":      payload.get("source", "inconnu"),
+            "source_id":   payload.get("source_id", ""),
+            "web_url":     payload.get("web_url", ""),
+            "chunk_index": payload.get("chunk_index", None),
+            "autorises":   autorises,
+            "interdits":   interdits,
+            **champs_purview(payload),
+        })
+    if disparus or refuses:
+        logger.info(f"[BM25] Relecture : {disparus} candidat(s) disparu(s) ou illisible(s), "
+                    f"{refuses} refusé(s) par les droits actuels (index antérieur à la modification)")
+    return resultat
 
 
 @app.on_event("startup")
@@ -485,8 +555,13 @@ async def etendre_complements(complements: list[dict], user_groups: list[str],
     avant son meilleur extrait. Le meilleur extrait d'un contrat est souvent son
     en-tête (il nomme le client) : la fenêtre apporte alors le contenu qui suit.
     Mêmes filtres que pour le document principal : ACL dans la requête Qdrant,
-    check_access (DENY), puis Purview. En cas d'erreur, les extraits d'origine
-    sont conservés.
+    check_access (DENY), puis Purview.
+    Refus par défaut (2.21.3) : une fenêtre vide après filtrage (droit retiré
+    entre-temps) ou une erreur de Qdrant écarte le document. Les extraits
+    d'origine ne sont plus remis à la place : c'est par ce repli qu'un extrait
+    BM25 aux droits périmés pouvait atteindre le modèle. Seul le cas sans
+    chunk_index garde les extraits reçus, qui ont été relus dans Qdrant pour
+    cette question (branche vectorielle, ou revalider_bm25).
     """
     par_source: dict[str, list[dict]] = {}
     for c in complements:
@@ -511,8 +586,7 @@ async def etendre_complements(complements: list[dict], user_groups: list[str],
             points = qdrant.scroll(collection_name=collection, scroll_filter=Filter(must=conditions),
                                    limit=EXTRAITS_PAR_COMPLEMENT, with_payload=True)[0]
         except Exception as e:
-            logger.warning(f"[COMPLEMENTS] Extension impossible pour '{source}' : {e}")
-            resultat.extend(extraits)
+            logger.warning(f"[COMPLEMENTS] Extension impossible pour '{source}', document écarté : {e}")
             continue
         fenetre = [
             {
@@ -531,7 +605,9 @@ async def etendre_complements(complements: list[dict], user_groups: list[str],
                 user_groups, r.payload.get("autorises", []), r.payload.get("interdits", []))
         ]
         fenetre = await filtrer_purview(fenetre, user_email)
-        resultat.extend(fenetre or extraits)
+        if not fenetre:
+            logger.info(f"[COMPLEMENTS] '{source}' : aucun extrait autorisé dans la fenêtre, document écarté")
+        resultat.extend(fenetre)
     return resultat
 
 
@@ -589,7 +665,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     fusionnés en une seule entrée, qui porte les métadonnées du dernier vu.
     Choix mesuré (§10.6) : une clé par position (document, rang) a fait passer
     une copie de test d'un contrat devant le contrat lui-même. Les droits ne sont
-    pas en jeu : les deux branches sont filtrées avant la fusion.
+    pas en jeu : les deux branches sont filtrées avant la fusion, sur l'état
+    actuel de Qdrant (la branche BM25 est relue par revalider_bm25, 2.21.3).
 
     Le filtre ACL NTFS s'applique sur les deux branches.
     Si le meilleur résultat dépasse CONTEXT_THRESHOLD, récupère tous les chunks
@@ -661,6 +738,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                 if score < 0.01:
                     break
                 c = _bm25_chunks[idx]
+                # Présélection sur les droits de l'instantané (rappel seulement) :
+                # l'autorisation est décidée par revalider_bm25, sur Qdrant.
                 if user_groups:
                     if not any(g in c["autorises"] for g in user_groups):
                         continue
@@ -669,6 +748,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                 bm25_results.append({"score": score, **c})
                 if len(bm25_results) >= top_k:
                     break
+            bm25_results = revalider_bm25(bm25_results, user_groups)
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
         # Clé = empreinte du texte (voir la docstring : choix mesuré).

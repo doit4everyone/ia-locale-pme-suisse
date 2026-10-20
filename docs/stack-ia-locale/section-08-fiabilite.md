@@ -234,6 +234,8 @@ Le retrieval combine deux approches fusionnées par Reciprocal Rank Fusion (RRF)
 
 L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit après chaque synchronisation. Il couvre les deux collections (`documents` et `documentation`). Chaque chunk BM25 inclut son `chunk_index` : si un chunk BM25 gagne le RRF, l'extension de contexte peut récupérer ses voisins par `chunk_index ± radius` au lieu de faire un scroll aléatoire.
 
+**Les droits ne viennent pas de l'index.** L'index est un instantané : entre deux reconstructions, il garde les droits du moment où il a été construit. Depuis la 2.21.3, chaque candidat trouvé par mots-clés est relu dans Qdrant avant d'être utilisé, et les droits sont contrôlés sur cette lecture ; un extrait disparu ou devenu interdit est écarté (§16.5.1).
+
 ### Note sur les PDF avec tables des matières
 
 `indexer.py` nettoie les suites de points répétitifs (`......`) avant l'appel à Ollama. Ces patterns, fréquents dans les tables des matières PDF, provoquent une erreur 500 sur `nomic-embed-text`. Le nettoyage est appliqué dans `get_embedding()` et n'affecte pas la qualité des embeddings.

@@ -123,6 +123,7 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 129 | Résumé final de `deploy.sh` : le compte propriétaire de n8n, à créer tout de suite (sinon n'importe quel poste peut le créer), n'y figurait pas. Étape 0 ajoutée | v2.21.2 | 2026-10-19 |
 | 130 | Rapports d'`indexer.py` et d'`acl_resolver.py` lancés à la main : sans `--rapport`, écrits dans `/root/rag-pipeline`, sur le disque système non chiffré (noms de fichiers et groupes autorisés). Le résumé de `deploy.sh` et la checklist du §0 donnent `--rapport /var/log/rag/...` | v2.21.2 | 2026-10-19 |
 | 131 | n8n 2.36.9 annonce que les paquets communautaires non vérifiés seront refusés par défaut dans une version future. `N8N_UNVERIFIED_PACKAGES_ENABLED=false` fixé dès maintenant dans le Compose | v2.21.2 | 2026-10-19 |
+| 10 | Recherche par mots-clés (BM25) : les candidats étaient autorisés sur les droits mémorisés dans l'index, construit au démarrage et en fin de synchronisation. Un droit retiré dans Qdrant restait valable par ce chemin jusqu'à la reconstruction (pendant la synchronisation, ou jusqu'à une heure après un `acl_resolver.py` lancé à la main) ; un document supprimé restait trouvable. Gravité **sous-estimée** jusqu'ici (« faible ») : la relecture des voisins, censée arrêter l'extrait, le remettait quand elle revenait vide (`fenetre or extraits`), c'est-à-dire précisément quand le droit avait été retiré ; sans extension du contexte, aucune relecture. Signalé par une revue externe du code. Chaque candidat est relu dans Qdrant par son identifiant et ses droits contrôlés sur cette lecture (`revalider_bm25`), refus par défaut ; repli supprimé. Fuite reproduite sur le code de la 2.21.2 et absente après correction : `test_revalidation_bm25.py`, 11 tests. Sur le vrai Qdrant de la VM de test (`test_revocation_bm25.py`, §16.5.1) : FUITE en 2.21.2 par les deux chemins, OK en 2.21.3 ; test de non-divulgation inchangé (70 OK, 2 INFO) | v2.21.3 | 2026-10-20 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -132,7 +133,6 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | Point | Description | Priorité | Remarque |
 |---|---|---|---|
 | 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. Depuis v2.17.0, `/v1` signale dans la réponse une vérification impossible ou un ancrage non établi. |
-| 10 | BM25 garde un instantané des ACL figées au démarrage | Faible | Les chunks BM25 ne repassent pas par Qdrant : le filtre ACL Qdrant ne s'applique pas sur le chemin BM25. Si les permissions d'un document changent, BM25 conserve les anciennes jusqu'à la reconstruction de l'index. Depuis v2.15.0, l'index est reconstruit après chaque synchronisation (horaire) : la fenêtre passe de « jusqu'au redémarrage » à une heure au plus. Impact limité en pratique : le chunk doit encore passer le filtre ACL Qdrant dans le scroll d'extension. Correction prévue : relire le payload Qdrant par ID pour les candidats BM25. |
 | 14 | ACL par noms plutôt que par SIDs | Moyenne | Le masque des droits est corrigé et les permissions du partage sont contrôlées (v2.17.0, §16.5). Reste le passage aux SID, avec le groupe principal (auth.1) : **le masque d'abord, le groupe principal ensuite**, sinon un fichier en écriture seule pour « Utilisateurs du domaine » devient lisible par tout le domaine. |
 | auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. À faire **après** la correction du masque (faite en v2.17.0), voir §16.5. |
 | auth.2 | Identités intégrées (`AUTORITE NT\Utilisateurs authentifiés`) dans `autorises[]` sans être dans les groupes LDAP | Moyenne | Fichiers concernés invisibles. Décision à prendre : ignorer ou injecter dans `get_user_groups`. |
@@ -270,6 +270,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.3 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §8.6 | Les droits des candidats par mots-clés sont relus dans Qdrant | v2.21.3 |
+| §16 | Statut ; §16.2, ce que le test de non-divulgation ne voit pas ; §16.5.1 (nouveau), seconde faille ; checklist | v2.21.3 |
+| Page d'accueil, `README.md`, sommaire | Présentation mise à jour (18 sections, GPU, sécurité 2.21, lab et non production, rejeu du 19 octobre, prochaines étapes), publiée avec la 2.21.3 | v2.21.3 |
 
 ---
 

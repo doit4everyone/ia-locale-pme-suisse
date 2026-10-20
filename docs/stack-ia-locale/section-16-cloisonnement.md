@@ -17,7 +17,7 @@ description: "Test de non-divulgation automatisé, contrôle du cloisonnement ap
 
 [Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md) | [Section suivante : §17 Gouvernance](section-17-gouvernance.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, octobre 2026 : 40 cas de cloisonnement conformes, une faille du calcul des droits NTFS reproduite puis corrigée, alerte prouvée par une fuite simulée. Compléments de la 2.21.0 (refus des secrets d'exemple, identité signée, versions figées, supervision externe) validés sur la VM de test, octobre 2026.
+**Statut :** validé en lab sur VM-RAG-LAB, octobre 2026 : 40 cas de cloisonnement conformes, une faille du calcul des droits NTFS reproduite puis corrigée, alerte prouvée par une fuite simulée. Compléments de la 2.21.0 (refus des secrets d'exemple, identité signée, versions figées, supervision externe) validés sur la VM de test, octobre 2026. Seconde faille (droits périmés de la recherche par mots-clés, §16.5.1) signalée par une revue externe du code, reproduite puis corrigée en 2.21.3, sur le vrai Qdrant de la VM de test, le 20 octobre 2026.
 
 ---
 
@@ -40,6 +40,8 @@ L'endpoint d'administration `/admin/verifier-acces` reçoit un utilisateur et un
 3. les droits de l'étiquette Purview (§14).
 
 Il renvoie trois nombres : les chunks du document dans l'index, ceux qui restent après la première condition, et ceux qui restent après Purview. Pas de classement, pas de génération, pas de juge. On voit ainsi **quelle condition** a retiré le document.
+
+> **Ce que ce test ne voit pas.** Il vérifie les droits enregistrés dans Qdrant, pas le chemin que suit une question. Un défaut de la recherche elle-même, qui contournerait ces droits, lui échappe : c'est le cas de la faille du §16.5.1, trouvée par une lecture du code. D'où les tests propres à ce chemin.
 
 ## §16.3 Le test de non-divulgation
 
@@ -114,6 +116,26 @@ Jusqu'à la v2.16, `acl_resolver.py` ne lisait que le début de la ligne : **tou
 > **Deux défauts qui se masquaient.** Le premier essai, avec « Utilisateurs du domaine » en écriture seule, n'a révélé aucune fuite : ce groupe est le **groupe principal** des comptes AD, absent de l'attribut `memberOf` que lit la RAG API. Le défaut du masque était bien là, compensé par un second défaut. Corriger d'abord le groupe principal aurait rendu le fichier lisible par tout le domaine. **L'ordre des corrections compte : le masque d'abord, le groupe principal ensuite.** C'est le genre de piège qu'un test automatisé révèle, et qu'une correction faite sans lui aurait déclenché.
 
 **Permissions du partage.** Sous Windows, l'accès réseau exige aussi les droits du partage. Le RAG ne lit que les NTFS : il suppose un partage ouvert largement (« Tout le monde » ou « Utilisateurs authentifiés »), la restriction étant portée par les NTFS, ce qui est la configuration habituelle. Lire les droits d'un partage exige en général des droits d'administration sur le serveur, que le compte d'indexation ne doit pas avoir. `Set-AccesIndexationRAG.ps1 -Verifier` affiche donc ces droits depuis le serveur, et signale un partage restreint (code de sortie 3).
+
+### §16.5.1 Seconde faille : un droit retiré restait valable par les mots-clés
+
+**Le défaut.** La recherche combine deux branches (§8.6). La branche vectorielle interroge Qdrant à chaque question, avec les droits actuels. La branche par mots-clés (BM25) cherche dans un index en mémoire, qui garde le texte **et les droits** du moment de sa construction : au démarrage, puis en fin de synchronisation. Jusqu'à la 2.21.2, ses candidats étaient autorisés sur ces droits mémorisés. Entre la modification des droits dans Qdrant et la reconstruction suivante, un droit retiré restait donc valable par ce chemin : pendant la synchronisation elle-même, ou jusqu'à une heure quand `acl_resolver.py` est lancé à la main. Un document supprimé restait aussi trouvable.
+
+**Le repli qui l'aggravait.** Pour un document complémentaire, la RAG API relit dans Qdrant les extraits voisins, avec les droits actuels. Si cette lecture ne renvoyait rien, elle remettait l'extrait d'origine. Or une lecture vide, c'est précisément le cas d'un droit retiré.
+
+**Comment il a été trouvé.** Par une revue externe du code, en octobre 2026. Le défaut figurait dans le suivi (point 10), avec une gravité « faible » : on comptait sur la relecture des voisins pour l'arrêter. Cette justification était fausse, à cause du repli. Le test de non-divulgation ne pouvait pas le voir (§16.2).
+
+**Reproduction.** `test_revalidation_bm25.py` simule Qdrant : l'index est construit pendant que deux documents sont autorisés, puis le droit sur l'un est retiré, sans reconstruire l'index. Sur le code de la 2.21.2, le document retiré revient dans les sources, avec et sans extension du contexte : **FUITE**.
+
+**Correction (2.21.3).** Les droits mémorisés ne servent plus qu'à présélectionner les candidats. Chaque candidat est relu dans Qdrant par son identifiant, en un appel par collection, et les droits (ALLOW, puis DENY) sont contrôlés sur cette lecture ; texte, source et étiquette Purview en sont repris. Refus par défaut : un point disparu ou une lecture en erreur écarte le candidat. Le repli est supprimé : une lecture des voisins vide ou en erreur écarte le document. Sur le code corrigé, les 11 tests unitaires passent.
+
+**Sur le vrai Qdrant.** `test_revocation_bm25.py` retire quelques secondes le droit sur un document, sans reconstruire l'index, repose la question avec les mots les plus rares du document, puis remet les droits d'origine et les contrôle. Le test ne fait que retirer un droit : il ne donne accès à rien.
+
+> **Validé sur la VM de test, 20 octobre 2026**, avec `COMPTABILITE/Test_RAG_Depot.docx`, lisible par l'administrateur seul, et la question « dépôt » :
+>
+> - **en 2.21.2 : FUITE par les deux chemins.** Avec l'extension du contexte, un autre document passe en tête après le retrait, et `Test_RAG_Depot.docx` revient en complément, par le repli. Sans extension, il revient directement ;
+> - **en 2.21.3 : OK par les deux chemins.** Le journal de la RAG API indique `[BM25] Relecture : 0 candidat(s) disparu(s) ou illisible(s), 1 refusé(s) par les droits actuels` ;
+> - droits d'origine restaurés et contrôlés après chaque passage ; tests unitaires : 11 OK ; test de non-divulgation inchangé après correction (70 OK, 2 INFO, aucune fuite).
 
 ## §16.6 Durcissement de la RAG API
 
@@ -307,6 +329,8 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Contrôle après synchronisation | `docker logs rag-api \| grep CLOISONNEMENT` | `N/N conformes, fuites=0` |
 | Alerte | Contre-épreuve (fuite simulée) | Courriel « FUITE DE CLOISONNEMENT » reçu |
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
+| Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `11 tests OK` |
+| Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |
 | Identité signée | Contrôle d'usurpation (§16.6) | HTTP 403 |

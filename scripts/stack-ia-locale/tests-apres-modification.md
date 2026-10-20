@@ -317,6 +317,24 @@ docker exec -it rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipelin
 
 Un `MANQUÉ` n'est pas un problème de sécurité : le document autorisé n'est simplement pas remonté par la recherche.
 
+### 9.3 Droit retiré et recherche par mots-clés (2.21.3)
+
+Tests unitaires, sans Qdrant ni modèle, quelques secondes :
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
+```
+
+**Attendu :** `11 tests OK`.
+
+Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/test_revocation_bm25.py --compte <compte@votre-domaine.ch> --document "<Nom_du_fichier.docx>"
+```
+
+**Attendu :** `Bilan : OK` et `Droits d'origine restaurés et contrôlés`. Un `NON CONCLUANT` demande un autre document ; si les droits n'ont pas été restaurés, lancer `acl_resolver.py` (§0, étape 13).
+
 Si un test a été lancé **sans** `-it` et continue de tourner :
 
 ```bash
@@ -398,6 +416,7 @@ Réponse obtenue fin septembre 2026 avec le compte `direction@votre-domaine.ch` 
 | 8 | Open WebUI | | Requêtes par question : |
 | 9.1 | Cloisonnement, mode accès | | |
 | 9.2 | Cloisonnement, mode complet | | |
+| 9.3 | Droit retiré, mots-clés | | Document : |
 | 10.1 | Synchronisation et contrôle | | |
 | 10.2 | Synthèse Teams | | |
 | 10.3 | Journal | | |

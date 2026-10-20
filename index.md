@@ -46,31 +46,33 @@ Documents de référence destinés aux décideurs et aux consultants IT.
 
 | Ressource | Contenu | Lien |
 |---|---|---|
-| **Guide de déploiement stack IA locale** | Déploiement complet en 9 sections : VM, Docker Compose, cloisonnement ACL NTFS, authentification LDAP AD, pipelines n8n, fiabilité, sécurité | → [Accéder au guide](docs/stack-ia-locale/index.md) |
-| **Scripts Python** | `indexer.py`, `acl_resolver.py`, `main.py`, `auth.py`, `docker-compose.yml` : valeurs sensibles remplacées par des placeholders, prêts à adapter | → [Accéder aux scripts](scripts/stack-ia-locale/index.md) |
-| **Workflows n8n** | Synchronisation corpus + email quarantaine, rappel mensuel rotation svc-rag : fichiers JSON importables directement dans n8n | → [Accéder aux workflows](scripts/N8N/) |
+| **Guide de déploiement stack RAG IA locale** | Déploiement complet en 18 sections (§0 à §17) : démarrage rapide, VM et disque chiffré, serveur de modèles, Docker Compose, cloisonnement par les droits NTFS, authentification Active Directory, n8n, fiabilité des réponses, sécurité, mesures sur GPU, Microsoft 365, contrôle du cloisonnement, gouvernance | → [Accéder au guide](docs/stack-ia-locale/index.md) |
+| **Scripts** | `deploy.sh`, `docker-compose.yml`, RAG API, indexation, droits d'accès, tests de cloisonnement : valeurs sensibles remplacées par des repères, prêts à adapter | → [Accéder aux scripts](scripts/stack-ia-locale/index.md) |
+| **Workflows n8n** | Synchronisation du corpus avec alertes, rappel de rotation du compte de service, synthèse des réunions Teams : fichiers JSON importables dans n8n | → [Accéder aux workflows](scripts/N8N/) |
 
 ### Ce que la stack fait concrètement
 
-Validée en lab sur matériel CPU sans GPU. Ce n'est pas un proof of concept : c'est une stack opérationnelle.
+Un assistant qui répond à partir des documents de l'entreprise, sans service d'IA externe. Validé en lab, sur processeur puis sur carte graphique (NVIDIA RTX 5060 Ti 16 Go), avec Ollama et avec vLLM. Ce n'est pas une installation de production : le guide dit ce qu'il faut ajouter pour y arriver (§17.7).
 
-- Authentification via compte Active Directory dans Open WebUI.
-- Cloisonnement documentaire réel : chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
-- Contrôle d'ancrage : les réponses du LLM sont vérifiées par un juge LLM secondaire avant affichage.
-- Journalisation nLPD : chaque requête est tracée avec l'identité de l'utilisateur et les sources consultées.
-- Synchronisation et résolution des permissions automatisées via n8n.
+- **Cloisonnement réel :** chaque utilisateur ne voit que les documents qu'il a déjà le droit d'ouvrir, sur le serveur de fichiers (droits NTFS) comme dans SharePoint, documents protégés par Purview compris.
+- **Contrôlé automatiquement :** un test de non-divulgation est rejoué après chaque synchronisation, avec une alerte par courriel en cas de fuite.
+- **Réponses vérifiées :** chaque réponse cite ses sources, et un second modèle contrôle qu'elle s'appuie bien sur elles.
+- **Accès sécurisé :** connexion par le compte Active Directory, en HTTPS derrière un frontal Nginx, avec une identité signée entre l'interface et le moteur de recherche.
+- **Traçabilité nLPD :** chaque question est journalisée avec l'utilisateur et les sources consultées ; les données sont chiffrées au repos.
+- **Rejouable :** `deploy.sh` installe la stack sur une VM neuve ; la procédure complète a été rejouée de bout en bout le 19 octobre 2026.
 
-**Stack technique :** Open WebUI + RAG API FastAPI + Qdrant + Ollama ou vLLM (qwen3:14b) + n8n, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS. Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+**Stack technique :** Open WebUI, RAG API FastAPI, Qdrant, Ollama ou vLLM (qwen3:14b), n8n et Nginx, déployés par Docker Compose sur Ubuntu Server 26.04 LTS. Recherche hybride par mots-clés et par vecteurs, indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 ---
 
 ## Ce qui vient ensuite
 
-La **Partie 3** connecte la stack à Microsoft 365. Déjà publiées et validées en lab : les prérequis Microsoft Graph et la résolution des groupes Entra ID (§11), la synthèse des réunions Teams par le modèle local (§12), l'indexation de SharePoint Online avec ses permissions (§13), les documents protégés par Purview avec une double condition d'accès (§14), la sécurité des données de la stack (§15), et le contrôle automatisé du cloisonnement, rejoué après chaque synchronisation (§16).
+Les trois parties du guide sont publiées : le serveur de fichiers Windows (§0 à §10), Microsoft 365 (§11 à §14), puis la sécurité, le contrôle du cloisonnement et la gouvernance (§15 à §17). Prochaines étapes :
 
-La Partie 3 se termine par la gouvernance de l'ensemble (§17).
-
-**Après l'installation du GPU RTX 5060 Ti :** les mesures de performance (§10) et le RAG visuel pour les documents PDF complexes.
+- un test de charge avec vLLM, à quatre puis huit questions simultanées, et des mesures de l'index sur un corpus plus grand ;
+- une procédure de mise à jour d'une installation existante ;
+- une section « Du lab à la production » ;
+- le RAG visuel, pour les PDF complexes (tableaux, schémas).
 
 ---
 

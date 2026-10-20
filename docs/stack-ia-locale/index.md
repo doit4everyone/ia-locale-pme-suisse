@@ -113,11 +113,13 @@ Les numéros de section sont attribués à la publication.
 
 ## Ce qui vient ensuite
 
-La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance. Il reste à venir :
+La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance. Le déploiement sur une VM neuve, disque chiffré compris, a été rejoué de bout en bout le 19 octobre 2026 (version 2.21.1). Il reste à venir :
 
-- **le déploiement sur une VM neuve** avec le disque de données chiffré préparé dès le départ (§1.5), et des scripts de déploiement simplifiés ;
+- **un test de charge avec vLLM** (quatre puis huit questions simultanées) et l'essai de `deploy.sh` avec vLLM sur une VM neuve ;
+- **des mesures de l'index** sur un corpus de 20 000 à 100 000 extraits, pour savoir quand changer d'approche (point 75 du suivi) ;
+- **une procédure de mise à jour** d'une installation existante, validée sur la VM connectée à Microsoft 365 ;
 - **le résumé d'un document entier** (lecture par morceaux puis synthèse), que le RAG ne sait pas faire en choisissant des extraits (§10.10) ;
-- **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal), comme extension de la Partie 2 ;
+- **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal) ;
 - **une section « Du lab à la production »**, qui listera ce qu'un déploiement en entreprise exige en plus du lab.
 
 ---

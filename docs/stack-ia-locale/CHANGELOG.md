@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.3] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une revue externe du code : un droit retiré restait valable par la recherche par mots-clés jusqu'à la reconstruction de son index (point 10, §16.5.1). Validé sur la VM de test le 20 octobre 2026 : fuite reproduite sur le vrai Qdrant en 2.21.2, absente en 2.21.3, test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Sécurité
+
+- `api/anon_main.py` : chaque candidat de la recherche par mots-clés (BM25) est relu dans Qdrant par son identifiant, en un appel par collection, et ses droits (ALLOW, puis DENY) sont contrôlés sur cette lecture (`revalider_bm25`) ; texte, source et étiquette Purview en sont repris. Un point disparu ou une lecture en erreur écarte le candidat. Les droits mémorisés dans l'index ne servent plus qu'à présélectionner.
+- `api/anon_main.py` : `etendre_complements` ne remet plus l'extrait d'origine quand la relecture des voisins revient vide ou en erreur ; le document est écarté.
+
+### Tests
+
+- `test_revalidation_bm25.py` (nouveau) : 11 tests unitaires, Qdrant simulé ; sur le code de la 2.21.2, les 11 tests échouent, dont les deux recherches de bout en bout (fuite reproduite).
+- `test_revocation_bm25.py` (nouveau) : test sur le vrai Qdrant, droit retiré quelques secondes sans reconstruction de l'index, question composée avec les mots les plus rares du document, droits remis et contrôlés ensuite.
+- `deploy.sh` : copie des deux tests, tests unitaires lancés à l'étape 10 ; en-tête en 2.21.3.
+- `tests-apres-modification.md` : §9.3.
+
+### Documentation
+
+- `section-08-fiabilite.md` : §8.6, droits relus dans Qdrant.
+- `section-16-cloisonnement.md` : statut ; §16.2, ce que le test de non-divulgation ne voit pas ; §16.5.1 (nouveau) ; checklist.
+- `suivi-corrections.md` : point 10 corrigé, gravité sous-estimée jusqu'ici.
+- Page d'accueil (`index.md`), `README.md`, sommaire du guide : présentation mise à jour (18 sections, validation sur GPU, sécurité de la 2.21, lab et non production, rejeu du 19 octobre, prochaines étapes).
+
+---
+
 ## [2.21.2] : Octobre 2026
 
 Rejeu complet du §0 avec la version 2.21.1 sur une VM Ubuntu 26.04 neuve, le 19 octobre 2026, avec Ollama : déploiement, certificat auto-signé puis certificat de l'autorité interne, indexation (70 fichiers, 1 692 extraits), droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou par un partage inexistant, ports exposés, redémarrage et supervision. Corrections issues de ce rejeu.

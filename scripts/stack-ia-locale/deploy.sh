@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.2)
+# Version : beta (2.21.3)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -410,8 +410,11 @@ if [ -f "test_cloisonnement.py" ]; then
     cp test_cloisonnement.py /root/rag-pipeline/test_cloisonnement.py
     [ -f cas_cloisonnement.exemple.json ] && cp cas_cloisonnement.exemple.json /root/rag-pipeline/
 fi
-# Tests unitaires du contrôle des citations (lancés à l'étape 10)
-[ -f "test_citations.py" ] && cp test_citations.py /root/rag-pipeline/test_citations.py
+# Tests unitaires du contrôle des citations et des droits sur la recherche par
+# mots-clés (lancés à l'étape 10), test en lab d'un droit retiré (§16.5.1)
+for f in test_citations.py test_revalidation_bm25.py test_revocation_bm25.py; do
+    [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
+done
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
 if [ -d "mip-service" ]; then
     mkdir -p /root/rag-stack/mip-service
@@ -809,6 +812,15 @@ if [ -f /root/rag-pipeline/test_citations.py ]; then
         ok "Contrôle des citations : tests unitaires OK"
     else
         warn "Contrôle des citations : tests en échec (docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py)"
+    fi
+fi
+
+# Droits sur la recherche par mots-clés : tests unitaires, Qdrant simulé (§16.5.1)
+if [ -f /root/rag-pipeline/test_revalidation_bm25.py ]; then
+    if docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py >/dev/null 2>&1; then
+        ok "Droits sur la recherche par mots-clés : tests unitaires OK"
+    else
+        warn "Droits sur la recherche par mots-clés : tests en échec (docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py)"
     fi
 fi
 
