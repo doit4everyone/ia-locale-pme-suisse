@@ -76,6 +76,8 @@ docker exec rag-api python3 -c "import httpx; print(httpx.get('http://localhost:
 
 **Attendu :** `{"status":"ok"}`
 
+Depuis la 2.21.8, `droits_perimes` ou `droits_inconnus` au lieu de `ok` : questions refusées, lancer une synchronisation (§16.5.2).
+
 ```bash
 docker exec rag-api python3 -c "import httpx; print(httpx.get('http://localhost:8080/stats').status_code)"
 ```
@@ -333,7 +335,7 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 ```
 
-**Attendu :** `31 tests OK`.
+**Attendu :** `42 tests OK`.
 
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 

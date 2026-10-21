@@ -9,6 +9,15 @@ relève la durée de chaque réponse, la durée totale du palier et le nombre
 d'échecs. Chaque demande pose une question différente du jeu (celles qui
 doivent recevoir une réponse, pas un refus).
 
+Mesure de référence (depuis la 2.21.8) : avant les paliers, chaque question est
+posée SEULE une fois. Pour chaque série, le script calcule le GAIN : la somme des
+durées des mêmes questions posées seules, divisée par la durée totale de la série.
+Un gain de 1,5 signifie que la série a été servie 1,5 fois plus vite que les mêmes
+questions enchaînées. Les paliers ne posent pas les mêmes questions (le jeu est
+parcouru dans l'ordre) : comparer leurs médianes entre elles ne mesure pas l'effet
+de la charge, le gain si. Mesuré le 21 octobre 2026 (§10.12) : la comparaison des
+médianes donnait ×14,8, le gain réel ×1,0 à ×1,5.
+
 À lancer DANS le conteneur rag-api :
 
   docker exec -it rag-api python3 /rag-pipeline/s10/charge_s10.py \\
@@ -19,6 +28,7 @@ Options :
   --repetitions N       nombre de séries par palier (défaut : 2)
   --etiquette X         nom de la configuration mesurée (figure dans le rapport)
   --pause S             pause entre deux paliers, en secondes (défaut : 20)
+  --sans-reference      sauter la mesure de référence (pas de calcul de gain)
 
 La mémoire de la carte ne se lit pas depuis le conteneur : relever en parallèle,
 sur le serveur de modèles, `nvidia-smi --query-gpu=memory.used --format=csv -l 5`
@@ -116,6 +126,7 @@ def main():
     ap.add_argument("--repetitions", type=int, default=2)
     ap.add_argument("--etiquette", default="sans-etiquette")
     ap.add_argument("--pause", type=int, default=20)
+    ap.add_argument("--sans-reference", action="store_true")
     args = ap.parse_args()
 
     if not API_TOKEN:
@@ -146,6 +157,20 @@ def main():
     poser(questions[0], compte, tmp, ev)
     print(f"  {tmp[0]['duree_s']} s\n")
 
+    # Référence : chaque question seule, une fois
+    reference: dict[str, float] = {}
+    if not args.sans_reference:
+        print(f"Référence : les {len(questions)} questions posées une par une...")
+        for q in questions:
+            tmp = []
+            ev = threading.Event(); ev.set()
+            poser(q, compte, tmp, ev)
+            if not tmp[0]["erreur"]:
+                reference[q["id"]] = tmp[0]["duree_s"]
+            print(f"  {q['id']:<24} {tmp[0]['duree_s']} s" + (f"  ERREUR {tmp[0]['erreur']}" if tmp[0]["erreur"] else ""))
+            time.sleep(min(args.pause, 5))
+        print(f"  Total à la suite : {round(sum(reference.values()), 1)} s\n")
+
     rapport_paliers, tous = [], []
     curseur = 0
     for n in paliers:
@@ -167,11 +192,16 @@ def main():
             ecarts = sum(1 for s in sortie if s["ecarts"])
             med = round(statistics.median(durees), 1) if durees else None
             mx = max(durees) if durees else None
+            gain = None
+            if reference and all(s["id"] in reference for s in sortie) and total > 0:
+                gain = round(sum(reference[s["id"]] for s in sortie) / total, 2)
             print(f"  {n:2} simultanées, série {rep} : médiane {med} s, max {mx} s, "
-                  f"total {total} s, erreurs {echecs}, réponses avec écart {ecarts}/{len(sortie)}")
+                  f"total {total} s, gain {gain if gain is not None else '?'}, "
+                  f"erreurs {echecs}, réponses avec écart {ecarts}/{len(sortie)}")
             rapport_paliers.append({"simultanees": n, "serie": rep, "mediane_s": med,
-                                    "max_s": mx, "total_s": total, "erreurs": echecs,
-                                    "reponses_avec_ecart": ecarts})
+                                    "max_s": mx, "total_s": total, "gain": gain,
+                                    "questions_par_min": round(n / total * 60, 1) if total else None,
+                                    "erreurs": echecs, "reponses_avec_ecart": ecarts})
             tous.extend({"simultanees": n, "serie": rep, **s} for s in sortie)
             time.sleep(args.pause)
 
@@ -182,22 +212,22 @@ def main():
         e = sum(1 for s in tous if s["simultanees"] == n and s["erreur"])
         a = sum(1 for s in tous if s["simultanees"] == n and s["ecarts"])
         nb = sum(1 for s in tous if s["simultanees"] == n)
+        gains = [r["gain"] for r in rapport_paliers if r["simultanees"] == n and r["gain"] is not None]
         synthese[n] = {"demandes": nb, "mediane_s": round(statistics.median(d), 1) if d else None,
                        "p95_s": percentile(d, 0.95), "max_s": max(d) if d else None,
+                       "gain_min": min(gains) if gains else None, "gain_max": max(gains) if gains else None,
                        "erreurs": e, "reponses_avec_ecart": a}
+        g = (f"gain {synthese[n]['gain_min']} à {synthese[n]['gain_max']}" if gains else "gain ?")
         print(f"  {n:2} simultanées : médiane {synthese[n]['mediane_s']} s, "
-              f"P95 {synthese[n]['p95_s']} s, max {synthese[n]['max_s']} s, "
+              f"P95 {synthese[n]['p95_s']} s, max {synthese[n]['max_s']} s, {g}, "
               f"erreurs {e}/{nb}, écarts {a}/{nb}")
-    if 1 in synthese and synthese[1]["mediane_s"]:
-        base = synthese[1]["mediane_s"]
-        print("\nRapport à une question seule (médiane) :")
-        for n in paliers:
-            if synthese[n]["mediane_s"]:
-                print(f"  {n:2} simultanées : x{round(synthese[n]['mediane_s'] / base, 2)}")
+    if reference:
+        print(f"\nGain : somme des durées des mêmes questions posées seules / durée de la série. "
+              f"Référence totale : {round(sum(reference.values()), 1)} s pour {len(reference)} questions.")
 
     rapport = f"/var/log/rag/charge_s10_{args.etiquette}_{datetime.now():%Y%m%d_%H%M%S}.json"
     with open(rapport, "w", encoding="utf-8") as f:
-        json.dump({"configuration": config, "paliers": rapport_paliers,
+        json.dump({"configuration": config, "reference_s": reference, "paliers": rapport_paliers,
                    "synthese": synthese, "resultats": tous}, f, ensure_ascii=False, indent=2)
     print(f"Rapport : {rapport}")
 

@@ -135,6 +135,13 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 141 | RAG API (2.21.6) : un échec d'écriture du registre était signalé mais les questions restaient servies ; après un redémarrage, l'ancien registre était relu comme valide, sans les documents retirés depuis. Questions refusées tant que le registre n'est pas écrit ; marqueur « synchronisation des droits en cours » posé avant toute modification des droits et retiré après l'écriture du résultat ; présent au démarrage, questions refusées jusqu'à une synchronisation terminée ; marqueur impossible à écrire, droits non synchronisés. Dossier synchronisé après le renommage. Signalé par une cinquième revue externe. VM de test : synchronisation interrompue simulée, questions refusées puis servies après une synchronisation | v2.21.7 | 2026-10-20 |
 | 142 | Registre lisible mais mal formé (`{}`, chaîne au lieu d'une liste, version inconnue) accepté sans contrôle. Validation stricte du schéma ; toute anomalie = état inconnu, questions refusées. Signalé par une cinquième revue externe | v2.21.7 | 2026-10-20 |
 | 143 | `ACL_INCERTAIN_FERME` valait 0 par défaut : après un passage abandonné ou interrompu, les derniers droits connus restaient appliqués. Défaut à 1 : origine suspendue jusqu'à un passage complet ; 0 reste possible par choix documenté | v2.21.7 | 2026-10-20 |
+| 144 | Synchronisations arrêtées (n8n arrêté, workflow désactivé) : les derniers droits connus restaient appliqués sans limite de durée, sans alerte. Âge maximal des droits (`ACL_AGE_MAX_HEURES`, 3 heures par défaut) : date de la dernière synchronisation complète enregistrée dans le registre (version 3), mise à jour seulement si toutes les origines ont abouti sans passage incertain et si le registre est écrit ; au-delà, date absente ou dans le futur, questions refusées. Questions servies pendant une synchronisation normale : choix documenté (§5.4). Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
+| 145 | Marqueur « synchronisation des droits en cours » posé après l'indexation : une indexation interrompue n'était pas couverte. Marqueur posé avant ; droits non garantis, indexation sautée. Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
+| 146 | `deploy.sh` recréait un registre vide si celui-ci manquait sur une installation existante, ce qui effaçait la liste des documents retirés. Registre créé seulement sur une installation neuve ; installation existante sans registre, arrêt en erreur. Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
+| 147 | `deploy.sh` : un test de sécurité absent du dossier source n'était pas copié, sans erreur ; une ancienne copie restée dans `/root/rag-pipeline` était alors lancée à sa place. Présence obligatoire dans le dossier source et copie contrôlée. Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
+| 148 | `/health` répondait « ok » même avec des droits périmés ou inconnus : la supervision ne voyait rien. État des droits dans la réponse, toujours en HTTP 200. Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
+| 149 | `s10/charge_s10.py` comparait les médianes de paliers qui ne posaient pas les mêmes questions (« ×14,8 » à 8 questions, sans rapport avec la charge). Mesure de référence de chaque question seule, gain de chaque série ; compte rendu au §10.12 | v2.21.8 | 2026-10-21 |
+| 150 | Procédures de mise à jour des Releases 2.21.2 à 2.21.7 : seul `main.py` était remplacé, jamais le `docker-compose.yml`. Sur la VM de test, le Compose était resté en 2.21.1 : `ACL_INCERTAIN_FERME` n'était pas transmis (valeur par défaut du code, 1, appliquée) et une valeur d'`ACL_AGE_MAX_HEURES` passée à Compose était ignorée sans message. Remplacement du Compose dans la procédure de la 2.21.8, avec comparaison préalable | v2.21.8 | 2026-10-21 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -281,6 +288,18 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.8 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §5.4 | Fenêtre de péremption des droits : latence normale et fenêtre supplémentaire bornée à 3 heures | v2.21.8 |
+| §16.5.2, §16.10 | Compléments de la 2.21.8, mise à jour, synchronisation manuelle, limites ; état des droits dans `/sante` ; checklist | v2.21.8 |
+| §10.12 | Mesure de charge de une à huit questions simultanées avec vLLM ; verdict nuancé au-delà de deux questions | v2.21.8 |
+| §3 | `ACL_AGE_MAX_HEURES` dans l'extrait du Compose | v2.21.8 |
+| §16.5.2 | Mise à jour : remplacement du `docker-compose.yml`, omis par les procédures de la 2.21.2 à la 2.21.7 | v2.21.8 |
 
 ---
 

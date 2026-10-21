@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.7)
+# Version : beta (2.21.8)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -80,7 +80,9 @@ echo ""
 # modification et avant les questions : confirmation explicite, puis copie
 # datée (point 125 du suivi).
 ENV_EXISTANT=$(readlink -f /root/rag-stack/.env 2>/dev/null || true)
+INSTALLATION_EXISTANTE=non   # utilisé plus bas pour le registre des documents retirés
 if [ -n "$ENV_EXISTANT" ] && [ -s "$ENV_EXISTANT" ]; then
+    INSTALLATION_EXISTANTE=oui
     warn "Un fichier .env existe déjà : ${ENV_EXISTANT}"
     warn "Le déploiement va le REMPLACER : tous les jetons changent (identifiant n8n et"
     warn "clé de la connexion rag-api d'Open WebUI à refaire), réglages Microsoft 365 perdus."
@@ -360,11 +362,20 @@ mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
 chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
-# Registre des documents retirés de la recherche (§16.5.2), vide à l'installation.
-# Son absence ensuite est anormale : la RAG API refuse alors les questions jusqu'à
-# une synchronisation complète. Jamais écrasé s'il existe.
+# Registre des documents retirés de la recherche (§16.5.2). Créé vide, et daté,
+# sur une installation NEUVE seulement : le corpus est vide ou ses droits viennent
+# d'être résolus. Sur une installation existante, un registre absent est anormal :
+# en recréer un vide effacerait la protection qu'il porte (2.21.8). Jamais écrasé.
+QDRANT_COLLECTIONS="$(readlink -f /root/rag-stack/qdrant_data 2>/dev/null)/collections"
 if [ ! -f /var/log/rag/acl_bloques.json ]; then
-    echo '{"version": 2, "smb": [], "sharepoint": [], "prefixes": [], "smb_tout": false, "sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}' > /var/log/rag/acl_bloques.json
+    if [ "$INSTALLATION_EXISTANTE" = "oui" ] || [ -n "$(ls -A "$QDRANT_COLLECTIONS" 2>/dev/null)" ]; then
+        echo -e "${RED}[ERREUR]${NC} Installation existante sans /var/log/rag/acl_bloques.json :"
+        echo "  le registre des documents retirés de la recherche a disparu. Ne pas en créer un vide."
+        echo "  Redémarrer la stack existante (cd /root/rag-stack && docker compose up -d), puis lancer"
+        echo "  une synchronisation complète : elle reconstruit le registre (§16.5.2)."
+        exit 1
+    fi
+    echo "{\"version\": 3, \"smb\": [], \"sharepoint\": [], \"prefixes\": [], \"smb_tout\": false, \"sharepoint_tout\": false, \"incertain\": {\"smb\": false, \"sharepoint\": false}, \"derniere_synchro_complete\": \"$(date -u +%Y-%m-%dT%H:%M:%S+00:00)\"}" > /var/log/rag/acl_bloques.json
     chmod 640 /var/log/rag/acl_bloques.json
 fi
 mkdir -p /etc/smbcredentials
@@ -419,8 +430,22 @@ if [ -f "test_cloisonnement.py" ]; then
 fi
 # Tests unitaires du contrôle des citations et des droits sur la recherche par
 # mots-clés (lancés à l'étape 10), test en lab d'un droit retiré (§16.5.1)
+# Les deux tests de sécurité sont exigés dans le dépôt (2.21.8) : sinon, une
+# ancienne copie restée dans /root/rag-pipeline serait lancée à leur place.
+for f in test_revalidation_bm25.py test_echec_droits.py; do
+    if [ ! -f "$f" ]; then
+        echo -e "${RED}[ERREUR]${NC} Test de sécurité $f absent du dépôt ($(pwd)) : déploiement arrêté (§16.5)."
+        exit 1
+    fi
+done
 for f in test_citations.py test_revalidation_bm25.py test_revocation_bm25.py test_echec_droits.py; do
     [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
+done
+for f in test_revalidation_bm25.py test_echec_droits.py; do
+    if ! cmp -s "$f" "/root/rag-pipeline/$f"; then
+        echo -e "${RED}[ERREUR]${NC} /root/rag-pipeline/$f diffère de la version du dépôt : déploiement arrêté (§16.5)."
+        exit 1
+    fi
 done
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
 if [ -d "mip-service" ]; then
@@ -955,6 +980,8 @@ echo "        ceux du fichier importé ne correspondent à rien chez vous."
 echo "     d. Renseigner les adresses : expéditeur = la boîte authentifiée par SMTP,"
 echo "        destinataire = une boîte interne."
 echo "     e. Publier les deux workflows, puis lancer une exécution manuelle."
+echo "        Sans synchronisation complète pendant 3 h (ACL_AGE_MAX_HEURES), la RAG API refuse"
+echo "        les questions (droits trop anciens, §16.5.2) : configurer n8n sans tarder."
 echo "     f. Facultatif, après le §12 : importer scripts/N8N/n8n-teams-sync.json."
 echo "  $((N + 1)). Contrôles finaux (§0, étape 16), puis snapshot de la VM arrêtée et snapshot"
 echo "     Qdrant (§3.7)."

@@ -557,7 +557,35 @@ Chaque campagne prend environ 1,7 fois plus de temps que seule avec le juge rete
 
 Une observation reste sans explication : sur la question d'inventaire des règles YAML, les deux campagnes simultanées placent chacune un autre document en tête (`10-integrations-agents.md` pour l'une, `14_Registre_Personnel_2026.docx` pour l'autre), alors que le même document est attendu. Elle est consignée au suivi.
 
-**Pour comparer avec vLLM** (juge 14B, 30 questions) : 6,5 min seul, 6,9 min à deux. Ollama avec le juge retenu est plus rapide pour une personne seule (4,8 min), vLLM l'est pour deux personnes simultanées (6,9 min contre 8,2 min). Au-delà de deux utilisateurs, rien n'a été mesuré avec Ollama, ni avec vLLM (quatre questions simultanées).
+**Pour comparer avec vLLM** (juge 14B, 30 questions) : 6,5 min seul, 6,9 min à deux. Ollama avec le juge retenu est plus rapide pour une personne seule (4,8 min), vLLM l'est pour deux personnes simultanées (6,9 min contre 8,2 min). Au-delà de deux utilisateurs, rien n'a été mesuré avec Ollama ; pour vLLM, voir la mesure de une à huit questions simultanées ci-dessous.
+
+### De une à huit questions à la fois : la mesure de charge
+
+**Conditions.** Mesuré le 21 octobre 2026 sur la VM de test (§0), avec vLLM 0.31.0 dans la configuration du §2.4.7 (`Qwen3-14B-AWQ`, qui sert aussi de juge ; au plus 4 questions traitées ensemble), au nom du compte administrateur du lab, sur un index de 76 extraits (documents) et 1 616 (documentation). Sur le poste LABO-G9, seules trois VM tournaient (contrôleur de domaine, serveur de fichiers, VM de test), et la puissance du processeur était limitée à 75 W en continu et 85 W en pointe. Workflow de synchronisation désactivé pendant la mesure. Le script `s10/charge_s10.py` pose 1, 2, 4, 6 puis 8 questions en même temps, deux séries par palier, chaque série avec d'autres questions du jeu ; les 14 questions ont ensuite été posées une par une, dans la même session, pour servir de référence.
+
+**Le piège de la première lecture.** Les paliers ne posent pas les mêmes questions : le palier 1 a posé des questions précises de 3 à 5 s, le palier 8 surtout des synthèses. Comparer leurs médianes donnait « ×14,8 » à 8 questions, un chiffre qui ne mesure pas la charge. La bonne mesure est le **gain** de chaque série : la somme des durées des mêmes questions posées seules, divisée par la durée totale de la série. Le script le calcule lui-même depuis la 2.21.8.
+
+**Une question seule** : 3 à 10 s pour une question précise, 15 à 35 s pour une synthèse ou un inventaire ; les 14 questions à la suite, 206 s.
+
+| Série | Questions | Seules, à la suite | En même temps | Gain |
+|---|---|---|---|---|
+| 2 précises | P3, P4 | 17 s | 16 s | ×1,1 |
+| 4 mélangées | L1, L2, L3, P8 | 51 s | 32 s | ×1,6 |
+| 4 lourdes | L4, L5, I1, I2 | 114 s | 82 s | ×1,4 |
+| 6 précises | P1 à P6 | 41 s | 43 s | ×1,0 |
+| 6 mélangées | L1 à L4, I1, P8 | 100 s | 71 s | ×1,4 |
+| 8 mélangées | P1 à P6, L5, I2 | 106 s | 88 s | ×1,2 |
+| 8 lourdes | L1 à L5, I1, I2, P8 | 165 s | 109 s | ×1,5 |
+
+**Aucune erreur sur les 42 questions, et la charge ne dégrade pas les réponses** : les cinq questions qui ont un écart sous charge (P6, L1, L2, L3, L4) ont le même écart posées seules ; elles relèvent du corpus de la VM de test, pas du moteur.
+
+**Pourquoi le gain reste faible : la carte est d'abord limitée par la lecture du contexte.** Chaque question fait lire 4 000 à 11 000 tokens, deux fois : pour la rédaction, puis pour le juge, qui est le même modèle. Une question seule lit déjà environ 1 360 tokens par seconde (§10.12, « La vitesse brute ») ; sous charge, le journal de vLLM plafonne entre 1 400 et 1 800. Pendant la série de 6 questions précises, le cache n'était rempli qu'à 42 à 73 %, et le gain a pourtant été nul : la limite était le calcul. Sur les séries lourdes, le cache monte à 98,8 % et vLLM met des questions de côté (`Deferred`) : la mémoire de la carte s'ajoute alors à la limite.
+
+**En capacité, avec ce corpus et ce mélange de questions** : environ 4 à 6 questions par minute, soit 250 à 350 par heure ; 8 questions posées à la même seconde sont toutes servies, la dernière en un peu moins de 2 minutes. Traduire ce débit en nombre d'utilisateurs demande une hypothèse d'usage (par exemple 5 questions par personne aux heures de pointe : une soixantaine d'utilisateurs actifs), avec des attentes d'une à deux minutes quand plusieurs questions arrivent ensemble.
+
+**Limites de cette mesure.** Une seule série par configuration ; la mémoire et la température de la carte n'ont pas été relevées ; le processeur du poste a atteint 99 °C en pointe et réduit sa fréquence une partie du temps (relevé HWiNFO à la fin du test), ce qui touche surtout la RAG API et les VM, pas la carte. Les chiffres ne se transposent pas à une autre machine : un DGX Spark a beaucoup plus de mémoire (128 Go) mais moins de bande passante mémoire (273 Go/s, contre 448 Go/s pour la RTX 5060 Ti) ; il soulagerait le cache, pas forcément le calcul. Seule une mesure sur la machine visée le dira.
+
+**Une piste, non testée.** Le juge relit les mêmes extraits que la rédaction. vLLM sait réutiliser le calcul d'un début de texte déjà lu, mais le taux de réutilisation est resté entre 13 et 41 % pendant la mesure. Si le prompt du juge commençait par les extraits, exactement dans la forme de celui de la rédaction, une bonne partie de la seconde lecture pourrait être évitée. C'est une hypothèse à mesurer avant toute conclusion.
 
 ### Ce que coûte vLLM
 
@@ -568,7 +596,7 @@ Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son
 | Situation | Moteur |
 |---|---|
 | Un essai, un poste unique, un à deux utilisateurs simultanés | **Ollama** : plus simple, et plus rapide sur une question seule grâce à son petit juge. À deux utilisateurs, chaque campagne prend environ 1,7 fois plus de temps |
-| Plusieurs utilisateurs simultanés, une PME en service | **vLLM** : presque deux fois plus de questions servies dans le même temps, pour des réponses à peine plus longues (+6 %) |
+| Plusieurs utilisateurs simultanés, une PME en service | **vLLM** : avec deux questions à la fois, presque deux fois plus de questions servies dans le même temps, pour des réponses à peine plus longues (+6 %). Au-delà, une carte de 16 Go sature : 1 à 1,5 fois plus de questions servies, et l'attente s'allonge (mesure de charge ci-dessus) |
 
 ---
 

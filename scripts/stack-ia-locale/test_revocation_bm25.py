@@ -131,6 +131,12 @@ def principal() -> int:
         return 3
     seuil_config = main.CONTEXT_THRESHOLD
 
+    # Ce processus n'a jamais synchronisé : la règle d'âge des droits (2.21.8)
+    # refuserait toute question. Le test porte sur la recherche par mots-clés,
+    # pas sur l'âge des droits (testé par test_echec_droits.py) : ce seul
+    # contrôle est désactivé ici, dans ce processus de test uniquement.
+    if hasattr(main, "ACL_AGE_MAX_HEURES"):
+        main.ACL_AGE_MAX_HEURES = 0
     main.build_bm25_index()
     if not any(correspond(c["source"], a.document) for c in main._bm25_chunks):
         print(f"NON CONCLUANT : aucun extrait de « {a.document} » dans l'index. Vérifier le nom du fichier.")

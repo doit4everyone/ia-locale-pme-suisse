@@ -222,6 +222,11 @@ def tests_recherche():
 
     main.get_embedding = embedding_simule
     main.RERANKER_URL = ""
+    # Synchronisation complète récente : sinon la règle d'âge des droits (2.21.8)
+    # refuserait toutes les questions, et ce test ne vérifierait rien d'autre.
+    if hasattr(main, "_etat") and "derniere_synchro_complete" in main._etat:
+        from datetime import datetime, timezone
+        main._etat["derniere_synchro_complete"] = datetime.now(timezone.utc).isoformat()
 
     for seuil, nom in ((main.CONTEXT_THRESHOLD, "avec extension du contexte"),
                        (2.0, "sans extension du contexte")):

@@ -16,12 +16,15 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
     registre atomique, refus des questions si le registre est absent ou illisible,
     fichier SharePoint devenu trop volumineux retiré de l'index ;
   - 2.21.7 : échec d'écriture du registre puis redémarrage, marqueur de
-    synchronisation inachevée, validation stricte du registre.
+    synchronisation inachevée, validation stricte du registre ;
+  - 2.21.8 : âge maximal des droits (récent, limite exacte, périmé, inconnu, dans
+    le futur), passage partiel, marqueur impossible puis redémarrage, workflow
+    arrêté, désactivation du seul contrôle d'âge, état signalé par /health.
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 31 tests OK », code de sortie 0.
+Attendu : « 42 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -30,6 +33,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ICI)
@@ -183,11 +187,17 @@ def ecrire_json(donnees) -> str:
     return chemin
 
 
+def il_y_a(heures: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=heures)).isoformat()
+
+
 def remise_a_zero():
     main._etat = main._etat_vide()
+    main._etat["derniere_synchro_complete"] = il_y_a(0)   # synchronisation récente
     main._registre_incertain = False
     main._persistance_ko = False
     main.ACL_INCERTAIN_FERME = False
+    main.ACL_AGE_MAX_HEURES = 3.0
     if os.path.exists(main.fichier_marqueur()):
         os.remove(main.fichier_marqueur())
 
@@ -303,7 +313,7 @@ def tests_api():
     os.remove(main.FICHIER_BLOQUES)
     main.charger_bloques()
     verifier("2.21.6 : registre absent au démarrage, état inconnu", main._registre_incertain)
-    main.lever_incertitude_registre()
+    main.finaliser_synchronisation(True, {"smb": 0}, {"smb"})   # synchronisation complète
     chunks = asyncio.run(main.search_qdrant("grille salaires", user_groups=[G], user_email="t@x.ch"))
     verifier("2.21.6 : après une synchronisation complète, questions servies", not main._registre_incertain and bool(chunks))
 
@@ -383,6 +393,118 @@ def tests_api():
 
 
 # ─────────────────────────────────────────
+# 2.21.8 : âge maximal des droits
+# ─────────────────────────────────────────
+def tests_age():
+    main.FICHIER_BLOQUES = tempfile.mktemp(suffix=".json")
+    points = {1: tb.payload("DIRECTION/Budget.docx", 0, "budget direction 2027 salaires", [G])}
+    for i in range(20):
+        points[10 + i] = tb.payload(f"DIVERS/Note_{i}.docx", 0, f"procédure archivage courrier note {i}", [G])
+    main.qdrant = QdrantPannes({main.COLLECTION: points, main.DOCUMENTATION_COLLECTION: {}})
+    main._bm25_chunks = [tb.candidat(i, v) for i, v in points.items()]
+    main._bm25_index = tb.BM25Okapi([c["text"].lower().split() for c in main._bm25_chunks])
+
+    def servie():
+        try:
+            asyncio.run(main.search_qdrant("budget direction", user_groups=[G], user_email="t@x.ch"))
+            return True
+        except main.HTTPException as e:
+            return False if e.status_code == 503 else None
+
+    remise_a_zero()
+    main._etat["derniere_synchro_complete"] = il_y_a(1)
+    verifier("2.21.8 : synchronisation complète il y a 1 h, question servie, /health ok",
+             servie() is True and main.etat_droits() == "ok")
+
+    t0 = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    main._etat["derniere_synchro_complete"] = t0.isoformat()
+    a_la_limite = main.droits_frais(t0 + timedelta(hours=3))[0]
+    juste_apres = main.droits_frais(t0 + timedelta(hours=3, seconds=1))[0]
+    verifier("2.21.8 : âge égal à la limite accepté, une seconde de plus refusée",
+             a_la_limite is True and juste_apres is False)
+
+    main._etat["derniere_synchro_complete"] = il_y_a(4)
+    verifier("2.21.8 : synchronisation complète il y a 4 h, question refusée, /health droits_perimes",
+             servie() is False and main.etat_droits() == "droits_perimes")
+
+    main._etat["derniere_synchro_complete"] = None
+    inconnu = servie() is False and main.etat_droits() == "droits_inconnus"
+    main._etat["derniere_synchro_complete"] = il_y_a(-1)
+    futur = servie() is False
+    verifier("2.21.8 : horodatage absent ou dans le futur, question refusée", inconnu and futur,
+             f"absent {inconnu}, futur {futur}")
+
+    remise_a_zero()
+    with open(main.FICHIER_BLOQUES, "w", encoding="utf-8") as f:
+        f.write('{"version": 3, "smb": [], "sharepoint": [], "prefixes": [], "smb_tout": false, '
+                '"sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}, '
+                '"derniere_synchro_complete": "hier soir"}')
+    main.charger_bloques()
+    verifier("2.21.8 : horodatage illisible dans le registre, état inconnu", main._registre_incertain)
+
+    remise_a_zero()
+    with open(main.FICHIER_BLOQUES, "w", encoding="utf-8") as f:
+        f.write('{"version": 2, "smb": [], "sharepoint": [], "prefixes": [], "smb_tout": false, '
+                '"sharepoint_tout": false, "incertain": {"smb": false, "sharepoint": false}}')
+    main.charger_bloques()
+    verifier("2.21.8 : registre de la 2.21.7 accepté, mais droits non datés, question refusée",
+             not main._registre_incertain and servie() is False)
+
+    # Passage partiel : l'horodatage ne bouge pas
+    remise_a_zero()
+    ancien = il_y_a(2)
+    main._etat["derniere_synchro_complete"] = ancien
+    main.poser_marqueur()
+    main._etat["incertain"]["smb"] = True
+    main.finaliser_synchronisation(True, {"smb": 2}, {"smb"})
+    verifier("2.21.8 : passage incomplet, horodatage inchangé",
+             main._etat["derniere_synchro_complete"] == ancien)
+
+    # Marqueur impossible, puis redémarrage, puis le délai expire
+    remise_a_zero()
+    main._etat["derniere_synchro_complete"] = il_y_a(2.5)
+    main.enregistrer_bloques()
+    os.makedirs(main.fichier_marqueur() + ".tmp", exist_ok=True)
+    pose = main.poser_marqueur()
+    main.finaliser_synchronisation(pose, {}, {"smb"})
+    os.rmdir(main.fichier_marqueur() + ".tmp")
+    main._persistance_ko = False                    # redémarrage simulé
+    main.charger_bloques()
+    servie_avant_delai = servie()
+    main._etat["derniere_synchro_complete"] = il_y_a(3.5)   # une heure plus tard, sans synchronisation
+    verifier("2.21.8 : marqueur impossible puis redémarrage, ancien horodatage gardé, refus après le délai",
+             pose is False and servie_avant_delai is True and servie() is False)
+
+    # Synchronisation complète suivante : nouvel horodatage écrit, reprise
+    remise_a_zero()
+    main._etat["derniere_synchro_complete"] = il_y_a(4)
+    main.poser_marqueur()
+    main.finaliser_synchronisation(True, {"smb": 0}, {"smb"})
+    main.charger_bloques()                          # redémarrage simulé
+    verifier("2.21.8 : synchronisation complète, horodatage écrit, marqueur retiré, questions servies",
+             servie() is True and not os.path.exists(main.fichier_marqueur()))
+
+    # Workflow n8n arrêté : aucune tentative, le délai expire quand même
+    remise_a_zero()
+    main._etat["derniere_synchro_complete"] = il_y_a(3.02)
+    verifier("2.21.8 : aucune synchronisation depuis plus de 3 h, question refusée, /health droits_perimes",
+             servie() is False and main.etat_droits() == "droits_perimes")
+
+    # 0 désactive le seul contrôle d'âge
+    main.ACL_AGE_MAX_HEURES = 0
+    age_ignore = servie() is True
+    main._registre_incertain = True
+    incertain_garde = servie() is False and main.etat_droits() == "droits_inconnus"
+    verifier("2.21.8 : ACL_AGE_MAX_HEURES=0, âge ignoré, registre inconnu toujours refusé",
+             age_ignore and incertain_garde, f"âge ignoré {age_ignore}, registre {incertain_garde}")
+
+    remise_a_zero()
+    for f in (main.FICHIER_BLOQUES, main.fichier_marqueur()):
+        if os.path.exists(f):
+            os.remove(f)
+
+
+# ─────────────────────────────────────────
 # sp_indexer.py : fichier devenu trop volumineux
 # ─────────────────────────────────────────
 def charger_sp():
@@ -424,16 +546,17 @@ def tests_sharepoint():
 if __name__ == "__main__":
     qdrant_reel, fichier_reel = main.qdrant, main.FICHIER_BLOQUES
     etat_reel, incertain_reel, ferme_reel = main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME
-    persistance_reelle = main._persistance_ko
+    persistance_reelle, age_reel = main._persistance_ko, main.ACL_AGE_MAX_HEURES
     try:
         tests_resolveur()
         tests_passage()
         tests_api()
+        tests_age()
         tests_sharepoint()
     finally:
         main.qdrant, main.FICHIER_BLOQUES = qdrant_reel, fichier_reel
         main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME = etat_reel, incertain_reel, ferme_reel
-        main._persistance_ko = persistance_reelle
+        main._persistance_ko, main.ACL_AGE_MAX_HEURES = persistance_reelle, age_reel
     total, ok = len(RESULTATS), sum(RESULTATS)
     print(f"{ok} tests OK" if ok == total else f"{total - ok} test(s) en échec sur {total}")
     sys.exit(0 if ok == total else 1)

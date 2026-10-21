@@ -168,7 +168,13 @@ Défaut voisin, sans effet sur les droits : la synchronisation cherchait le stat
 - Même règle pour SharePoint : un fichier en erreur dans le rapport de `sp_indexer.py` (code 2) est retiré de la recherche.
 - `deploy.sh` : les tests de sécurité des droits sont obligatoires. Absent ou en échec, la RAG API est arrêtée et le déploiement se termine en erreur.
 
-**Que faire en cas d'alerte.** Le courriel de synchronisation indique le nombre de documents retirés, et `docker logs rag-api 2>&1 | grep DROITS` les nomme. Corriger la cause (espace disque, état de Qdrant), puis relancer une synchronisation : les documents reviennent dès que leurs droits sont écrits.
+**Que faire en cas d'alerte.** Le courriel de synchronisation indique le nombre de documents retirés, et `docker logs rag-api 2>&1 | grep DROITS` les nomme. Corriger la cause (espace disque, état de Qdrant, n8n arrêté), puis relancer une synchronisation : depuis n8n (*Execute workflow*), ou à la main sur la VM :
+
+```bash
+docker exec rag-api python3 -c "import os,httpx; r=httpx.post('http://localhost:8080/admin/sync', headers={'Authorization':'Bearer '+os.environ['ADMIN_TOKEN']}, timeout=1800); print(r.status_code, r.json().get('success'), r.json().get('errors'))"
+```
+
+Les documents reviennent dès que leurs droits sont écrits, et les questions sont de nouveau servies dès qu'une synchronisation complète a abouti.
 
 **Compléments de la 2.21.6**, à la suite d'une quatrième revue, qui a trouvé deux chemins encore ouverts, dont un introduit par la 2.21.5 :
 
@@ -191,9 +197,33 @@ Défaut voisin, sans effet sur les droits : la synchronisation cherchait le stat
 
 - Avec `ACL_INCERTAIN_FERME=0`, un passage abandonné ou interrompu laisse en place les droits du passage précédent pour les documents qui n'étaient pas déjà retirés. L'alerte part à chaque synchronisation tant qu'aucun passage complet n'a abouti.
 - Un redémarrage de la RAG API pendant une synchronisation laisse le marqueur : les questions sont refusées jusqu'à la synchronisation suivante, au plus une heure, ou tout de suite par une synchronisation lancée à la main.
-- Le registre et le marqueur sont sur le même disque (`/var/log/rag`, disque chiffré) : un disque plein les rend impossibles à écrire, et l'assistant refuse alors toute question. C'est voulu : un état qu'on ne peut pas enregistrer ne protège rien.
+- Le registre et le marqueur sont sur le même disque (`/var/log/rag`, disque chiffré) : un disque plein les rend impossibles à écrire, et l'assistant refuse alors les questions **tant que la RAG API tourne**. Après un redémarrage, ce refus en mémoire est perdu : si le marqueur n'avait pas pu être écrit, rien ne le signale, et les questions sont de nouveau servies avec les droits de la dernière synchronisation complète. C'est l'âge maximal des droits de la 2.21.8 qui borne ce cas (voir plus bas).
 - L'alerte Push vers la supervision n'existe que si le nœud n8n correspondant a été activé (§16.10) ; le courriel, lui, part sans réglage supplémentaire.
 - Un vrai échec d'écriture n'a pas été provoqué sur la VM de test : il est vérifié par les tests unitaires, Qdrant simulé (`test_echec_droits.py`, 31 tests).
+
+**Compléments de la 2.21.8**, à la suite d'une sixième revue :
+
+- **âge maximal des droits.** Le registre garde l'heure de la dernière synchronisation **complète** des droits : chaque origine configurée a terminé son passage, aucune n'est restée incertaine, et le registre a bien été écrit. Un passage partiel ne la change pas. Au-delà de `ACL_AGE_MAX_HEURES` (3 h par défaut ; avec une synchronisation horaire, deux échecs de suite sont tolérés), plus aucune question n'est servie. Un horodatage absent, illisible ou dans le futur vaut refus. Cette règle ne demande aucune écriture : elle survit à un redémarrage, même quand le disque refuse l'écriture, et couvre aussi n8n arrêté, un workflow désactivé et oublié, ou des échecs répétés. `ACL_AGE_MAX_HEURES=0` désactive ce seul contrôle, pas les autres ;
+- **le marqueur est posé avant l'indexation**, plus seulement avant les droits : l'indexeur reporte sur le nouveau contenu d'un fichier modifié les droits de son ancienne version. Si le marqueur ne s'écrit pas, rien de la synchronisation ne tourne ;
+- **`/sante` signale l'état des droits** : `ok`, `droits_perimes` ou `droits_inconnus`, toujours avec le code HTTP 200, pour que le contrôle d'état de Docker ne redémarre pas la RAG API. La sonde de supervision du §16.10, qui cherche `ok`, alerte alors même quand aucune synchronisation n'a tourné, donc sans courriel d'échec. La sonde avertit ; c'est la RAG API qui bloque ;
+- **`deploy.sh`** ne crée le registre que sur une installation neuve, et l'y date. Sur une installation existante dont le registre a disparu, il s'arrête au lieu d'en créer un vide. Les deux tests de sécurité sont exigés dans le dépôt, puis comparés après la copie ;
+- **pendant une synchronisation normale, les questions restent servies.** C'est un choix : la bloquer coûterait plusieurs minutes d'indisponibilité chaque heure. Le risque pendant ces minutes est celui de la latence normale (§5.4) : un document dont le contenu et les droits changent ensemble garde ses anciens droits jusqu'au passage de `acl_resolver.py`, quelques minutes plus tard.
+
+**Mettre à jour vers la 2.21.8.** Le registre de la 2.21.7 n'est pas daté : après la mise à jour, la RAG API refuse les questions jusqu'à la première synchronisation complète. La lancer aussitôt.
+
+**Remplacer aussi le `docker-compose.yml`.** Les procédures de mise à jour de la 2.21.2 à la 2.21.7 ne remplaçaient que `main.py` : sur une installation mise à jour ainsi, le Compose ne transmet ni `ACL_INCERTAIN_FERME`, ni `ACL_AGE_MAX_HEURES`. Le code applique alors ses valeurs par défaut (1 et 3 heures), mais une valeur écrite dans le `.env` est ignorée sans message. Copier le `docker-compose.yml` du dépôt dans le dossier personnel de l'administrateur, puis comparer :
+
+```bash
+cd /root/rag-stack && diff docker-compose.yml /home/<admin>/docker-compose.yml
+```
+
+Seules des lignes ajoutées (`>`) doivent apparaître ; une ligne retirée (`<`) est une adaptation locale à reporter dans le nouveau fichier. Puis remplacer le Compose, en gardant l'ancien, et recréer les conteneurs concernés :
+
+```bash
+cd /root/rag-stack && cp docker-compose.yml docker-compose.yml.avant-2.21.8 && cp /home/<admin>/docker-compose.yml docker-compose.yml && docker compose up -d
+```
+
+> **Validé sur la VM de test, 21 octobre 2026 (2.21.8) :** Mise à jour depuis la 2.21.7, Compose remplacé (il était resté en 2.21.1, point 150) ; `test_echec_droits.py` 42 tests OK et `test_revalidation_bm25.py` 14 tests OK, dans le conteneur ; âge des droits : limite passée à 0,01 h, `/health` à `droits_perimes`, question refusée avec le motif `droits non synchronisés depuis 0.3 h (limite 0.01 h)`, puis `ok` et questions servies avec la limite de 3 heures ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO). Les modifications de `deploy.sh` (installation neuve, registre absent, tests manquants) sont vérifiées par simulation, pas sur une VM neuve.
 
 > **Validé sur la VM de test, 20 octobre 2026 (2.21.7) :** 31 et 14 tests unitaires OK dans le conteneur ; registre de la 2.21.6 accepté au démarrage ; synchronisation interrompue simulée (marqueur posé à la main, RAG API redémarrée) : `Synchronisation des droits inachevée`, question refusée dans Open WebUI ; synchronisation lancée : `questions de nouveau servies`, `success=True`, question de nouveau servie ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO).
 
@@ -317,14 +347,14 @@ Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un.
 
 | Contrôle | Comment | Ce qu'il détecte | Exemple §16.10.2 |
 |---|---|---|---|
-| La stack répond | `GET https://<RAG_FQDN>/sante`, réponse contenant `ok` | VM, Nginx ou RAG API arrêtés, nom DNS perdu | Oui |
+| La stack répond, droits à jour | `GET https://<RAG_FQDN>/sante`, réponse contenant `ok` | VM, Nginx ou RAG API arrêtés, nom DNS perdu ; depuis la 2.21.8, droits trop anciens ou inconnus (`droits_perimes`, `droits_inconnus`), donc aussi n8n arrêté ou workflow désactivé | Oui |
 | Le certificat est valide | Contrôle TLS de la même adresse, échéance | Certificat expiré ou proche de l'échéance (§9.8.6), chaîne cassée | Oui |
 | La synchronisation tourne | Signal envoyé par n8n après chaque synchronisation (« Push ») ; absence de signal = alerte | n8n arrêté, workflow désactivé, synchronisation en échec | Oui |
 | Le cloisonnement est juste | Courriel du contrôle après synchronisation (§16.4) | Fuite ou refus à tort | Déjà en place, sans outil |
 | Espace disque | `/srv/rag-donnees`, `/var/log/rag`, espace Docker | Disque plein : Qdrant, journaux nLPD | Non, outil de l'organisation |
 | Moteur d'inférence | Contrôle du serveur Ollama ou vLLM | Questions sans réponse alors que `/sante` répond | Non, outil de l'organisation |
 
-> **Ce que `/sante` ne dit pas :** la réponse prouve que Nginx et la RAG API répondent. Elle ne contrôle ni Qdrant, ni le moteur d'inférence, ni l'annuaire : `/health` est volontairement minimal (§16.6) et ne révèle rien de l'installation. Une question réelle reste le seul contrôle de bout en bout.
+> **Ce que `/sante` ne dit pas :** la réponse prouve que Nginx et la RAG API répondent, et, depuis la 2.21.8, que les droits ont été synchronisés depuis moins de `ACL_AGE_MAX_HEURES` (§16.5.2). Elle ne contrôle ni Qdrant, ni le moteur d'inférence, ni l'annuaire : `/health` est volontairement minimal (§16.6) et ne révèle rien de l'installation. Une question réelle reste le seul contrôle de bout en bout.
 
 **Le certificat de l'autorité interne.** L'outil de supervision doit faire confiance à la racine de l'autorité, sinon la sonde HTTPS échoue ou doit ignorer les erreurs de certificat, et ne contrôle plus rien de ce côté. Pour un outil Node.js : variable `NODE_EXTRA_CA_CERTS` (§9.8.5).
 
@@ -395,9 +425,10 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
-| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `31 tests OK` |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `42 tests OK` |
 | Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json*` | Registre présent, pas de `.en_cours` hors synchronisation ; sinon, questions refusées jusqu'à une synchronisation terminée |
 | Fermeture si les droits sont incertains | `grep ACL_INCERTAIN_FERME /root/rag-stack/.env` | 1, ou absent (1 par défaut) ; 0 seulement par choix documenté |
+| Âge des droits | `curl -s https://<RAG_FQDN>/sante` | `{"status":"ok"}` ; `droits_perimes` ou `droits_inconnus` : synchronisation à relancer |
 | Documents retirés de la recherche | `docker logs rag-api 2>&1 \| grep DROITS` | Aucune ligne, ou documents nommés et alerte reçue |
 | Permissions du partage | `Set-AccesIndexationRAG.ps1 -Verifier` | Ouverture large, pas d'alerte |
 | Valeurs d'exemple | `docker logs rag-api \| grep SÉCURITÉ` | Aucune ligne ; la RAG API est démarrée |

@@ -4,6 +4,37 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.8] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une sixième revue externe : si les synchronisations s'arrêtaient (n8n arrêté, workflow désactivé), les derniers droits connus restaient appliqués sans limite de durée, sans alerte (points 144 à 148, §5.4, §16.5.2). Compte rendu du test de charge de vLLM, de une à huit questions simultanées (point 149, §10.12). Procédure de mise à jour complétée : le `docker-compose.yml` est aussi remplacé (point 150). Validé sur la VM de test le 21 octobre 2026 : 42 et 14 tests unitaires OK ; droits périmés refusés puis questions servies après retour à la limite de 3 heures ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Sécurité
+
+- `api/anon_main.py` : âge maximal des droits (`ACL_AGE_MAX_HEURES`, 3 heures par défaut, 0 désactive ce seul contrôle) ; date de la dernière synchronisation complète enregistrée dans le registre (version 3), mise à jour seulement si toutes les origines configurées ont abouti (code 0 ou 2) sans passage incertain et si le registre a été écrit ; au-delà de l'âge, date absente ou dans le futur, questions refusées (503).
+- `api/anon_main.py` : marqueur « synchronisation des droits en cours » posé avant l'indexation ; droits non garantis, indexation sautée.
+- `api/anon_main.py` : `/health` renvoie l'état des droits (`ok`, `droits_perimes`, `droits_inconnus`), toujours en HTTP 200.
+- `docker-compose.yml`, `env.example` : `ACL_AGE_MAX_HEURES`.
+- `deploy.sh` : registre créé en version 3 à la date du jour sur une installation neuve seulement ; installation existante sans registre, arrêt en erreur ; tests de sécurité obligatoires dans le dossier source et contrôlés après la copie ; en-tête en 2.21.8.
+
+### Tests
+
+- `test_echec_droits.py` : 11 tests ajoutés, 42 au total.
+- `test_revalidation_bm25.py` : date de synchronisation récente posée dans le test ; 14 tests.
+- `test_revocation_bm25.py` : contrôle de l'âge désactivé dans son seul processus.
+- `s10/charge_s10.py` : mesure de référence de chaque question seule, gain de chaque série, débit en questions par minute.
+
+### Documentation
+
+- `section-05-connecteurs.md` : §5.4, fenêtre de péremption des droits réécrite (latence normale, fenêtre supplémentaire bornée à 3 heures).
+- `section-16-cloisonnement.md` : §16.5.2, compléments de la 2.21.8, mise à jour, synchronisation manuelle, limites ; §16.10 ; checklist.
+- `section-10-gpu.md` : §10.12, mesure de charge et verdict nuancé.
+- `section-03-docker-compose.md` : `ACL_AGE_MAX_HEURES` dans l'extrait.
+- `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md` : 42 tests ; `charge_s10.py`.
+- `section-16-cloisonnement.md` : mise à jour, remplacement du `docker-compose.yml`, omis depuis la 2.21.2.
+- `suivi-corrections.md` : points 144 à 150.
+
+---
+
 ## [2.21.7] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une cinquième revue externe : un registre des documents retirés qui n'avait pas pu être écrit était perdu au redémarrage, et les documents retirés depuis redevenaient visibles (points 141 à 143, §16.5.2). Validé sur la VM de test le 20 octobre 2026 : 31 et 14 tests unitaires OK ; synchronisation interrompue simulée, questions refusées puis servies après une synchronisation ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).

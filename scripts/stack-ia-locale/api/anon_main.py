@@ -231,12 +231,25 @@ FICHIER_BLOQUES = os.getenv("ACL_BLOQUES_FICHIER", "/var/log/rag/acl_bloques.jso
 # connus conservés, plus disponible, moins sûr (§5.4, §16.5.2).
 ACL_INCERTAIN_FERME = os.getenv("ACL_INCERTAIN_FERME", "1").strip() != "0"
 PREFIXE_SP = "SharePoint/"
+# Âge maximal des droits (2.21.8) : au-delà de ce délai depuis la dernière
+# synchronisation COMPLÈTE des droits, plus aucune question n'est servie. Borne
+# la durée pendant laquelle la RAG API peut tourner sur des droits anciens
+# (n8n arrêté, workflow désactivé, synchronisations en échec répété, marqueur
+# impossible à écrire). 0 désactive ce seul contrôle, pas les autres.
+try:
+    ACL_AGE_MAX_HEURES = float(os.getenv("ACL_AGE_MAX_HEURES", "3") or "3")
+except ValueError:
+    ACL_AGE_MAX_HEURES = 3.0
+TOLERANCE_HORLOGE_S = 300   # horodatage « dans le futur » toléré (écart d'horloge)
 
 
 def _etat_vide() -> dict:
     return {"smb": set(), "sharepoint": set(), "prefixes": set(),
             "smb_tout": False, "sharepoint_tout": False,
-            "incertain": {"smb": False, "sharepoint": False}}
+            "incertain": {"smb": False, "sharepoint": False},
+            # Heure (UTC, ISO 8601) de la dernière synchronisation complète des
+            # droits ; None = inconnue, donc droits non frais (2.21.8)
+            "derniere_synchro_complete": None}
 
 
 _etat = _etat_vide()
@@ -325,11 +338,13 @@ def enregistrer_bloques(chemin: str | None = None) -> bool:
     l'ancien registre, sans les documents retirés depuis."""
     global _registre_ok, _persistance_ko
     chemin = chemin or FICHIER_BLOQUES
-    contenu = json.dumps({"version": 2, "maj": datetime.now(timezone.utc).isoformat(),
+    contenu = json.dumps({"version": 3, "maj": datetime.now(timezone.utc).isoformat(),
                           "smb": sorted(_etat["smb"]), "sharepoint": sorted(_etat["sharepoint"]),
                           "prefixes": sorted(_etat["prefixes"]),
                           "smb_tout": _etat["smb_tout"], "sharepoint_tout": _etat["sharepoint_tout"],
-                          "incertain": _etat["incertain"]}, ensure_ascii=False, indent=2)
+                          "incertain": _etat["incertain"],
+                          "derniere_synchro_complete": _etat["derniere_synchro_complete"]},
+                         ensure_ascii=False, indent=2)
     try:
         _ecrire_atomique(chemin, contenu)
         _registre_ok = True
@@ -344,8 +359,12 @@ def enregistrer_bloques(chemin: str | None = None) -> bool:
 
 def _valider_registre(d) -> None:
     """Structure exacte attendue (2.21.7) ; toute anomalie lève ValueError."""
-    if not isinstance(d, dict) or d.get("version") != 2:
+    if not isinstance(d, dict) or d.get("version") not in (2, 3):
         raise ValueError("version de schéma inconnue")
+    if d["version"] == 3:
+        ts = d.get("derniere_synchro_complete", "absent")
+        if ts is not None and (not isinstance(ts, str) or _lire_horodatage(ts) is None):
+            raise ValueError("« derniere_synchro_complete » : horodatage ISO 8601 ou null attendu")
     for cle in ("smb", "sharepoint", "prefixes"):
         v = d.get(cle)
         if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
@@ -375,6 +394,9 @@ def charger_bloques(chemin: str | None = None) -> None:
         _etat["smb_tout"] = d["smb_tout"]
         _etat["sharepoint_tout"] = d["sharepoint_tout"]
         _etat["incertain"] = dict(d["incertain"])
+        # Registre de la 2.21.7 (version 2) : pas d'horodatage, droits non frais
+        # jusqu'à la prochaine synchronisation complète
+        _etat["derniere_synchro_complete"] = d.get("derniere_synchro_complete") if d["version"] == 3 else None
         _registre_incertain = False
     except Exception as e:
         _registre_incertain = True
@@ -391,6 +413,69 @@ def charger_bloques(chemin: str | None = None) -> None:
     if nombre_retires():
         logger.warning(f"[DROITS] {nombre_retires()} document(s) ou périmètre(s) retiré(s) de la recherche "
                        "lors de la dernière synchronisation")
+
+
+def _lire_horodatage(texte) -> datetime | None:
+    """Horodatage ISO 8601 avec fuseau ; None s'il est illisible ou sans fuseau."""
+    try:
+        t = datetime.fromisoformat(texte)
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo is not None else None
+
+
+def droits_frais(maintenant: datetime | None = None) -> tuple[bool, str]:
+    """(True, "") si la dernière synchronisation complète des droits a moins de
+    ACL_AGE_MAX_HEURES. Horodatage absent, illisible ou dans le futur : non frais.
+    L'âge exactement égal à la limite est accepté ; au-delà, refus."""
+    if ACL_AGE_MAX_HEURES <= 0:
+        return True, ""
+    t = _lire_horodatage(_etat.get("derniere_synchro_complete"))
+    if t is None:
+        return False, "date de la dernière synchronisation complète inconnue"
+    maintenant = maintenant or datetime.now(timezone.utc)
+    age = (maintenant - t).total_seconds()
+    if age < -TOLERANCE_HORLOGE_S:
+        return False, "date de la dernière synchronisation complète dans le futur"
+    if age > ACL_AGE_MAX_HEURES * 3600:
+        return False, f"droits non synchronisés depuis {age / 3600:.1f} h (limite {ACL_AGE_MAX_HEURES:g} h)"
+    return True, ""
+
+
+def etat_droits() -> str:
+    """Pour /health et la supervision : « ok », « droits_inconnus » ou « droits_perimes »."""
+    if _registre_incertain or _persistance_ko:
+        return "droits_inconnus"
+    frais, motif = droits_frais()
+    if not frais:
+        return "droits_inconnus" if "inconnue" in motif else "droits_perimes"
+    return "ok"
+
+
+def refus_droits() -> str:
+    """Motif de refus d'une question, ou chaîne vide si elle peut être servie."""
+    if _registre_incertain or _persistance_ko:
+        return "état des documents retirés inconnu ou non enregistré"
+    frais, motif = droits_frais()
+    return "" if frais else motif
+
+
+def finaliser_synchronisation(droits_autorises: bool, codes_droits: dict, origines: set,
+                              maintenant: datetime | None = None) -> None:
+    """Fin de /admin/sync (2.21.8). Une synchronisation est COMPLÈTE si chaque origine
+    configurée a terminé son passage (code 0 ou 2) et qu'aucune n'est restée
+    incertaine (inventaire incomplet) : alors seulement l'horodatage avance.
+    Ensuite : registre écrit, marqueur retiré, état inconnu du démarrage levé."""
+    if not droits_autorises:
+        return
+    termine = all(codes_droits.get(o) in (0, 2) for o in origines)
+    complete = termine and not any(_etat["incertain"][o] for o in origines)
+    if complete:
+        _etat["derniere_synchro_complete"] = (maintenant or datetime.now(timezone.utc)).isoformat()
+    if enregistrer_bloques():
+        retirer_marqueur()
+        if termine:
+            lever_incertitude_registre()
 
 
 def _orphelins_probables(rapport: dict) -> set[str] | None:
@@ -964,8 +1049,9 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     if not user_groups:
         logger.error("[AUTH] Recherche demandée sans groupes : refus")
         raise HTTPException(status_code=403, detail="Résolution des droits impossible")
-    if _registre_incertain or _persistance_ko:
-        logger.error("[DROITS] État des documents retirés inconnu ou non enregistré : question refusée")
+    motif = refus_droits()
+    if motif:
+        logger.error(f"[DROITS] Question refusée : {motif}")
         raise HTTPException(status_code=503, detail="Vérification des droits en cours : "
                             "réessayer après la prochaine synchronisation")
     try:
@@ -1660,7 +1746,10 @@ def log_query(user_id: str, query: str, chunks: list[dict], ancree: bool, juge_e
 @app.get("/health")
 async def health():
     # Sans détail interne (adresse du moteur, modèle) : réponse publique minimale.
-    return {"status": "ok"}
+    # Toujours HTTP 200 : le contrôle d'état de Docker ne doit pas redémarrer la
+    # RAG API pour des droits anciens. La supervision (§16.10), qui cherche « ok »,
+    # alerte sur « droits_perimes » ou « droits_inconnus » (2.21.8).
+    return {"status": etat_droits()}
 
 
 @app.get("/stats")
@@ -2122,8 +2211,9 @@ async def calculer_acces(user_id: str, document: str, correspondance: str = "exa
     user_groups = get_user_groups(user_id)
     if not user_groups:
         raise PermissionError("Résolution des droits impossible")
-    if _registre_incertain or _persistance_ko:
-        raise RuntimeError("État des documents retirés inconnu ou non enregistré (§16.5.2)")
+    motif = refus_droits()
+    if motif:
+        raise RuntimeError(f"Droits non garantis : {motif} (§16.5.2)")
     filtre = Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=user_groups))])
     try:
         existantes = {c.name for c in qdrant.get_collections().collections}
@@ -2265,74 +2355,76 @@ async def admin_sync(
 
         venv_python = os.getenv("SYNC_PYTHON", "python3")
 
-        # ── Étape 1 : indexer.py ─────────────────────────────────────────
-        indexer_script = f"{SYNC_SCRIPTS_DIR}/indexer.py"
-        try:
-            logger.info("[SYNC] Lancement de indexer.py")
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [venv_python, indexer_script,
-                 "--corpus", SMB_MOUNT,
-                 "--rapport", "/var/log/rag/rapport_indexer.json"],
-                capture_output=True,
-                text=True,
-                timeout=_env_nombre("SYNC_TIMEOUT_INDEXER", "600"),
-                env={
-                    "PATH": os.environ.get("PATH", ""),
-                    "HOME": os.environ.get("HOME", ""),
-                    "LANG": os.environ.get("LANG", "C.UTF-8"),
-                    "PYTHONIOENCODING": "utf-8",
-                    "OLLAMA_URL": EMBED_BASE_URL,
-                    "EMBED_MODEL": EMBED_MODEL,
-                    "QDRANT_URL": QDRANT_HOST,
-                    "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
-                    "EMBED_NUM_GPU": EMBED_NUM_GPU,
-                    "EMBED_API": EMBED_API,
-                    "VLLM_API_KEY": VLLM_API_KEY,
-                    "QDRANT_COLLECTION": COLLECTION,
-                    "ORG_OWNER": ORG_NAME,
-                    "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
-                    "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
-                    # Variables de routage des collections
-                    "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
-                    "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
-                    "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
-                }
-            )
-            rapport["indexer"]["returncode"] = result.returncode
-            if result.returncode != 0:
-                rapport["errors"].append(f"indexer.py a retourné code {result.returncode}")
-                logger.error(f"[SYNC] indexer.py erreur : {result.stderr[-200:]}")
-            else:
-                logger.info("[SYNC] indexer.py terminé avec succès")
-                try:
-                    with open("/var/log/rag/rapport_indexer.json", "r") as rf:
-                        r_data = json.load(rf)
-                    for doc in r_data.get("documents", []):
-                        if doc.get("statut") == "quarantaine":
-                            rapport["quarantine"].append(doc["fichier"])
-                except Exception as e:
-                    logger.warning(f"[SYNC] Rapport indexer illisible : {e}")
-
-        except subprocess.TimeoutExpired:
-            msg = "indexer.py timeout (>10 min)"
-            rapport["errors"].append(msg)
-            logger.error(f"[SYNC] {msg}")
-        except Exception as e:
-            msg = f"indexer.py exception : {e}"
-            rapport["errors"].append(msg)
-            logger.error(f"[SYNC] {msg}")
-
-        # Marqueur posé AVANT toute modification des droits (2.21.7). S'il ne peut
-        # pas être écrit, les droits ne sont pas synchronisés et les questions sont
-        # refusées : un résultat qu'on ne pourrait pas enregistrer serait perdu au
-        # prochain redémarrage.
+        # Marqueur posé AVANT toute modification du corpus (2.21.7, avant
+        # l'indexation depuis la 2.21.8 : l'indexeur reporte les anciens droits sur
+        # le nouveau contenu d'un fichier modifié). S'il ne peut pas être écrit,
+        # rien n'est synchronisé et les questions sont refusées : un résultat qu'on
+        # ne pourrait pas enregistrer serait perdu au prochain redémarrage.
         passages_droits: set[str] = set()   # origines dont le résultat a été appliqué
         codes_droits: dict[str, int | None] = {}
         droits_autorises = poser_marqueur()
         if not droits_autorises:
             rapport["errors"].append("Marqueur de synchronisation impossible à écrire (/var/log/rag) : "
                                      "droits non synchronisés, questions refusées")
+        if droits_autorises:
+            # ── Étape 1 : indexer.py ─────────────────────────────────────────
+            indexer_script = f"{SYNC_SCRIPTS_DIR}/indexer.py"
+            try:
+                logger.info("[SYNC] Lancement de indexer.py")
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [venv_python, indexer_script,
+                     "--corpus", SMB_MOUNT,
+                     "--rapport", "/var/log/rag/rapport_indexer.json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=_env_nombre("SYNC_TIMEOUT_INDEXER", "600"),
+                    env={
+                        "PATH": os.environ.get("PATH", ""),
+                        "HOME": os.environ.get("HOME", ""),
+                        "LANG": os.environ.get("LANG", "C.UTF-8"),
+                        "PYTHONIOENCODING": "utf-8",
+                        "OLLAMA_URL": EMBED_BASE_URL,
+                        "EMBED_MODEL": EMBED_MODEL,
+                        "QDRANT_URL": QDRANT_HOST,
+                        "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
+                        "EMBED_NUM_GPU": EMBED_NUM_GPU,
+                        "EMBED_API": EMBED_API,
+                        "VLLM_API_KEY": VLLM_API_KEY,
+                        "QDRANT_COLLECTION": COLLECTION,
+                        "ORG_OWNER": ORG_NAME,
+                        "CHUNK_SIZE": os.environ.get("CHUNK_SIZE", "150"),
+                        "CHUNK_OVERLAP": os.environ.get("CHUNK_OVERLAP", "20"),
+                        # Variables de routage des collections
+                        "DOCUMENTATION_COLLECTION": DOCUMENTATION_COLLECTION,
+                        "DOCUMENTATION_PATHS": ",".join(DOCUMENTATION_PATHS),
+                        "MIN_CHUNK_WORDS": os.environ.get("MIN_CHUNK_WORDS", "8"),
+                    }
+                )
+                rapport["indexer"]["returncode"] = result.returncode
+                if result.returncode != 0:
+                    rapport["errors"].append(f"indexer.py a retourné code {result.returncode}")
+                    logger.error(f"[SYNC] indexer.py erreur : {result.stderr[-200:]}")
+                else:
+                    logger.info("[SYNC] indexer.py terminé avec succès")
+                    try:
+                        with open("/var/log/rag/rapport_indexer.json", "r") as rf:
+                            r_data = json.load(rf)
+                        for doc in r_data.get("documents", []):
+                            if doc.get("statut") == "quarantaine":
+                                rapport["quarantine"].append(doc["fichier"])
+                    except Exception as e:
+                        logger.warning(f"[SYNC] Rapport indexer illisible : {e}")
+
+            except subprocess.TimeoutExpired:
+                msg = "indexer.py timeout (>10 min)"
+                rapport["errors"].append(msg)
+                logger.error(f"[SYNC] {msg}")
+            except Exception as e:
+                msg = f"indexer.py exception : {e}"
+                rapport["errors"].append(msg)
+                logger.error(f"[SYNC] {msg}")
+
         if droits_autorises:
             # ── Étape 2 : acl_resolver.py ────────────────────────────────────
             resolver_script = f"{SYNC_SCRIPTS_DIR}/acl_resolver.py"
@@ -2497,11 +2589,7 @@ async def admin_sync(
         # tous les échecs, il reconstruit donc la liste complète.
         sp_actif = bool(os.getenv("SP_SITES", "") and os.getenv("SP_CLIENT_ID", ""))
         origines = {"smb", "sharepoint"} if sp_actif else {"smb"}
-        if droits_autorises:
-            if enregistrer_bloques():
-                retirer_marqueur()
-                if all(codes_droits.get(o) in (0, 2) for o in origines):
-                    lever_incertitude_registre()
+        finaliser_synchronisation(droits_autorises, codes_droits, origines)
         if _registre_incertain:
             rapport["errors"].append("État des documents retirés inconnu (registre absent ou illisible, ou "
                                      "synchronisation inachevée) : questions suspendues jusqu'à une "
@@ -2509,6 +2597,10 @@ async def admin_sync(
         if _persistance_ko:
             rapport["errors"].append("Registre des documents retirés non enregistré sur le disque (/var/log/rag) : "
                                      "questions suspendues jusqu'à une écriture réussie")
+        frais, motif = droits_frais()
+        if not frais:
+            rapport["errors"].append(f"Droits non garantis : {motif} ; questions suspendues")
+        rapport["derniere_synchro_complete"] = _etat["derniere_synchro_complete"]
         if any(_etat["incertain"].values()):
             rapport["errors"].append("Dernier passage des droits incomplet : les documents retirés restent retirés "
                                      "jusqu'à un passage complet" + (" ; origine suspendue (ACL_INCERTAIN_FERME=1)"
