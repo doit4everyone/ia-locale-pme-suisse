@@ -1,5 +1,5 @@
 """
-test_sid.py : tests unitaires du contrôle d'accès par SID (2.22.0).
+test_sid.py : tests unitaires du contrôle d'accès par SID (2.22.0, refus complétés en 2.22.1).
 
 Vérifie, sans annuaire ni partage :
   - la lecture des ACL de smbcacls --numeric par acl_resolver.py, sur des
@@ -8,12 +8,15 @@ Vérifie, sans annuaire ni partage :
     par auth.py (groupes intégrés retirés, ACL_SID_ETENDUS) ;
   - le refus d'accès quand tokenGroups ne peut pas être lu, sans retour à une
     résolution partielle ;
-  - la décision d'accès (refus prioritaire, boîte de dépôt).
+  - la décision d'accès (refus prioritaire, boîte de dépôt) ;
+  - les refus sur des identités absentes des SID de l'utilisateur mais présentes
+    dans un jeton Windows : « Tout le monde », « Utilisateurs authentifiés »,
+    groupes intégrés ou locaux (2.22.1).
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py
 
-Attendu : « 16 tests OK », code de sortie 0.
+Attendu : « 28 tests OK », code de sortie 0.
 """
 import importlib.util
 import os
@@ -209,11 +212,55 @@ def tests_acces():
              auth.check_access(compta, a_depot, i_depot) is False)
 
 
+def tests_refus_identites_jeton():
+    """2.22.1 : un refus vaut pour toute identité du jeton Windows, y compris
+    celles que tokenGroups ne donne pas ; les autorisations restent fermées."""
+    finances = f"{D}-1500"
+    membre = [f"{D}-1104", finances, f"{D}-513"]          # compte, GRP-Finances, groupe principal
+    lire = "0x001200a9"
+
+    def acl(*entrees):
+        return "".join(f"ACL:{sid}:{t}/0x0/{m}\n" for sid, t, m in entrees)
+
+    for sid, nom in (("S-1-1-0", "Tout le monde"), ("S-1-5-11", "Utilisateurs authentifiés")):
+        a, i = ar.analyser_acl(acl((finances, 0, lire), (sid, 1, lire)))
+        verifier(f"refus à « {nom} » : membre d'un groupe autorisé refusé",
+                 i == [sid] and auth.check_access(membre, a, i) is False, f"autorisés {a}, interdits {i}")
+        a, i = ar.analyser_acl(acl((sid, 0, lire)))
+        verifier(f"autorisation à « {nom} » seul : document invisible par défaut",
+                 auth.check_access(auth.sids_retenus(membre[0], membre[1:]), a, i) is False, f"autorisés {a}")
+    a, i = ar.analyser_acl(acl(("S-1-1-0", 0, lire)))
+    verifier("autorisation à « Tout le monde » avec ACL_SID_ETENDUS : document visible",
+             auth.check_access(auth.sids_retenus(membre[0], membre[1:], etendus=True), a, i) is True)
+
+    a, i = ar.analyser_acl(acl((finances, 0, lire), ("S-1-5-32-544", 1, lire)))
+    verifier("refus aux Administrateurs intégrés conservé par le résolveur (avant : écarté) et appliqué",
+             i == ["S-1-5-32-544"] and auth.check_access(membre, a, i) is False, f"autorisés {a}, interdits {i}")
+    a, i = ar.analyser_acl(acl((finances, 0, lire), ("S-1-5-32-545", 1, lire)))
+    verifier("refus à un groupe intégré, même avec ACL_SID_ETENDUS : appliqué",
+             auth.check_access(auth.sids_retenus(membre[0], membre[1:], etendus=True), a, i) is False)
+    a, i = ar.analyser_acl(acl((finances, 0, lire), ("S-1-5-21-9-8-7-1001", 1, lire)))
+    verifier("refus à un SID d'une autre machine ou d'un autre domaine (groupe local) : appliqué",
+             auth.check_access(membre, a, i) is False)
+    a, i = ar.analyser_acl(acl((finances, 0, lire), ("S-1-5-18", 1, lire), ("S-1-5-80-1-2-3-4-5", 1, lire)))
+    verifier("refus à Système ou à un service : sans effet sur un utilisateur",
+             auth.check_access(membre, a, i) is True, f"interdits {i}")
+    a, i = ar.analyser_acl(acl((finances, 0, lire), (f"{D}-1999", 1, lire)))
+    verifier("refus à un autre compte du domaine : sans effet", auth.check_access(membre, a, i) is True)
+    verifier("refus en identifiant Entra (SharePoint) : correspondance exacte, inchangée",
+             auth.check_access(["entra:a"], ["entra:a"], ["entra:b"]) is True
+             and auth.check_access(["entra:a"], ["entra:a"], ["entra:a"]) is False)
+    verifier("rapport : « Tout le monde » et groupe intégré ferment à tous, Système et domaine non",
+             ar.refus_pour_tous("S-1-1-0") and ar.refus_pour_tous("S-1-5-32-544")
+             and not ar.refus_pour_tous("S-1-5-18") and not ar.refus_pour_tous(f"{D}-1999"))
+
+
 if __name__ == "__main__":
     tests_resolveur()
     tests_auth()
     tests_get_user_groups()
     tests_acces()
+    tests_refus_identites_jeton()
     total, ok = len(RESULTATS), sum(RESULTATS)
     print(f"{ok} tests OK" if ok == total else f"{total - ok} test(s) en échec sur {total}")
     sys.exit(0 if ok == total else 1)

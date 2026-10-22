@@ -107,10 +107,27 @@ class ErreurAuthentification(Exception):
     """Le serveur de fichiers refuse le compte svc-rag."""
 
 
-# Groupes à exclure des autorisés[] : comptes système, pas des utilisateurs métier
-# Identités jamais retenues : Système (S-1-5-18) et Administrateurs intégrés
-# (S-1-5-32-544), comme avant la 2.22.0 avec leurs noms.
+# Autorisations jamais retenues : Système (S-1-5-18) et Administrateurs intégrés
+# (S-1-5-32-544), comme avant la 2.22.0 avec leurs noms. Depuis la 2.22.1, cette
+# exclusion ne vaut que pour les autorisations : tout refus est conservé, et
+# auth.check_access décide à qui il s'applique.
 GROUPES_EXCLUS = {"S-1-5-18", "S-1-5-32-544"}
+
+# Identités de service, jamais présentes dans le jeton d'un utilisateur :
+# Système, Service local, Service réseau, services (NT SERVICE\...).
+SID_SERVICES = {"S-1-5-18", "S-1-5-19", "S-1-5-20"}
+PREFIXES_SERVICES = ("S-1-5-80-",)
+
+
+def refus_pour_tous(sid: str) -> bool:
+    """Un refus sur ce SID s'applique-t-il à tout utilisateur (2.22.1) ?
+    Oui pour toute identité hors domaine (S-1-5-21-...) et hors service : « Tout
+    le monde », « Utilisateurs authentifiés », groupes intégrés ou locaux du
+    serveur de fichiers, dont l'appartenance ne se lit pas dans tokenGroups.
+    Même règle que auth.check_access, pour le rapport seulement."""
+    if sid.startswith("S-1-5-21-"):
+        return False
+    return sid not in SID_SERVICES and not sid.startswith(PREFIXES_SERVICES)
 
 # Ligne d'ACL de smbcacls --numeric : ACL:<SID>:<type>/<drapeaux>/<masque>
 # type : 0 autorisation, 1 refus ; drapeaux : hexadécimal (0x10 hérité,
@@ -185,12 +202,12 @@ def analyser_acl(sortie: str, chemin_relatif: str = "") -> tuple[list[str], list
             print(f"  Ligne d'ACL non reconnue sur '{chemin_relatif}', fichier traité comme illisible : {ligne}")
             return [], []
         identite, type_ace, drapeaux, masque = m.group(1), int(m.group(2)), int(m.group(3), 16), m.group(4)
-        if identite in GROUPES_EXCLUS:
-            continue
         # Entrée « héritable seulement » : ne s'applique pas au fichier lui-même
         if drapeaux & INHERIT_ONLY_ACE:
             continue
         if type_ace == 0:
+            if identite in GROUPES_EXCLUS:
+                continue
             # Seules les entrées qui accordent la lecture du contenu comptent.
             # Une entrée d'écriture seule (boîte de dépôt) ne doit pas rendre
             # le fichier interrogeable.
@@ -608,6 +625,7 @@ def resoudre_acl(
     # Récupérer tous les source_names présents dans les deux collections
     sources_qdrant = set()
     sources_format_ancien = set()
+    sources_refus_pour_tous = set()
     echecs_lecture_orphelins = []
     for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
         if col not in collections:
@@ -633,6 +651,10 @@ def resoudre_acl(
                     valeurs = list(point.payload.get("autorises") or []) + list(point.payload.get("interdits") or [])
                     if src and any(not RE_SID.match(str(v)) for v in valeurs):
                         sources_format_ancien.add(src)
+                    # Refus qui ferme le document à tous (2.22.1), à vérifier sur le partage
+                    if src and any(RE_SID.match(str(v)) and refus_pour_tous(str(v))
+                                   for v in (point.payload.get("interdits") or [])):
+                        sources_refus_pour_tous.add(src)
                 if next_offset is None:
                     break
             except Exception as e:
@@ -697,6 +719,16 @@ def resoudre_acl(
             print(f"  {src}")
         echecs_ecriture = sorted(set(echecs_ecriture) | set(non_migres))
 
+    # Refus à « Tout le monde », « Utilisateurs authentifiés » ou à un groupe
+    # intégré ou local : document fermé à tous dans la RAG (2.22.1). Pas un échec,
+    # mais à vérifier sur le partage s'il devrait rester lisible par certains.
+    refus_tous = sorted(sources_refus_pour_tous - supprimes)
+    if refus_tous:
+        print(f"\n[INFO] {len(refus_tous)} document(s) fermé(s) à tous par un refus sur une identité "
+              f"intégrée ou locale (§16.5.3) :")
+        for src in refus_tous:
+            print(f"  {src}")
+
     # Sauvegarder le rapport.
     # Si --rapport n'est pas fourni, le rapport est écrit à côté du script.
     # Depuis le conteneur rag-api, /rag-pipeline est monté en lecture seule :
@@ -723,8 +755,10 @@ def resoudre_acl(
                 "echecs_ecriture": len(echecs_ecriture),
                 "echecs_suppression": len(echecs_suppression),
                 "documents_non_migres_sid": len(non_migres),
+                "documents_refus_pour_tous": len(refus_tous),
             },
             "documents_non_migres_sid": non_migres,
+            "documents_refus_pour_tous": refus_tous,
             # Documents dont les droits dans Qdrant ne sont PAS ceux du partage :
             # la RAG API les retire de la recherche jusqu'à une écriture réussie.
             "echecs_ecriture": sorted(echecs_ecriture),

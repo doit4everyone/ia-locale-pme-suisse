@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.22.0)
+# Version : beta (2.22.1)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh

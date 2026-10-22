@@ -101,6 +101,35 @@ ACL_SID_ETENDUS = os.getenv("ACL_SID_ETENDUS", "0").strip() == "1"
 SID_TOUT_LE_MONDE = "S-1-1-0"
 SID_UTILISATEURS_AUTHENTIFIES = "S-1-5-11"
 PREFIXE_BUILTIN = "S-1-5-32-"
+PREFIXE_DOMAINE = "S-1-5-21-"
+# Identités de service, jamais présentes dans le jeton d'un utilisateur :
+# Système, Service local, Service réseau, services (NT SERVICE\...).
+SID_SERVICES = {"S-1-5-18", "S-1-5-19", "S-1-5-20"}
+PREFIXES_SERVICES = ("S-1-5-80-",)
+
+
+def refus_applicable(sid: str, sids_utilisateur: set[str], domaines: set[str]) -> bool:
+    """Un refus (entrée de type refus d'une ACL SMB) s'applique-t-il à l'utilisateur ? (2.22.1)
+
+    Windows applique un refus à toute identité du jeton d'accès. Le jeton d'un
+    accès SMB contient aussi « Tout le monde », « Utilisateurs authentifiés »,
+    « Réseau », et des groupes locaux du serveur de fichiers que tokenGroups ne
+    donne pas. Règle, du côté prudent :
+      - SID retenu pour l'utilisateur : refus appliqué ;
+      - SID d'un domaine de l'utilisateur, absent de ses SID : non appliqué
+        (autre compte, groupe dont il n'est pas membre) ;
+      - SID d'un autre domaine ou d'une machine (S-1-5-21-... de préfixe inconnu,
+        par exemple un groupe local du serveur de fichiers) : appliqué ;
+      - identité de service (Système, services) : non appliqué ;
+      - toute autre identité (S-1-1-0, S-1-5-11, groupes intégrés S-1-5-32-...,
+        identités bien connues) : appliqué, l'appartenance n'étant pas lisible.
+    Les autorisations ne suivent pas cette règle : « Tout le monde » et les
+    groupes intégrés n'accordent l'accès qu'avec ACL_SID_ETENDUS."""
+    if sid in sids_utilisateur:
+        return True
+    if sid.startswith(PREFIXE_DOMAINE):
+        return sid.rsplit("-", 1)[0] not in domaines
+    return sid not in SID_SERVICES and not sid.startswith(PREFIXES_SERVICES)
 
 
 def sid_texte(b: bytes) -> str:
@@ -440,6 +469,11 @@ def check_access(user_groups: list[str], autorisés: list[str], interdits: list[
 
     Les DENY sont prioritaires sur les ALLOW, comme en NTFS Windows.
     Les groupes sont comparés sans tenir compte de la casse.
+
+    Refus en SID (partages SMB, 2.22.1) : appliqué selon refus_applicable, qui
+    couvre les identités du jeton Windows absentes de user_groups (« Tout le
+    monde », « Utilisateurs authentifiés », groupes intégrés ou locaux). Refus
+    en identifiants Entra (SharePoint) : correspondance exacte, comme avant.
     """
     if not autorisés:
         return False
@@ -451,6 +485,12 @@ def check_access(user_groups: list[str], autorisés: list[str], interdits: list[
     # Vérifier les DENY d'abord
     if user_lower & interdits_lower:
         return False
+    sids_utilisateur = {g.upper() for g in user_groups if g.upper().startswith("S-1-")}
+    domaines = {s.rsplit("-", 1)[0] for s in sids_utilisateur if s.startswith(PREFIXE_DOMAINE)}
+    for refus in interdits:
+        r = str(refus).upper()
+        if r.startswith("S-1-") and refus_applicable(r, sids_utilisateur, domaines):
+            return False
 
     # Vérifier les ALLOW
     return bool(user_lower & autorisés_lower)

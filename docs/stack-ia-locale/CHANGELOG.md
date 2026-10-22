@@ -4,6 +4,25 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.1] : Octobre 2026
+
+Correctif de cloisonnement de la 2.22.0, relevé par une revue externe (point 159, §16.5.3). Un refus sur une identité absente des SID de l'utilisateur était ignoré : un document autorisé à un groupe et refusé à « Tout le monde » ou à « Utilisateurs authentifiés » restait lisible par les membres du groupe, alors que Windows le refuse. Validé le 22 octobre 2026 sur la VM de test avec un vrai refus à « Tout le monde » (lecture de données seule) sur un contrat client : même ACL, même compte membre du groupe autorisé, `accès True` en 2.22.0, `accès False` en 2.22.1 ; tests 28, 46 et 14 OK ; refus retiré, test de non-divulgation 79 OK, 2 INFO.
+
+### Sécurité
+
+- `api/anon_auth.py` : `check_access` applique un refus en SID à toute identité dont l'appartenance ne se lit pas dans `tokenGroups` (« Tout le monde », « Utilisateurs authentifiés », groupes intégrés, SID d'une autre machine ou d'un autre domaine) ; jamais aux identités de service ni aux autres comptes du domaine. Autorisations inchangées. Refus en identifiants Entra (SharePoint) inchangés.
+- `anon_acl_resolver.py` : tous les refus conservés, y compris aux Administrateurs intégrés (avant : écartés avec leurs autorisations) ; rapport `documents_refus_pour_tous`.
+
+### Tests
+
+- `test_sid.py` : 28 tests (12 de plus), dont 5 échouent sur le code de la 2.22.0.
+
+### Documentation
+
+- `section-16-cloisonnement.md` (§16.5.3), `section-00-quickstart.md`, `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md`, `suivi-corrections.md` (point 159 ; point ouvert 34, commande du courriel de quarantaine).
+
+---
+
 ## [2.22.0] : Octobre 2026
 
 Les droits SMB sont comparés par **SID**, plus par noms de groupes (point 158, §16.5.3). Règle trois points ouverts du suivi (14, auth.1, auth.2). Validé sur la VM de test le 22 octobre 2026 : `tokenGroups` lu par le compte de service sans droit supplémentaire ; synchronisation `success=True`, 1 692 extraits migrés en SID, aucun document non migré ; `test_sid.py` 16, `test_echec_droits.py` 46, `test_revalidation_bm25.py` 14 tests OK ; droit retiré `Bilan : OK` ; test de non-divulgation 79 OK, 2 INFO, dont un compte réduit au groupe principal qui voit désormais un document autorisé à « Utilisateurs du domaine ».

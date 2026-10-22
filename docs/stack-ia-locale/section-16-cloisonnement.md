@@ -251,6 +251,18 @@ Les deux premiers écarts allaient presque toujours dans le sens prudent (docume
 
 **Les groupes intégrés (`S-1-5-32-…`) sont ignorés par défaut.** `tokenGroups` renvoie ceux de l'annuaire, qui ne valent que sur les contrôleurs de domaine. Sur un serveur de fichiers, une ACL `BUILTIN\Utilisateurs` désigne le groupe **local** du serveur, au même SID mais aux membres définis sur ce serveur. Les confondre recréerait une équivalence approximative, exactement ce que la 2.22.0 supprime. « Tout le monde » (`S-1-1-0`) et « Utilisateurs authentifiés » (`S-1-5-11`) ne figurent pas dans `tokenGroups`. Les documents autorisés à ces seules identités restent donc invisibles, comme avant. `ACL_SID_ETENDUS=1` garde les groupes intégrés et ajoute ces deux identités à tout compte trouvé : plus fidèle à Windows dans le cas courant, mais à décider après revue des droits des partages, souvent trop ouverts pour ces identités.
 
+**Les refus, plus larges que les autorisations (2.22.1).** Windows applique un refus à toute identité du jeton d'accès. Or le jeton d'un accès SMB contient des identités que `tokenGroups` ne donne pas : « Tout le monde » (`S-1-1-0`), « Utilisateurs authentifiés » (`S-1-5-11`), et les groupes intégrés ou locaux du serveur de fichiers. En 2.22.0, un refus à l'une d'elles était ignoré : un document autorisé à un groupe et refusé à « Tout le monde » restait lisible par les membres du groupe dans la RAG, alors que Windows le refuse (point 159, relevé par une revue externe). Depuis la 2.22.1, la règle est asymétrique, toujours du côté prudent :
+
+| Refus sur | Appliqué à l'utilisateur |
+|---|---|
+| Un de ses SID (compte, groupe) | Oui |
+| Un autre compte ou un autre groupe de son domaine | Non |
+| « Tout le monde », « Utilisateurs authentifiés », groupe intégré (`S-1-5-32-…`), autre identité bien connue | Oui, l'appartenance ne se lit pas |
+| SID d'une autre machine ou d'un autre domaine (groupe local du serveur de fichiers) | Oui, même raison |
+| Système, Service local, Service réseau, services (`S-1-5-80-…`) | Non, jamais dans le jeton d'un utilisateur |
+
+Les autorisations ne changent pas : « Tout le monde » et les groupes intégrés n'accordent l'accès qu'avec `ACL_SID_ETENDUS=1`. Un refus aux Administrateurs intégrés, auparavant écarté par `acl_resolver.py` avec leurs autorisations, est désormais conservé. Un document fermé à tous par un tel refus n'est pas un échec : il est listé dans le rapport (`documents_refus_pour_tous`), à vérifier sur le partage. **Limite** : dans une forêt de plusieurs domaines, un refus à un groupe d'un autre domaine dont l'utilisateur n'est pas membre est appliqué quand même, la RAG ne sachant pas distinguer ce groupe d'un groupe local. Le document est alors invisible à tort, jamais visible à tort.
+
 **Ce qui s'élargit, et qu'il faut regarder avant la mise à jour.** Le groupe principal étant reconnu, **un document lisible par « Utilisateurs du domaine » devient visible pour tous les comptes du domaine**. C'est fidèle aux droits du partage, que Windows applique déjà, mais c'est un changement visible. Pour lister ces documents après la migration :
 
 ```bash
@@ -261,15 +273,17 @@ Dans le lab, 54 documents : toute la documentation publique du dossier `DOIT4EVE
 
 **La migration, sans mélange.** Après la mise à jour, les droits encore enregistrés dans Qdrant sont des noms : aucun SID d'utilisateur ne leur correspond, les documents SMB sont donc **invisibles** jusqu'à la synchronisation suivante, à lancer aussitôt. À la fin de chaque passage, `acl_resolver.py` vérifie que **tous** les documents SMB ont des droits en SID. Un document encore au format des noms est compté comme un échec d'écriture : retiré de la recherche, signalé dans le rapport (`documents_non_migres_sid`), et l'alerte part. SharePoint et Purview ne sont pas concernés : leurs droits sont des identifiants Entra.
 
-**Contrôler un compte** : `diag_sid.py` affiche les SID de `tokenGroups`, leur nom, et ceux que la RAG API retient. Il vérifie aussi que le compte de service lit `tokenGroups` ; dans certains domaines durcis, il faut l'ajouter au groupe « Groupe d'accès d'autorisation Windows ».
+**Contrôler un compte** : `diag_sid.py` affiche les SID de `tokenGroups`, leur nom, et ceux que la RAG API retient. Il vérifie aussi que le compte de service lit `tokenGroups` ; dans certains domaines durcis, il faut l'ajouter au groupe « Groupe d'accès d'autorisation Windows ». `tokenGroups` est un attribut calculé par le contrôleur de domaine à chaque lecture : la RAG API le lit au plus une fois par compte toutes les 5 minutes (cache `GROUPS_CACHE_TTL`, §5.5). La charge sur l'annuaire n'a pas été mesurée au-delà du lab.
 
 ```bash
 docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte@domaine>
 ```
 
-**Tests.** `test_sid.py` (16 tests, obligatoire et bloquant dans `deploy.sh`) part de **sorties réelles** de `smbcacls --numeric` relevées sur le partage du lab : boîte de dépôt (écriture seule écartée), refus explicite (prioritaire), entrées héritées, ligne au format des noms (fichier illisible), lecture de `tokenGroups` refusée (aucun groupe). `test_echec_droits.py` vérifie le contrôle de migration. Le test de non-divulgation, qui fonctionne par comptes, sert de contrôle avant et après.
+**Tests.** `test_sid.py` (28 tests depuis la 2.22.1, obligatoire et bloquant dans `deploy.sh`) part de **sorties réelles** de `smbcacls --numeric` relevées sur le partage du lab : boîte de dépôt (écriture seule écartée), refus explicite (prioritaire), entrées héritées, ligne au format des noms (fichier illisible), lecture de `tokenGroups` refusée (aucun groupe), refus à « Tout le monde », « Utilisateurs authentifiés », aux groupes intégrés et à un SID d'une autre machine (appliqués), à Système et à un autre compte (sans effet), autorisation à « Tout le monde » seul (invisible par défaut). Cinq de ces tests échouent sur le code de la 2.22.0. `test_echec_droits.py` vérifie le contrôle de migration. Le test de non-divulgation, qui fonctionne par comptes, sert de contrôle avant et après.
 
 > **Validé sur la VM de test, 22 octobre 2026 (2.22.0) :** `tokenGroups` lu par le compte de service sans droit supplémentaire (18 SID pour un compte administrateur, 3 pour un compte de test) ; synchronisation `success=True`, 70 fichiers relus, 1 692 extraits réécrits en SID, `documents_non_migres_sid` : 0 ; `test_sid.py` 16, `test_echec_droits.py` 46 et `test_revalidation_bm25.py` 14 tests OK ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO), puis complété par le cas `DOC-DOMAINE` : un document autorisé à « Utilisateurs du domaine » est visible pour les 9 comptes, y compris un compte qui n'a que ce groupe (79 OK, 2 INFO). En 2.21.11, ce compte ne le voyait pas.
+>
+> **Validé sur la VM de test, 22 octobre 2026 (2.22.1) :** refus à « Tout le monde » posé sur un contrat client, en lecture de données seule (`icacls … /deny "*S-1-1-0:(RD)"`). Même ACL relevée par `smbcacls`, même compte membre du groupe autorisé : `accès True` en 2.22.0, `accès False` en 2.22.1. `test_sid.py` 28, `test_echec_droits.py` 46 et `test_revalidation_bm25.py` 14 tests OK. Refus retiré : document réindexé, `documents_refus_pour_tous` : 0, test de non-divulgation 79 OK, 2 INFO. Le refus touche aussi le compte d'indexation, membre de « Tout le monde » : il ne lisait plus le contenu, et l'indexeur a retiré le document de la recherche (statut `vide`). Pour un tel refus sur un partage réel, le document n'est donc de toute façon pas indexé ; la correction compte pour les refus aux groupes intégrés ou locaux, qui peuvent ne pas toucher le compte d'indexation, et pour un document indexé avant la pose du refus.
 
 ## §16.6 Durcissement de la RAG API
 
@@ -470,7 +484,7 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
 | Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `46 tests OK` |
-| Droits par SID | `test_sid.py` (§16.5.3) | `16 tests OK` |
+| Droits par SID | `test_sid.py` (§16.5.3) | `28 tests OK` |
 | Migration vers les SID | `rapport_acl.json`, `documents_non_migres_sid` | 0 après la première synchronisation (§16.5.3) |
 | Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json*` | Registre présent, pas de `.en_cours` hors synchronisation ; sinon, questions refusées jusqu'à une synchronisation terminée |
 | Fermeture si les droits sont incertains | `grep ACL_INCERTAIN_FERME /root/rag-stack/.env` | 1, ou absent (1 par défaut) ; 0 seulement par choix documenté |

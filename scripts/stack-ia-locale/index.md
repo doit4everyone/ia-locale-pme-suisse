@@ -78,7 +78,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `test_echec_droits.py` | Tests unitaires des échecs d'écriture des droits : `acl_resolver.py` (trois issues, seconde tentative, code 2), documents retirés de la recherche par la RAG API, passages incomplets, registre (écriture, marqueur, validation), âge maximal des droits, fichier SharePoint trop volumineux ; Qdrant simulé ; un échec bloque `deploy.sh` | `docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py`, voir §16.5.2 |
 | `test_revocation_bm25.py` | Test en lab : retire quelques secondes le droit sur un document dans Qdrant, sans reconstruire l'index, et vérifie que la recherche ne le renvoie plus ; droits remis ensuite | Dans le conteneur `rag-api`, voir §16.5.1 |
 | `test_citations.py` | Tests unitaires du contrôle des citations (accents, ambiguïté, source inventée) et de la lecture du verdict du juge (schéma complet exigé), sans modèle ni Qdrant ; obligatoire dans `deploy.sh` depuis la 2.21.10 | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py`, voir §0 étape 16 |
-| `test_sid.py` | Tests unitaires du contrôle d'accès par SID (2.22.0) : sorties réelles de `smbcacls --numeric`, `tokenGroups` (lecture refusée = aucun groupe), décision d'accès ; obligatoire dans `deploy.sh` | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py`, voir guide §16.5.3 |
+| `test_sid.py` | Tests unitaires du contrôle d'accès par SID (2.22.0) : sorties réelles de `smbcacls --numeric`, `tokenGroups` (lecture refusée = aucun groupe), décision d'accès, refus sur les identités absentes de `tokenGroups` (2.22.1) ; obligatoire dans `deploy.sh` | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py`, voir guide §16.5.3 |
 | `diag_sid.py` | Contrôle des SID d'un compte : `tokenGroups` lisible, groupes et noms, SID retenus pour l'accès ; ne modifie rien | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte@domaine>` |
 | [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
 | [`s10/charge_s10.py`](s10/charge_s10.py) | Mesure de charge du §10.12 : 1 à N questions posées en même temps, après une mesure de référence de chaque question seule ; gain de chaque série, débit, écarts | `docker exec -it rag-api python3 /rag-pipeline/s10/charge_s10.py /rag-pipeline/s10/jeu_questions_s10.json --paliers 1,2,4,6,8 --etiquette ma-configuration` |
@@ -169,6 +169,7 @@ Fonctionnalités :
 - Groupes intégrés (`S-1-5-32-…`) ignorés par défaut ; `ACL_SID_ETENDUS=1` les garde et ajoute « Tout le monde » et « Utilisateurs authentifiés »
 - Cache TTL configurable (défaut 300 secondes)
 - SID du compte nominatif inclus (pour les ACE directs)
+- Refus (2.22.1) : appliqué aussi à « Tout le monde », « Utilisateurs authentifiés », aux groupes intégrés et à tout SID d'une autre machine ou d'un autre domaine, dont l'appartenance ne se lit pas ; jamais aux identités de service ni aux autres comptes du domaine
 - Noms des groupes dans le journal du conteneur, à côté des SID, pour le dépannage seulement
 - Deny par défaut en cas d'erreur LDAP
 - **Extension Entra ID (Partie 3, désactivée par défaut)** : si `ENTRA_ENABLED=true`, ajoute aux groupes AD les identifiants Entra de l'utilisateur, obtenus via Microsoft Graph (`transitiveMemberOf`), au format `entra:usr:<id>` et `entra:grp:<id>`. Authentification de l'application par certificat (MSAL). Si Graph échoue, les groupes AD sont conservés et le résultat n'est pas mis en cache. Détails et validation : guide §11.
@@ -253,6 +254,7 @@ Fonctionnalités :
 - Lecture des ACL via `smbcacls --numeric` (paquet `smbclient` requis) : SID, type (0 autorisation, 1 refus), drapeaux et masque en hexadécimal ; une ligne non reconnue rend le fichier illisible
 - Droits enregistrés en SID, comparés aux SID de l'utilisateur par `auth.py` (2.22.0)
 - Contrôle de migration : un document SMB encore au format des noms est compté en échec (`documents_non_migres_sid`)
+- Tous les refus conservés, y compris aux Administrateurs intégrés (2.22.1) ; documents fermés à tous par un refus sur une identité intégrée ou locale listés dans le rapport (`documents_refus_pour_tous`)
 - Population de `autorises[]` (ALLOW) et `interdits[]` (DENY explicites)
 - Suppression des chunks dont la source a disparu du partage (orphelins). Depuis la v4, seuls les chunks `source_type` `smb` (ou sans ce champ) sont concernés : les chunks SharePoint ne sont jamais supprimés comme orphelins. La suppression se fait par filtre, sans limite du nombre de chunks par fichier
 - Rapport JSON produit à l'issue de chaque passe
