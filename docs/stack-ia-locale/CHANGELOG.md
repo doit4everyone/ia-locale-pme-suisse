@@ -4,6 +4,30 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.10] : Octobre 2026
+
+Correctif de sécurité, à la suite d'une septième revue externe du code (points 154 à 156). Validé sur la VM de test le 22 octobre 2026 : 20, 44 et 14 tests unitaires OK ; test de non-divulgation inchangé (70 OK, 2 INFO) ; mesure du juge 4B : aucune réponse incomplète du juge, ni sur les réponses réelles ni sur les falsifiées, la règle ne bloque donc aucune réponse ; faits inventés 30/30 détectés. Au passage, la protection de la 2.21.8 a joué en conditions réelles : workflow de synchronisation resté désactivé après des mesures, questions refusées au-delà de 3 heures (`droits_perimes`), reprise après une synchronisation.
+
+### Sécurité
+
+- `api/anon_main.py` : « ancrée » exige un schéma complet (booléen `true` et liste vide) ; une réponse du juge sans liste, ou avec une liste `null`, vide en texte, `0`, objet ou éléments non textuels, vaut « non ancrée » (point 154).
+- `api/anon_main.py` : `ACL_AGE_MAX_HEURES` lu strictement : 0, ou nombre fini strictement positif ; `nan`, `inf`, négatif ou texte appliquent la limite de 3 heures, avec une alerte au journal ; le contrôle refuse toute limite invalide qui lui parviendrait (point 156).
+- `deploy.sh` : `test_citations.py` exigé dans le dépôt, copie contrôlée, test obligatoire et bloquant comme les tests de sécurité des droits (point 155) ; en-tête en 2.21.10.
+
+### Tests et mesures
+
+- `test_citations.py` : 7 tests ajoutés (schéma de la réponse du juge), 20 au total.
+- `test_echec_droits.py` : 2 tests ajoutés (valeurs invalides de `ACL_AGE_MAX_HEURES`), 44 au total.
+- `s10/mesure_juge.py` : compte les réponses incomplètes du juge, sur les réponses réelles et falsifiées.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.2 (valeurs de `ACL_AGE_MAX_HEURES`), §16.6 (réponse du juge incomplète), checklist (44 tests).
+- `section-00-quickstart.md`, `tests-apres-modification.md` : 20 et 44 tests.
+- `suivi-corrections.md` : points 154 à 156 ; point 73 (charge) mis à jour.
+
+---
+
 ## [2.21.9] : Octobre 2026
 
 Correctif de sécurité : avec la configuration Ollama recommandée, le juge laissait passer un fait inventé sur trois, qu'il avait pourtant repéré (points 151 à 153, §10.12). Première mesure de ce que le juge détecte. La piste du juge partagé, qui devait réduire la charge de vLLM, a été mesurée puis abandonnée. Validé sur la VM de test le 22 octobre 2026 : 13, 42 et 14 tests unitaires OK ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO) ; mesure du juge 4B avec la règle : 39 réponses réelles sur 42 acceptées, 33 faits inventés sur 33 détectés.

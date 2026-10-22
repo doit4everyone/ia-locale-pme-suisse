@@ -798,7 +798,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Refus par adresse IP | `curl -sk https://<IP-VM>/; echo $?` | `35` |
 | Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
 | Ports exposés | `docker compose ps` | Seul `nginx` publie des ports : 80, 443, 5678 |
-| Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `13 tests OK` |
+| Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `20 tests OK` |
 | Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
 | Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |

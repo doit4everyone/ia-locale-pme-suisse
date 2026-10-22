@@ -131,6 +131,7 @@ def juger(reponse: str, chunks: list) -> dict:
             "erreur": r.get("juge_error", ""),
             "controle": r.get("controle", ""),
             "incoherent": bool(r.get("verdict_incoherent")),
+            "schema_invalide": bool(r.get("schema_invalide")),
             "non_sourcees": r.get("affirmations_non_sourcees", []),
             "jetons": r.get("juge_jetons"),
             "duree_s": round(time.monotonic() - debut, 1)}
@@ -232,8 +233,12 @@ def principal() -> int:
               f"Versions « {nom} » : aucune (réponses qui ne s'y prêtent pas)")
     erreurs = sum(verdict(j) == "erreur" for r in resultats for js in r["jugements"].values() for j in js)
     incoherents = sum(j["incoherent"] for r in resultats for js in r["jugements"].values() for j in js)
-    print(f"Erreurs du juge : {erreurs} ; verdicts incohérents (« ancrée » avec une liste) : {incoherents}")
+    schemas = sum(j.get("schema_invalide", False) for r in resultats for js in r["jugements"].values() for j in js)
+    schemas_reels = sum(j.get("schema_invalide", False) for r in resultats for j in r["jugements"].get("reelle", []))
+    print(f"Erreurs du juge : {erreurs} ; verdicts incohérents (« ancrée » avec une liste) : {incoherents} ; "
+          f"réponses du juge incomplètes : {schemas} (dont {schemas_reels} sur des réponses réelles)")
     synthese["erreurs"], synthese["incoherents"] = erreurs, incoherents
+    synthese["schemas_invalides"], synthese["schemas_invalides_reelles"] = schemas, schemas_reels
 
     trouvees = total = en_trop = 0
     for r in resultats:

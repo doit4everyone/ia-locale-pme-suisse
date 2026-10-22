@@ -626,7 +626,7 @@ La dernière colonne relit la mesure du 4B comme le faisait la 2.21.8, sans la r
 
 > **Validé sur la VM de test, 22 octobre 2026 (2.21.9) :** `test_citations.py` 13 tests OK (dont verdict incohérent et phrase de refus), `test_echec_droits.py` 42 et `test_revalidation_bm25.py` 14 tests OK ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO). Les mesures du juge ci-dessus ont été faites sur la même VM.
 
-**Ce que la mesure a montré de la rédaction.** Les réponses réelles refusées ne viennent pas du juge : sur la question « clients axonix », une rédaction sans aucune citation, mêlant des documents hors sujet ; sur « clients », un refus formulé autrement que la phrase prévue, que le contrôle des refus ne reconnaît pas. Deux comportements à suivre (§10.9).
+**Ce que la mesure a montré de la rédaction.** Les réponses réelles refusées ne viennent pas du juge : sur la question « clients axonix », une rédaction sans aucune citation, mêlant des documents hors sujet ; sur « clients », un refus formulé autrement que la phrase prévue, que le contrôle des refus ne reconnaît pas. Deux comportements à suivre (§10.9) : la rédaction sans citation de « clients axonix » s'est reproduite dans deux mesures sur quatre.
 
 ### Ce que coûte vLLM
 

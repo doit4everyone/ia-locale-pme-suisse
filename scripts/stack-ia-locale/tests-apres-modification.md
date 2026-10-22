@@ -335,7 +335,7 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 ```
 
-**Attendu :** `42 tests OK`.
+**Attendu :** `44 tests OK`.
 
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 

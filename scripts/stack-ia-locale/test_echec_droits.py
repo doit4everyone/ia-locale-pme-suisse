@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 42 tests OK », code de sortie 0.
+Attendu : « 44 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -497,6 +497,20 @@ def tests_age():
     incertain_garde = servie() is False and main.etat_droits() == "droits_inconnus"
     verifier("2.21.8 : ACL_AGE_MAX_HEURES=0, âge ignoré, registre inconnu toujours refusé",
              age_ignore and incertain_garde, f"âge ignoré {age_ignore}, registre {incertain_garde}")
+
+    # 2.21.10 : valeurs invalides de ACL_AGE_MAX_HEURES, limite sûre de 3 h
+    lus = {v: main._age_max_heures(v) for v in ("nan", "inf", "-inf", "-1", "abc", "", "0", "0.5", "3")}
+    attendus = {"nan": 3.0, "inf": 3.0, "-inf": 3.0, "-1": 3.0, "abc": 3.0, "": 3.0, "0": 0.0, "0.5": 0.5, "3": 3.0}
+    verifier("2.21.10 : ACL_AGE_MAX_HEURES nan, inf, négatif ou texte, limite de 3 h ; 0 et positifs gardés",
+             lus == attendus, f"lu {lus}")
+    # Même si une valeur invalide arrivait jusqu'au contrôle : refus, jamais « frais »
+    remise_a_zero()
+    main._etat["derniere_synchro_complete"] = il_y_a(10)
+    refus = []
+    for v in (float("nan"), float("inf"), -1.0):
+        main.ACL_AGE_MAX_HEURES = v
+        refus.append(servie() is False)
+    verifier("2.21.10 : limite d'âge nan, inf ou négative au contrôle, question refusée", all(refus), f"{refus}")
 
     remise_a_zero()
     for f in (main.FICHIER_BLOQUES, main.fichier_marqueur()):

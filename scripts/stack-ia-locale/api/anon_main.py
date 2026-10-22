@@ -18,6 +18,7 @@ import logging
 import subprocess
 import asyncio
 import time
+import math
 import unicodedata
 from datetime import datetime, timezone
 from auth import get_user_groups, check_access, entra_en_echec
@@ -236,10 +237,26 @@ PREFIXE_SP = "SharePoint/"
 # la durée pendant laquelle la RAG API peut tourner sur des droits anciens
 # (n8n arrêté, workflow désactivé, synchronisations en échec répété, marqueur
 # impossible à écrire). 0 désactive ce seul contrôle, pas les autres.
-try:
-    ACL_AGE_MAX_HEURES = float(os.getenv("ACL_AGE_MAX_HEURES", "3") or "3")
-except ValueError:
-    ACL_AGE_MAX_HEURES = 3.0
+def _age_max_heures(brut: str) -> float:
+    """ACL_AGE_MAX_HEURES lu strictement (2.21.10) : 0 exactement (contrôle
+    désactivé) ou un nombre fini strictement positif. Toute autre valeur
+    (texte, nan, inf, négatif) : limite sûre de 3 heures et alerte au journal.
+    Avant : « nan » rendait toute comparaison fausse, donc des droits toujours
+    jugés frais ; un négatif désactivait le contrôle ; « inf » le rendait sans
+    limite."""
+    brut = (brut or "").strip() or "3"
+    try:
+        v = float(brut)
+    except ValueError:
+        v = float("nan")
+    if v == 0 or (math.isfinite(v) and v > 0):
+        return v
+    logger.critical(f"[DROITS] ACL_AGE_MAX_HEURES={brut!r} invalide (0, ou nombre fini positif) : "
+                    "limite de 3 heures appliquée (§16.5.2)")
+    return 3.0
+
+
+ACL_AGE_MAX_HEURES = _age_max_heures(os.getenv("ACL_AGE_MAX_HEURES", "3"))
 TOLERANCE_HORLOGE_S = 300   # horodatage « dans le futur » toléré (écart d'horloge)
 
 
@@ -428,8 +445,10 @@ def droits_frais(maintenant: datetime | None = None) -> tuple[bool, str]:
     """(True, "") si la dernière synchronisation complète des droits a moins de
     ACL_AGE_MAX_HEURES. Horodatage absent, illisible ou dans le futur : non frais.
     L'âge exactement égal à la limite est accepté ; au-delà, refus."""
-    if ACL_AGE_MAX_HEURES <= 0:
+    if ACL_AGE_MAX_HEURES == 0:
         return True, ""
+    if not (math.isfinite(ACL_AGE_MAX_HEURES) and ACL_AGE_MAX_HEURES > 0):
+        return False, "limite d'âge des droits invalide"
     t = _lire_horodatage(_etat.get("derniere_synchro_complete"))
     if t is None:
         return False, "date de la dernière synchronisation complète inconnue"
@@ -1576,27 +1595,43 @@ def est_refus_standard(answer: str) -> bool:
 
 
 def verdict_juge(result) -> dict:
-    """Verdict du juge, lu strictement (fail-closed).
-    - Seul le booléen True vaut « ancrée » : {"ancree": "false"} en chaîne ou une
-      clé absente laisseraient sinon passer une réponse non ancrée.
-    - Verdict incohérent (2.21.9) : le juge répond « ancrée » tout en citant des
-      affirmations non sourcées. Mesuré le 22 octobre 2026 (s10/mesure_juge.py) : une
-      réponse au chiffre falsifié, citée par le juge lui-même, mais déclarée
-      ancrée. La liste l'emporte : réponse non ancrée. Sur 168 jugements de
-      réponses réelles (deux mesures, deux formats de prompt), aucune liste non
-      vide avec « ancrée » : la règle ne bloque aucune réponse mesurée."""
+    """Verdict du juge, lu strictement (fail-closed). « Ancrée » exige un schéma
+    complet : `ancree` égal au booléen True ET `affirmations_non_sourcees` égal
+    à une liste VIDE. Tout le reste est « non ancrée ».
+    - {"ancree": "true"} en chaîne, clé absente : non ancrée.
+    - Verdict incohérent (2.21.9) : « ancrée » avec des affirmations signalées.
+      Mesuré le 22 octobre 2026 (s10/mesure_juge.py) : le juge 4B d'Ollama l'a
+      fait 14 fois sur 72 versions falsifiées. Sur 210 jugements de réponses
+      réelles, aucun ne combinait « ancrée » et une liste non vide.
+    - Schéma incomplet (2.21.10, revue externe) : liste absente, null, chaîne
+      vide, 0 ou objet. Jusqu'à la 2.21.9, ces cas étaient lus comme une liste
+      vide, et {"ancree": true} seul valait « ancrée » : une réponse incomplète
+      du juge devenait une preuve d'ancrage."""
     if not isinstance(result, dict):
         result = {}
-    liste = result.get("affirmations_non_sourcees")
-    if result.get("ancree") is not True:
+    liste = result.get("affirmations_non_sourcees", None)
+    liste_ok = isinstance(liste, list) and all(isinstance(x, str) for x in liste)
+    if result.get("ancree") is True and liste_ok and not liste:
+        result["ancree"] = True
+    else:
+        if result.get("ancree") is True:
+            if liste_ok:
+                logger.warning("[JUGE] Verdict incohérent : « ancrée » avec des affirmations "
+                               "non sourcées ; réponse traitée comme non ancrée")
+                result["verdict_incoherent"] = True
+            else:
+                logger.warning("[JUGE] Réponse du juge incomplète (liste des affirmations absente "
+                               "ou mal formée) ; réponse traitée comme non ancrée")
+                result["schema_invalide"] = True
         result["ancree"] = False
-    elif liste:
-        logger.warning("[JUGE] Verdict incohérent : « ancrée » avec des affirmations "
-                       "non sourcées ; réponse traitée comme non ancrée")
-        result["ancree"] = False
-        result["verdict_incoherent"] = True
-    if not isinstance(liste, list):
-        result["affirmations_non_sourcees"] = [str(liste)] if liste else []
+    if not liste_ok:
+        # Garder la trace de ce que le juge a renvoyé, sous forme de liste de textes
+        if isinstance(liste, list):
+            result["affirmations_non_sourcees"] = [str(x) for x in liste]
+        elif liste not in (None, "", 0, {}):
+            result["affirmations_non_sourcees"] = [str(liste)]
+        else:
+            result["affirmations_non_sourcees"] = []
     result["controle"] = "juge"
     return result
 

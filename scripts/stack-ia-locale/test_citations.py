@@ -10,7 +10,7 @@ incohérent refusé) et est_refus_standard (seule la phrase de refus exacte
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py
 
-Attendu : « 13 tests OK », code de sortie 0.
+Attendu : « 20 tests OK », code de sortie 0.
 """
 
 import sys
@@ -89,6 +89,14 @@ resultats += [
     juge("juge : clé absente", {"affirmations_non_sourcees": []}, False),
     # 9. Liste remplacée par une chaîne : non ancrée, liste normalisée
     juge("juge : liste en chaîne", {"ancree": True, "affirmations_non_sourcees": "36 mois"}, False),
+    # 2.21.10 : schéma incomplet, jamais une preuve d'ancrage
+    juge("juge : liste absente", {"ancree": True}, False),
+    juge("juge : liste null", {"ancree": True, "affirmations_non_sourcees": None}, False),
+    juge("juge : liste chaîne vide", {"ancree": True, "affirmations_non_sourcees": ""}, False),
+    juge("juge : liste 0", {"ancree": True, "affirmations_non_sourcees": 0}, False),
+    juge("juge : liste objet vide", {"ancree": True, "affirmations_non_sourcees": {}}, False),
+    juge("juge : liste d'éléments non textuels", {"ancree": True, "affirmations_non_sourcees": [1]}, False),
+    juge("juge : réponse qui n'est pas un objet", ["ancree", True], False),
 ]
 
 

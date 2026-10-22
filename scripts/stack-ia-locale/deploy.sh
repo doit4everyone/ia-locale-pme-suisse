@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.21.9)
+# Version : beta (2.21.10)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -430,9 +430,10 @@ if [ -f "test_cloisonnement.py" ]; then
 fi
 # Tests unitaires du contrôle des citations et des droits sur la recherche par
 # mots-clés (lancés à l'étape 10), test en lab d'un droit retiré (§16.5.1)
-# Les deux tests de sécurité sont exigés dans le dépôt (2.21.8) : sinon, une
-# ancienne copie restée dans /root/rag-pipeline serait lancée à leur place.
-for f in test_revalidation_bm25.py test_echec_droits.py; do
+# Les tests de sécurité sont exigés dans le dépôt (2.21.8 ; test_citations.py,
+# qui contrôle aussi la lecture du verdict du juge, depuis la 2.21.10) : sinon,
+# une ancienne copie restée dans /root/rag-pipeline serait lancée à leur place.
+for f in test_citations.py test_revalidation_bm25.py test_echec_droits.py; do
     if [ ! -f "$f" ]; then
         echo -e "${RED}[ERREUR]${NC} Test de sécurité $f absent du dépôt ($(pwd)) : déploiement arrêté (§16.5)."
         exit 1
@@ -441,7 +442,7 @@ done
 for f in test_citations.py test_revalidation_bm25.py test_revocation_bm25.py test_echec_droits.py; do
     [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
 done
-for f in test_revalidation_bm25.py test_echec_droits.py; do
+for f in test_citations.py test_revalidation_bm25.py test_echec_droits.py; do
     if ! cmp -s "$f" "/root/rag-pipeline/$f"; then
         echo -e "${RED}[ERREUR]${NC} /root/rag-pipeline/$f diffère de la version du dépôt : déploiement arrêté (§16.5)."
         exit 1
@@ -838,21 +839,13 @@ if [ "$CERT_AUTOSIGNE" = "non" ] && [ -s /etc/ssl/certs/ad-chain.pem ]; then
     fi
 fi
 
-# Contrôle des citations : tests unitaires, sans modèle ni Qdrant
-if [ -f /root/rag-pipeline/test_citations.py ]; then
-    if docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py >/dev/null 2>&1; then
-        ok "Contrôle des citations : tests unitaires OK"
-    else
-        warn "Contrôle des citations : tests en échec (docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py)"
-    fi
-fi
-
-# Tests de sécurité des droits (§16.5.1, §16.5.2) : obligatoires (2.21.5).
+# Tests de sécurité (§16.5.1, §16.5.2) : obligatoires (2.21.5) ; contrôle des
+# citations et lecture du verdict du juge (test_citations.py) depuis la 2.21.10.
 # Absent ou en échec : la RAG API est arrêtée, pour qu'aucune question ne soit
 # servie par un code non vérifié, et le déploiement se termine en erreur.
 # Rien n'est supprimé : corriger, puis redémarrer la RAG API.
 ECHEC_SECURITE=0
-for t in test_revalidation_bm25.py test_echec_droits.py; do
+for t in test_citations.py test_revalidation_bm25.py test_echec_droits.py; do
     if [ ! -f "/root/rag-pipeline/$t" ]; then
         ECHEC_SECURITE=1
         PROBLEMES="${PROBLEMES}  - Test de sécurité $t ABSENT de /root/rag-pipeline (copier le fichier du dépôt ; §16.5)\n"
