@@ -171,6 +171,7 @@ Fonctionnalités :
 - SID du compte nominatif inclus (pour les ACE directs)
 - Refus (2.22.1) : appliqué aussi à « Tout le monde », « Utilisateurs authentifiés », aux groupes intégrés et à tout SID d'une autre machine ou d'un autre domaine, dont l'appartenance ne se lit pas ; jamais aux identités de service ni aux autres comptes du domaine
 - Noms des groupes dans le journal du conteneur, à côté des SID, pour le dépannage seulement
+- SID du domaine lu une fois (`sid_domaine`), transmis à `acl_resolver.py` pour son rapport (2.22.2), jamais pour une décision d'accès
 - Deny par défaut en cas d'erreur LDAP
 - **Extension Entra ID (Partie 3, désactivée par défaut)** : si `ENTRA_ENABLED=true`, ajoute aux groupes AD les identifiants Entra de l'utilisateur, obtenus via Microsoft Graph (`transitiveMemberOf`), au format `entra:usr:<id>` et `entra:grp:<id>`. Authentification de l'application par certificat (MSAL). Si Graph échoue, les groupes AD sont conservés et le résultat n'est pas mis en cache. Détails et validation : guide §11.
 
@@ -254,7 +255,7 @@ Fonctionnalités :
 - Lecture des ACL via `smbcacls --numeric` (paquet `smbclient` requis) : SID, type (0 autorisation, 1 refus), drapeaux et masque en hexadécimal ; une ligne non reconnue rend le fichier illisible
 - Droits enregistrés en SID, comparés aux SID de l'utilisateur par `auth.py` (2.22.0)
 - Contrôle de migration : un document SMB encore au format des noms est compté en échec (`documents_non_migres_sid`)
-- Tous les refus conservés, y compris aux Administrateurs intégrés (2.22.1) ; documents fermés à tous par un refus sur une identité intégrée ou locale listés dans le rapport (`documents_refus_pour_tous`)
+- Tous les refus conservés, y compris aux Administrateurs intégrés (2.22.1) ; documents fermés à tous par un refus sur une identité intégrée ou locale listés dans le rapport (`documents_refus_pour_tous`), y compris un SID d'une autre machine ou d'un autre domaine depuis la 2.22.2 (SID du domaine transmis par la RAG API, `SID_DOMAINE`)
 - Population de `autorises[]` (ALLOW) et `interdits[]` (DENY explicites)
 - Suppression des chunks dont la source a disparu du partage (orphelins). Depuis la v4, seuls les chunks `source_type` `smb` (ou sans ce champ) sont concernés : les chunks SharePoint ne sont jamais supprimés comme orphelins. La suppression se fait par filtre, sans limite du nombre de chunks par fichier
 - Rapport JSON produit à l'issue de chaque passe

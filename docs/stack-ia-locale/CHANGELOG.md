@@ -4,6 +4,26 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.2] : Octobre 2026
+
+Suite de la neuvième revue externe, qui juge le modèle d'autorisation par SID suffisamment solide pour des pilotes en périmètre maîtrisé et clôt cette série de corrections. Un défaut du rapport, aucun de la décision d'accès. Validé le 22 octobre 2026 sur la VM de test avec un refus à un groupe local du serveur de fichiers (lecture de données seule), dont le compte d'indexation n'est pas membre : document resté indexé, `sid_domaine` lu dans l'annuaire, document listé dans `documents_refus_pour_tous`, `accès False` pour un compte membre du groupe autorisé ; `test_sid.py` 32, `test_echec_droits.py` 46, `test_revalidation_bm25.py` 14 et `test_citations.py` 20 tests OK ; refus et groupe retirés, rapport à 0, test de non-divulgation 79 OK, 2 INFO.
+
+### Corrigé
+
+- `anon_acl_resolver.py`, `api/anon_auth.py`, `api/anon_main.py` : le rapport `documents_refus_pour_tous` compte aussi un refus sur un SID d'une autre machine ou d'un autre domaine (groupe local du serveur de fichiers, par exemple). La RAG API lit le SID du domaine dans l'annuaire (`sid_domaine`, une fois) et le transmet à `acl_resolver.py` (`SID_DOMAINE`) ; inconnu, ces refus ne sont pas comptés et le journal le dit. La décision d'accès est inchangée (point 160).
+- `scripts/N8N/n8n-sync-corpus.json` : la commande de contrôle du courriel cherche aussi le statut « non_indexe », écrit par `acl_resolver.py` (point 161, ancien point ouvert 34).
+
+### Tests
+
+- `test_sid.py` : 32 tests (classement du rapport, SID du domaine lu ou introuvable).
+
+### Documentation
+
+- `section-16-cloisonnement.md` : statut de la section mis à jour ; §16.5.3, l'inventaire des documents ouverts à « Utilisateurs du domaine » comme audit du partage (dans le lab, contrôle total hérité de la racine, droit d'écriture sur des documents indexés) ; noms du journal contrôlés dans le lab.
+- `section-00-quickstart.md`, `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md`, `suivi-corrections.md` (points 160 et 161).
+
+---
+
 ## [2.22.1] : Octobre 2026
 
 Correctif de cloisonnement de la 2.22.0, relevé par une revue externe (point 159, §16.5.3). Un refus sur une identité absente des SID de l'utilisateur était ignoré : un document autorisé à un groupe et refusé à « Tout le monde » ou à « Utilisateurs authentifiés » restait lisible par les membres du groupe, alors que Windows le refuse. Validé le 22 octobre 2026 sur la VM de test avec un vrai refus à « Tout le monde » (lecture de données seule) sur un contrat client : même ACL, même compte membre du groupe autorisé, `accès True` en 2.22.0, `accès False` en 2.22.1 ; tests 28, 46 et 14 OK ; refus retiré, test de non-divulgation 79 OK, 2 INFO.

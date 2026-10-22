@@ -1,5 +1,5 @@
 """
-test_sid.py : tests unitaires du contrôle d'accès par SID (2.22.0, refus complétés en 2.22.1).
+test_sid.py : tests unitaires du contrôle d'accès par SID (2.22.0, refus complétés en 2.22.1, rapport en 2.22.2).
 
 Vérifie, sans annuaire ni partage :
   - la lecture des ACL de smbcacls --numeric par acl_resolver.py, sur des
@@ -11,12 +11,14 @@ Vérifie, sans annuaire ni partage :
   - la décision d'accès (refus prioritaire, boîte de dépôt) ;
   - les refus sur des identités absentes des SID de l'utilisateur mais présentes
     dans un jeton Windows : « Tout le monde », « Utilisateurs authentifiés »,
-    groupes intégrés ou locaux (2.22.1).
+    groupes intégrés ou locaux (2.22.1) ;
+  - le rapport des documents fermés à tous, qui distingue le domaine des
+    autres machines et domaines, et la lecture du SID du domaine (2.22.2).
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py
 
-Attendu : « 28 tests OK », code de sortie 0.
+Attendu : « 32 tests OK », code de sortie 0.
 """
 import importlib.util
 import os
@@ -251,8 +253,52 @@ def tests_refus_identites_jeton():
              auth.check_access(["entra:a"], ["entra:a"], ["entra:b"]) is True
              and auth.check_access(["entra:a"], ["entra:a"], ["entra:a"]) is False)
     verifier("rapport : « Tout le monde » et groupe intégré ferment à tous, Système et domaine non",
-             ar.refus_pour_tous("S-1-1-0") and ar.refus_pour_tous("S-1-5-32-544")
-             and not ar.refus_pour_tous("S-1-5-18") and not ar.refus_pour_tous(f"{D}-1999"))
+             ar.refus_pour_tous("S-1-1-0", D) and ar.refus_pour_tous("S-1-5-32-544", D)
+             and not ar.refus_pour_tous("S-1-5-18", D) and not ar.refus_pour_tous(f"{D}-1999", D))
+    verifier("rapport : SID d'une autre machine ou d'un autre domaine compté comme fermant à tous (2.22.2)",
+             ar.refus_pour_tous("S-1-5-21-9-8-7-1001", D) is True)
+    verifier("rapport : SID du domaine inconnu, refus S-1-5-21 non classé (signalé au journal)",
+             ar.refus_pour_tous("S-1-5-21-9-8-7-1001", "") is False and ar.refus_pour_tous("S-1-1-0", "") is True)
+
+
+class ServeurSimule:
+    def __init__(self, nc):
+        self.info = type("I", (), {})()
+        self.info.other = {"defaultNamingContext": [nc]} if nc else {}
+
+
+class ConnDomaine:
+    def __init__(self, sid=None):
+        self.sid, self.entries = sid, []
+
+    def search(self, base, filtre, portee, attributes=None):
+        self.base = base
+        if self.sid and base == "DC=test,DC=ch":
+            e = type("E", (), {})()
+            e.entry_raw_attributes = {"objectSid": [sid_binaire(self.sid)]}
+            self.entries = [e]
+        else:
+            self.entries = []
+        return True
+
+    def unbind(self):
+        pass
+
+
+def tests_sid_domaine():
+    sauve = (auth._serveur_ldap, auth.Connection, auth._sid_domaine_cache)
+    try:
+        auth._sid_domaine_cache = None
+        auth._serveur_ldap = lambda: ServeurSimule("DC=test,DC=ch")
+        auth.Connection = lambda *a, **k: ConnDomaine(D)
+        lu = auth.sid_domaine()
+        verifier("SID du domaine lu sur le contexte de nommage par défaut", lu == D, f"{lu}")
+        auth._sid_domaine_cache = None
+        auth.Connection = lambda *a, **k: ConnDomaine(None)
+        lu = auth.sid_domaine()
+        verifier("SID du domaine introuvable : chaîne vide, pas d'exception", lu == "", f"{lu}")
+    finally:
+        auth._serveur_ldap, auth.Connection, auth._sid_domaine_cache = sauve
 
 
 if __name__ == "__main__":
@@ -261,6 +307,7 @@ if __name__ == "__main__":
     tests_get_user_groups()
     tests_acces()
     tests_refus_identites_jeton()
+    tests_sid_domaine()
     total, ok = len(RESULTATS), sum(RESULTATS)
     print(f"{ok} tests OK" if ok == total else f"{total - ok} test(s) en échec sur {total}")
     sys.exit(0 if ok == total else 1)

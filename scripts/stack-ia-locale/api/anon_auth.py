@@ -319,6 +319,83 @@ def entra_en_echec(email: str) -> bool:
     return email.lower() in _entra_echec
 
 
+def _serveur_ldap():
+    """Serveur LDAP ou LDAPS (validation du certificat si LDAP_CA_CERT est fourni)."""
+    if LDAP_USE_TLS:
+        # Chemin du certificat CA du DC (export depuis Cert:\LocalMachine\Root)
+        # Absent en lab (certificat auto-signé) : CERT_NONE acceptable
+        # En production : exporter le certificat CA et le pointer ici
+        ca_certs = os.getenv("LDAP_CA_CERT", "")
+        # Trois cas :
+        # 1. Fichier présent et non vide  → CERT_REQUIRED (production)
+        # 2. Fichier absent ou vide        → CERT_NONE avec avertissement (lab)
+        # 3. LDAP_CA_CERT non défini       → CERT_NONE avec avertissement (lab)
+        # Le fichier vide permet le démarrage du conteneur sans bloquer le montage
+        # Docker, même quand le certificat AD n'est pas encore exporté.
+        cert_valide = (
+            ca_certs
+            and os.path.exists(ca_certs)
+            and os.path.getsize(ca_certs) > 0
+        )
+        if cert_valide:
+            tls_config = Tls(
+                ca_certs_file=ca_certs,
+                validate=ssl.CERT_REQUIRED,
+                version=ssl.PROTOCOL_TLS_CLIENT,
+            )
+            logger.info(f"[AUTH] TLS avec certificat CA : {ca_certs}")
+        else:
+            tls_config = Tls(
+                validate=ssl.CERT_NONE,
+                version=ssl.PROTOCOL_TLS_CLIENT,
+            )
+            raison = "fichier vide" if (ca_certs and os.path.exists(ca_certs)) else "fichier absent ou variable non définie"
+            logger.warning(
+                f"[AUTH] TLS sans validation du certificat (CERT_NONE) : {raison}. "
+                "Lab uniquement : installer le certificat CA du DC et redémarrer le conteneur."
+            )
+        return Server(
+            LDAP_HOST,
+            port=LDAP_PORT,
+            use_ssl=True,
+            tls=tls_config,
+            get_info=ALL
+        )
+    else:
+        return Server(LDAP_HOST, port=LDAP_PORT, get_info=ALL)
+
+
+_sid_domaine_cache = None
+
+
+def sid_domaine() -> str:
+    """SID du domaine (objectSid du contexte de nommage par défaut), lu une fois.
+    Sert au rapport de acl_resolver.py (documents_refus_pour_tous, 2.22.2), jamais
+    à une décision d'accès. Chaîne vide si l'annuaire ne répond pas."""
+    global _sid_domaine_cache
+    if _sid_domaine_cache:
+        return _sid_domaine_cache
+    try:
+        server = _serveur_ldap()
+        conn = Connection(server, user=LDAP_BIND_DN, password=LDAP_BIND_PWD, auto_bind=True)
+        nc = ""
+        try:
+            nc = str(server.info.other.get("defaultNamingContext", [""])[0])
+        except Exception:
+            pass
+        nc = nc or LDAP_BASE_DN
+        conn.search(nc, "(objectClass=*)", BASE, attributes=["objectSid"])
+        brut = conn.entries[0].entry_raw_attributes.get("objectSid", []) if conn.entries else []
+        conn.unbind()
+        if brut:
+            _sid_domaine_cache = sid_texte(brut[0])
+            return _sid_domaine_cache
+        logger.warning(f"[AUTH] SID du domaine introuvable sous '{nc}'")
+    except Exception as e:
+        logger.warning(f"[AUTH] SID du domaine illisible : {e}")
+    return ""
+
+
 def get_user_groups(email: str) -> list[str]:
     """
     Résout les groupes AD d'un utilisateur à partir de son email (userPrincipalName).
@@ -346,49 +423,7 @@ def get_user_groups(email: str) -> list[str]:
 
     groups = []
     try:
-        # Configurer la connexion LDAP/LDAPS
-        if LDAP_USE_TLS:
-            # Chemin du certificat CA du DC (export depuis Cert:\LocalMachine\Root)
-            # Absent en lab (certificat auto-signé) : CERT_NONE acceptable
-            # En production : exporter le certificat CA et le pointer ici
-            ca_certs = os.getenv("LDAP_CA_CERT", "")
-            # Trois cas :
-            # 1. Fichier présent et non vide  → CERT_REQUIRED (production)
-            # 2. Fichier absent ou vide        → CERT_NONE avec avertissement (lab)
-            # 3. LDAP_CA_CERT non défini       → CERT_NONE avec avertissement (lab)
-            # Le fichier vide permet le démarrage du conteneur sans bloquer le montage
-            # Docker, même quand le certificat AD n'est pas encore exporté.
-            cert_valide = (
-                ca_certs
-                and os.path.exists(ca_certs)
-                and os.path.getsize(ca_certs) > 0
-            )
-            if cert_valide:
-                tls_config = Tls(
-                    ca_certs_file=ca_certs,
-                    validate=ssl.CERT_REQUIRED,
-                    version=ssl.PROTOCOL_TLS_CLIENT,
-                )
-                logger.info(f"[AUTH] TLS avec certificat CA : {ca_certs}")
-            else:
-                tls_config = Tls(
-                    validate=ssl.CERT_NONE,
-                    version=ssl.PROTOCOL_TLS_CLIENT,
-                )
-                raison = "fichier vide" if (ca_certs and os.path.exists(ca_certs)) else "fichier absent ou variable non définie"
-                logger.warning(
-                    f"[AUTH] TLS sans validation du certificat (CERT_NONE) : {raison}. "
-                    "Lab uniquement : installer le certificat CA du DC et redémarrer le conteneur."
-                )
-            server = Server(
-                LDAP_HOST,
-                port=LDAP_PORT,
-                use_ssl=True,
-                tls=tls_config,
-                get_info=ALL
-            )
-        else:
-            server = Server(LDAP_HOST, port=LDAP_PORT, get_info=ALL)
+        server = _serveur_ldap()
 
         # Connexion avec le compte de service
         conn = Connection(

@@ -799,7 +799,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
 | Ports exposés | `docker compose ps` | Seul `nginx` publie des ports : 80, 443, 5678 |
 | Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `20 tests OK` |
-| Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `28 tests OK` |
+| Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `32 tests OK` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
 | Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |

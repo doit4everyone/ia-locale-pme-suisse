@@ -21,7 +21,7 @@ import time
 import math
 import unicodedata
 from datetime import datetime, timezone
-from auth import get_user_groups, check_access, entra_en_echec
+from auth import get_user_groups, check_access, entra_en_echec, sid_domaine
 
 # Journaux et rapports (noms de fichiers, groupes, identifiants) : créés en 640,
 # lisibles par root et son groupe seulement (2.20.4).
@@ -2552,6 +2552,8 @@ async def admin_sync(
                         "SMB_USER": SMB_USER,
                         "SMB_PASSWORD": SMB_PASSWORD,
                         "SMB_DOMAIN": SMB_DOMAIN,
+                        # Pour le rapport documents_refus_pour_tous (2.22.2)
+                        "SID_DOMAINE": sid_domaine(),
                         "QDRANT_URL": QDRANT_HOST,
                         "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                         "EMBED_NUM_GPU": EMBED_NUM_GPU,

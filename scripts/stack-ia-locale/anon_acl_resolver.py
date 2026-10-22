@@ -119,14 +119,21 @@ SID_SERVICES = {"S-1-5-18", "S-1-5-19", "S-1-5-20"}
 PREFIXES_SERVICES = ("S-1-5-80-",)
 
 
-def refus_pour_tous(sid: str) -> bool:
-    """Un refus sur ce SID s'applique-t-il à tout utilisateur (2.22.1) ?
-    Oui pour toute identité hors domaine (S-1-5-21-...) et hors service : « Tout
-    le monde », « Utilisateurs authentifiés », groupes intégrés ou locaux du
-    serveur de fichiers, dont l'appartenance ne se lit pas dans tokenGroups.
-    Même règle que auth.check_access, pour le rapport seulement."""
+# SID du domaine, transmis par la RAG API (auth.sid_domaine) pour le rapport
+# seulement (2.22.2). Vide : les refus sur un SID S-1-5-21-... ne sont pas classés.
+SID_DOMAINE = os.getenv("SID_DOMAINE", "").strip().upper()
+
+
+def refus_pour_tous(sid: str, domaine: str = "") -> bool:
+    """Un refus sur ce SID ferme-t-il le document à tous les utilisateurs du
+    domaine ? Pour le rapport seulement ; la décision d'accès est prise par
+    auth.check_access (refus_applicable), avec les SID réels de l'utilisateur.
+    Oui pour « Tout le monde », « Utilisateurs authentifiés », les groupes
+    intégrés et toute identité hors service (2.22.1), et, depuis la 2.22.2, pour
+    un SID S-1-5-21-... d'une autre machine ou d'un autre domaine, quand le SID
+    du domaine est connu (groupe local du serveur de fichiers, par exemple)."""
     if sid.startswith("S-1-5-21-"):
-        return False
+        return bool(domaine) and sid.rsplit("-", 1)[0] != domaine
     return sid not in SID_SERVICES and not sid.startswith(PREFIXES_SERVICES)
 
 # Ligne d'ACL de smbcacls --numeric : ACL:<SID>:<type>/<drapeaux>/<masque>
@@ -652,7 +659,7 @@ def resoudre_acl(
                     if src and any(not RE_SID.match(str(v)) for v in valeurs):
                         sources_format_ancien.add(src)
                     # Refus qui ferme le document à tous (2.22.1), à vérifier sur le partage
-                    if src and any(RE_SID.match(str(v)) and refus_pour_tous(str(v))
+                    if src and any(RE_SID.match(str(v)) and refus_pour_tous(str(v), SID_DOMAINE)
                                    for v in (point.payload.get("interdits") or [])):
                         sources_refus_pour_tous.add(src)
                 if next_offset is None:
@@ -723,6 +730,10 @@ def resoudre_acl(
     # intégré ou local : document fermé à tous dans la RAG (2.22.1). Pas un échec,
     # mais à vérifier sur le partage s'il devrait rester lisible par certains.
     refus_tous = sorted(sources_refus_pour_tous - supprimes)
+    if not SID_DOMAINE:
+        print("\n[INFO] SID du domaine inconnu : les refus sur un SID d'une autre machine ou d'un autre "
+              "domaine ne sont pas comptés dans documents_refus_pour_tous (la décision d'accès les "
+              "applique quand même).")
     if refus_tous:
         print(f"\n[INFO] {len(refus_tous)} document(s) fermé(s) à tous par un refus sur une identité "
               f"intégrée ou locale (§16.5.3) :")
@@ -757,6 +768,7 @@ def resoudre_acl(
                 "documents_non_migres_sid": len(non_migres),
                 "documents_refus_pour_tous": len(refus_tous),
             },
+            "sid_domaine": SID_DOMAINE or None,
             "documents_non_migres_sid": non_migres,
             "documents_refus_pour_tous": refus_tous,
             # Documents dont les droits dans Qdrant ne sont PAS ceux du partage :

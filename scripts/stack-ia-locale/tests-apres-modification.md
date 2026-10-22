@@ -343,7 +343,7 @@ Droits par SID (§16.5.3) : lecture de `smbcacls --numeric` sur des sorties rée
 docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py
 ```
 
-**Attendu :** `28 tests OK`.
+**Attendu :** `32 tests OK`.
 
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 
