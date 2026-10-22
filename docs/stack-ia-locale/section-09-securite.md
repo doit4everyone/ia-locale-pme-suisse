@@ -455,7 +455,7 @@ docker logs rag-api 2>&1 | grep -E "Contexte étendu|interdit|filtré" | tail -1
 
 **Résultat avant modification AD :** `auth.py` résolvait 2 groupes pour `test-client` : `DOMAINE\GRP-Clients` et `DOMAINE\test-client`.
 
-**Résultat après modification AD :** `auth.py` résout 3 groupes : `DOMAINE\GRP-Clients-Niveau2` (membre direct), `DOMAINE\GRP-Clients` (remonté par récursion `memberOf`) et `DOMAINE\test-client`.
+**Résultat après modification AD :** `auth.py` résout 3 groupes : `DOMAINE\GRP-Clients-Niveau2` (membre direct), `DOMAINE\GRP-Clients` (remonté par récursion `memberOf`) et `DOMAINE\test-client`. *Depuis la 2.22.0, `auth.py` retourne des SID, lus dans `tokenGroups`, qui contient aussi les groupes imbriqués ; le groupe principal s'y ajoute (§16.5.3).*
 
 ```bash
 # Vérifier la résolution des groupes dans les logs

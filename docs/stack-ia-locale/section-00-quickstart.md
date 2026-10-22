@@ -428,12 +428,12 @@ cp -r mip-service/. /root/rag-stack/mip-service/
 # Les scripts d'indexation, des droits et de contrôle
 cp anon_indexer.py /root/rag-pipeline/indexer.py
 cp anon_acl_resolver.py /root/rag-pipeline/acl_resolver.py
-cp sp_indexer.py test_cloisonnement.py test_citations.py cas_cloisonnement.exemple.json /root/rag-pipeline/
+cp sp_indexer.py test_cloisonnement.py test_citations.py test_sid.py diag_sid.py cas_cloisonnement.exemple.json /root/rag-pipeline/
 
 ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 ```
 
-**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py` et `test_citations.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
+**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `test_citations.py`, `test_sid.py` et `diag_sid.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
 > **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué trois fois sur une VM neuve, en dernier lieu en version 2.21.1 le 19 octobre 2026 ; ce rejeu a fait déplacer le garde-fou du `.env` au début du script et compléter le résumé final (version 2.21.2). Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier, en root.
 
@@ -799,6 +799,8 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
 | Ports exposés | `docker compose ps` | Seul `nginx` publie des ports : 80, 443, 5678 |
 | Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `20 tests OK` |
+| Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `16 tests OK` |
+| SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
 | Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
 | Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |

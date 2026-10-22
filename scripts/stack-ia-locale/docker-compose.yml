@@ -105,6 +105,9 @@ services:
       - ACL_INCERTAIN_FERME=${ACL_INCERTAIN_FERME:-1}
       # Âge maximal des droits, en heures ; 0 désactive ce contrôle (§16.5.2)
       - ACL_AGE_MAX_HEURES=${ACL_AGE_MAX_HEURES:-3}
+      # Groupes intégrés (S-1-5-32-...), « Tout le monde » et « Utilisateurs
+      # authentifiés » pris en compte : 0 par défaut (§16.5.3)
+      - ACL_SID_ETENDUS=${ACL_SID_ETENDUS:-0}
       - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
       - CANDIDATS=${CANDIDATS:-30}
       - PRINCIPAL_MAX=${PRINCIPAL_MAX:-9}

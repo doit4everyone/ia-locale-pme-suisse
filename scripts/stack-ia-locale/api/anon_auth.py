@@ -2,10 +2,24 @@
 auth.py : résolution de l'identité utilisateur Open WebUI vers les groupes AD.
 
 Flux :
-  1. main.py reçoit le header x-openwebui-user-email depuis Open WebUI
+  1. main.py reçoit l'identité signée par Open WebUI
   2. get_user_groups(email) fait un bind LDAP avec svc-rag
-  3. Retourne la liste des groupes AD de l'utilisateur au format DOMAINE\\Groupe
-  4. main.py filtre Qdrant : autorisés[] ∩ groupes_utilisateur != ∅
+  3. Retourne les SID de l'utilisateur : le SID du compte, puis ceux de tous ses
+     groupes de sécurité, lus dans l'attribut tokenGroups (2.22.0)
+  4. main.py filtre Qdrant : autorisés[] ∩ SID_utilisateur != ∅
+
+Depuis la 2.22.0, la comparaison se fait sur des SID, plus sur des noms :
+tokenGroups donne en une lecture les groupes directs, les groupes imbriqués
+et le groupe principal (« Utilisateurs du domaine »), que memberOf omettait.
+Si tokenGroups ne peut pas être lu, aucun groupe n'est retourné (accès refusé) :
+pas de retour à une résolution partielle.
+
+Groupes intégrés (BUILTIN, S-1-5-32-...) : tokenGroups renvoie ceux de
+l'annuaire, qui ne valent que sur les contrôleurs de domaine. Sur un serveur de
+fichiers, le même SID désigne un groupe LOCAL, aux membres différents. Ils sont
+donc retirés par défaut. ACL_SID_ETENDUS=1 les garde, et ajoute « Tout le monde »
+(S-1-1-0) et « Utilisateurs authentifiés » (S-1-5-11) à tout compte trouvé :
+plus fidèle à Windows dans le cas courant, mais à décider en connaissance de cause.
 
 Le cloisonnement repose sur autorisés[] (données constatées depuis les ACL NTFS)
 et non sur org_name (données déduites). Cette distinction est documentée dans
@@ -18,7 +32,9 @@ Variables d'environnement :
   LDAP_BASE_DN   : base de recherche (ex: DC=votre-domaine,DC=ch)
   LDAP_BIND_DN   : DN du compte de service (ex: CN=svc-rag,OU=...)
   LDAP_BIND_PWD  : mot de passe du compte de service
-  LDAP_DOMAIN    : préfixe du domaine pour les groupes (ex: VOTRE-DOMAINE)
+  LDAP_DOMAIN    : nom court du domaine, pour les journaux (ex: VOTRE-DOMAINE)
+  ACL_SID_ETENDUS : 1 pour garder les groupes BUILTIN et ajouter S-1-1-0 et
+                   S-1-5-11 (défaut : 0)
 
 Validé sur VM-RAG-LAB, septembre 2026
 
@@ -30,8 +46,8 @@ Extension Entra ID (Partie 3, désactivée par défaut) :
                             (transitiveMemberOf)
     entra:tous-internes     si le compte est membre du locataire (pas invité)
   Ces identifiants correspondent au format autorisés[] des chunks SharePoint.
-  Les chunks SMB utilisent le format DOMAINE\\Groupe : ils ne sont pas
-  affectés par l'extension.
+  Les chunks SMB utilisent des SID (2.22.0) : ils ne sont pas affectés par
+  l'extension.
 
   Authentification de l'application par certificat (pas de secret client).
   Permissions Graph (application) : User.Read.All, GroupMember.Read.All.
@@ -81,6 +97,59 @@ LDAP_BIND_DN = os.getenv("LDAP_BIND_DN",
     "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch")
 LDAP_BIND_PWD = os.getenv("LDAP_BIND_PWD", "")
 LDAP_DOMAIN  = os.getenv("LDAP_DOMAIN",  "VOTRE-DOMAINE")
+ACL_SID_ETENDUS = os.getenv("ACL_SID_ETENDUS", "0").strip() == "1"
+SID_TOUT_LE_MONDE = "S-1-1-0"
+SID_UTILISATEURS_AUTHENTIFIES = "S-1-5-11"
+PREFIXE_BUILTIN = "S-1-5-32-"
+
+
+def sid_texte(b: bytes) -> str:
+    """SID binaire (format de l'annuaire) vers sa forme texte S-1-5-21-..."""
+    if not isinstance(b, (bytes, bytearray)) or len(b) < 8 or b[0] != 1 or len(b) != 8 + 4 * b[1]:
+        raise ValueError("SID binaire mal formé")
+    autorite = int.from_bytes(b[2:8], "big")
+    sous = [int.from_bytes(b[8 + 4 * i:12 + 4 * i], "little") for i in range(b[1])]
+    return f"S-{b[0]}-{autorite}" + "".join(f"-{x}" for x in sous)
+
+
+def sids_retenus(sid_compte: str, sids_groupes: list[str], etendus: bool = False) -> list[str]:
+    """SID utilisés pour l'accès : le compte, puis ses groupes ; groupes BUILTIN
+    retirés sauf avec ACL_SID_ETENDUS ; S-1-1-0 et S-1-5-11 ajoutés seulement
+    avec ACL_SID_ETENDUS. Ordre stable, sans doublon."""
+    retenus = [sid_compte] + [s for s in sids_groupes if etendus or not s.startswith(PREFIXE_BUILTIN)]
+    if etendus:
+        retenus += [SID_TOUT_LE_MONDE, SID_UTILISATEURS_AUTHENTIFIES]
+    return list(dict.fromkeys(retenus))
+
+
+def lire_sids_utilisateur(conn, dn: str) -> list[str]:
+    """SID de tous les groupes de sécurité du compte (attribut calculé tokenGroups,
+    lisible seulement en portée BASE). Lève une exception si la lecture échoue ou
+    ne renvoie rien : tout compte a au moins son groupe principal."""
+    if not conn.search(dn, "(objectClass=*)", BASE, attributes=["tokenGroups"]) or not conn.entries:
+        raise RuntimeError(f"lecture de tokenGroups refusée ou impossible ({conn.result.get('description')})")
+    brut = conn.entries[0].entry_raw_attributes.get("tokenGroups") or []
+    if not brut:
+        raise RuntimeError("tokenGroups vide : droit de lecture du compte de service à vérifier")
+    return [sid_texte(b) for b in brut]
+
+
+def noms_des_sids(conn, sids: list[str]) -> dict[str, str]:
+    """Pour les journaux seulement : SID → nom pré-Windows 2000. Jamais pour décider."""
+    noms = {}
+    try:
+        cherches = [s for s in sids if s.startswith("S-1-5-21-")]
+        if cherches:
+            filtre = "(|" + "".join(f"(objectSid={s})" for s in cherches) + ")"
+            conn.search(LDAP_BASE_DN, filtre, SUBTREE, attributes=["objectSid", "sAMAccountName"])
+            for e in conn.entries:
+                try:
+                    noms[sid_texte(e.entry_raw_attributes["objectSid"][0])] = str(e.sAMAccountName)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return noms
 
 # ─────────────────────────────────────────
 # Configuration Entra ID (extension Partie 3)
@@ -225,8 +294,9 @@ def get_user_groups(email: str) -> list[str]:
     """
     Résout les groupes AD d'un utilisateur à partir de son email (userPrincipalName).
 
-    Retourne une liste de groupes au format 'DOMAINE\\NomGroupe',
-    compatible avec le champ autorisés[] stocké dans Qdrant par acl_resolver.py.
+    Retourne les SID de l'utilisateur (compte et groupes de sécurité, via
+    tokenGroups), compatibles avec le champ autorisés[] écrit par acl_resolver.py,
+    puis, si l'extension Entra est active, ses identifiants Entra.
 
     En cas d'erreur LDAP, retourne une liste vide : l'utilisateur ne verra
     aucun document plutôt que tous les documents. C'est le comportement sécurisé
@@ -307,7 +377,7 @@ def get_user_groups(email: str) -> list[str]:
             search_base=LDAP_BASE_DN,
             search_filter=f"(&(objectClass=user)(userPrincipalName={clean_email}))",
             search_scope=SUBTREE,
-            attributes=["distinguishedName", "sAMAccountName", "memberOf"]
+            attributes=["distinguishedName", "sAMAccountName", "objectSid"]
         )
 
         if not conn.entries:
@@ -319,51 +389,22 @@ def get_user_groups(email: str) -> list[str]:
         sam = str(entry.sAMAccountName) if entry.sAMAccountName else ""
         logger.info(f"[AUTH] Utilisateur trouvé : '{sam}' ({email})")
 
-        # Résoudre les groupes avec récursivité pour les groupes imbriqués
-        # memberOf ne remonte que les appartenances directes.
-        # On résout récursivement jusqu'à ce qu'il n'y ait plus de nouveaux groupes.
-        member_of_dns = set(str(dn) for dn in (entry.memberOf.values if entry.memberOf else []))
-        dns_a_resoudre = set(member_of_dns)
-        groupes_resolus_dns = set()
-
-        while dns_a_resoudre:
-            dn = dns_a_resoudre.pop()
-            if dn in groupes_resolus_dns:
-                continue
-            groupes_resolus_dns.add(dn)
-
-            # Extraire le nom du groupe depuis le DN
-            parts = str(dn).split(",")
-            for part in parts:
-                if part.strip().upper().startswith("CN="):
-                    group_name = part.strip()[3:]
-                    groups.append(f"{LDAP_DOMAIN}\\{group_name}")
-                    break
-
-            # Chercher les groupes parents de ce groupe (imbrication)
-            try:
-                clean_dn = escape_filter_chars(dn)
-                conn.search(
-                    search_base=LDAP_BASE_DN,
-                    search_filter=f"(&(objectClass=group)(distinguishedName={clean_dn}))",
-                    search_scope=SUBTREE,
-                    attributes=["memberOf"]
-                )
-                if conn.entries and conn.entries[0].memberOf:
-                    for parent_dn in conn.entries[0].memberOf.values:
-                        parent_str = str(parent_dn)
-                        if parent_str not in groupes_resolus_dns:
-                            dns_a_resoudre.add(parent_str)
-            except Exception as eg:
-                logger.debug(f"[AUTH] Résolution groupe parent '{dn}' échouée : {eg}")
-                continue
-
-        # Ajouter aussi le compte nominatif (pour les ACL posées directement sur le compte)
-        if sam:
-            groups.append(f"{LDAP_DOMAIN}\\{sam}")
+        # SID du compte et de tous ses groupes de sécurité (2.22.0). Échec de
+        # lecture : aucun groupe, donc aucun accès, jamais une liste partielle.
+        sid_compte = sid_texte(entry.entry_raw_attributes["objectSid"][0])
+        try:
+            sids_groupes = lire_sids_utilisateur(conn, str(entry.distinguishedName))
+        except Exception as eg:
+            logger.error(f"[AUTH] SID des groupes de '{email}' illisibles ({eg}) : accès refusé")
+            conn.unbind()
+            return []
+        groups = sids_retenus(sid_compte, sids_groupes, ACL_SID_ETENDUS)
+        noms = noms_des_sids(conn, groups)
+        retires = 0 if ACL_SID_ETENDUS else len({s for s in sids_groupes if s.startswith(PREFIXE_BUILTIN)})
+        logger.info(f"[AUTH] SID retenus pour '{email}' : {len(groups)} (groupes intégrés retirés : {retires}) "
+                    f": " + ", ".join(f"{g} ({noms[g]})" if g in noms else g for g in groups))
 
         conn.unbind()
-        logger.info(f"[AUTH] Groupes résolus pour '{email}' : {groups}")
 
     except LDAPException as e:
         logger.error(f"[AUTH] Erreur LDAP pour '{email}' : {e}")

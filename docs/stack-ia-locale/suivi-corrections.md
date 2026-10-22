@@ -148,6 +148,8 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 154 | Réponse du juge incomplète lue comme « ancrée » : `{"ancree": true}` sans liste, ou une liste `null`, chaîne vide, `0` ou objet, étaient normalisés en liste vide après le contrôle. « Ancrée » exige maintenant le booléen `true` et une liste vide ; sinon non ancrée. Signalé par une septième revue externe ; les nouveaux tests échouent sur le code de la 2.21.9 et passent sur la 2.21.10 | v2.21.10 | 2026-10-22 |
 | 155 | `test_citations.py`, qui contrôle aussi la lecture du verdict du juge depuis la 2.21.9, restait facultatif dans `deploy.sh` (simple avertissement). Exigé dans le dépôt, copie contrôlée, obligatoire et bloquant comme les tests de sécurité des droits. Signalé par une septième revue externe | v2.21.10 | 2026-10-22 |
 | 156 | `ACL_AGE_MAX_HEURES` converti par `float()` sans contrôle : `nan` rendait toute comparaison fausse (droits toujours frais), un négatif désactivait le contrôle, `inf` le rendait sans limite. 0 ou nombre fini positif ; sinon limite de 3 heures et alerte. Signalé par une septième revue externe | v2.21.10 | 2026-10-22 |
+| 157 | Marqueur de synchronisation impossible à retirer en fin de passage : seulement journalisé, le rapport de `/admin/sync` annonçait un succès ; au redémarrage, questions refusées sans alerte préalable. Signalé comme erreur du rapport, l'alerte part ; questions toujours servies (droits à jour). Signalé par une septième revue externe | v2.21.11 | 2026-10-22 |
+| 158 | Droits comparés par noms (points ouverts 14, auth.1, auth.2) : groupe principal ignoré (documents autorisés à « Utilisateurs du domaine » invisibles), noms CN et pré-Windows 2000 confondus (collision possible), identités intégrées sans correspondance. Droits en SID des deux côtés : `smbcacls --numeric` (ligne non reconnue = fichier illisible, type inconnu = refus) et `tokenGroups` (illisible = aucun groupe) ; groupes intégrés ignorés par défaut, `ACL_SID_ETENDUS` ; contrôle de migration (`documents_non_migres_sid`). Revue externe en appui. VM de test : 1 692 extraits migrés, non-divulgation 79 OK, 2 INFO, dont un compte réduit au groupe principal | v2.22.0 | 2026-10-22 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -157,9 +159,6 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | Point | Description | Priorité | Remarque |
 |---|---|---|---|
 | 7 | Groundedness check ne bloque pas sur `/v1` | Choix délibéré | Documenté dans §8.3 depuis v2.9.0. Bloquer casserait la compatibilité OpenAI. Depuis v2.17.0, `/v1` signale dans la réponse une vérification impossible ou un ancrage non établi. |
-| 14 | ACL par noms plutôt que par SIDs | Moyenne | Le masque des droits est corrigé et les permissions du partage sont contrôlées (v2.17.0, §16.5). Reste le passage aux SID, avec le groupe principal (auth.1) : **le masque d'abord, le groupe principal ensuite**, sinon un fichier en écriture seule pour « Utilisateurs du domaine » devient lisible par tout le domaine. |
-| auth.1 | Groupe principal AD absent de `memberOf` | Moyenne | Ajouter `primaryGroupID` dans `auth.py`. À mesurer d'abord sur le partage. À faire **après** la correction du masque (faite en v2.17.0), voir §16.5. |
-| auth.2 | Identités intégrées (`AUTORITE NT\Utilisateurs authentifiés`) dans `autorises[]` sans être dans les groupes LDAP | Moyenne | Fichiers concernés invisibles. Décision à prendre : ignorer ou injecter dans `get_user_groups`. |
 | 27 | `indexer.py` : un fichier chiffré par Purview sur le partage serait compté comme « vide », sans signalement explicite | Faible | Aucun fichier chiffré sur le partage du lab à ce jour. Détection prévue, comme dans `sp_indexer.py`. |
 | 28 | Aucune détection de secrets dans le corpus indexé | Faible | Un fichier nommé comme une clé TLS a été trouvé dans un dossier indexé du lab. À traiter par la gouvernance (inventaire, exclusion), pas par l'indexeur seul. |
 | 29 | Courriel de quarantaine sans statut par fichier | Faible | Le message présente les deux causes possibles (point 22), mais `main.py` ne transmet que les noms. Prévu avec la prochaine reconstruction (§10). |
@@ -294,6 +293,27 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.22.0 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.3 (nouveau) | Droits par SID : défaut, correction, groupes intégrés, élargissement à « Utilisateurs du domaine », migration, contrôle d'un compte ; checklist | v2.22.0 |
+| §5.4, §5.5 | Droits et identité en SID, `tokenGroups` ; la note qui le disait inaccessible au compte de service est corrigée par la mesure | v2.22.0 |
+| §0, §3, §9.4.5 | Copie de `test_sid.py` et `diag_sid.py`, contrôle `16 tests OK` ; `ACL_SID_ETENDUS` dans l'extrait du Compose ; note sur `memberOf` | v2.22.0 |
+| Suivi | Points ouverts 14, auth.1 et auth.2 réglés par le point 158 | v2.22.0 |
+
+---
+
+## Corrections documentaires v2.21.11 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §16.5.2 | Horodatage dans le futur : tolérance de 5 minutes (écart d'horloge) | v2.21.11 |
+| §16.10 | `ok` ne dit pas qu'une origine est suspendue après un passage incomplet | v2.21.11 |
+| Index des scripts | Installer la dernière Release ; v2.12.0, référence historique | v2.21.11 |
 
 ---
 

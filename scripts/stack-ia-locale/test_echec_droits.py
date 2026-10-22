@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 44 tests OK », code de sortie 0.
+Attendu : « 46 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -42,6 +42,7 @@ import test_revalidation_bm25 as tb  # noqa: E402
 
 main = tb.main
 G = tb.GROUPE
+SID_RH = "S-1-5-21-1111-2222-3333-1201"   # droits en SID depuis la 2.22.0
 
 
 def charger_resolveur():
@@ -112,23 +113,23 @@ def verifier(nom, ok, detail=""):
 # ─────────────────────────────────────────
 def tests_resolveur():
     q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", [G])}}, ecriture_refusee={"RH/Salaires.xlsx"})
-    nb = ar.mettre_a_jour_qdrant(q, "RH/Salaires.xlsx", COLL, ["BSCULIER\\RH"], [])
+    nb = ar.mettre_a_jour_qdrant(q, "RH/Salaires.xlsx", COLL, [SID_RH], [])
     verifier("résolveur : écriture refusée, échec distinct", nb == ar.ECHEC_ECRITURE, f"retour {nb}")
 
-    nb = ar.mettre_a_jour_qdrant(q, "RH/Absent.docx", COLL, ["BSCULIER\\RH"], [])
+    nb = ar.mettre_a_jour_qdrant(q, "RH/Absent.docx", COLL, [SID_RH], [])
     verifier("résolveur : aucun extrait, non indexé", nb == 0, f"retour {nb}")
 
     q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", [G])}}, ecriture_refusee={"RH/Salaires.xlsx"},
                      echecs_avant_succes=1)
-    nb = ar.mettre_a_jour_qdrant(q, "RH/Salaires.xlsx", COLL, ["BSCULIER\\RH"], [])
-    verifier("résolveur : seconde tentative réussie", nb == 1 and q.points[COLL][1]["autorises"] == ["BSCULIER\\RH"],
+    nb = ar.mettre_a_jour_qdrant(q, "RH/Salaires.xlsx", COLL, [SID_RH], [])
+    verifier("résolveur : seconde tentative réussie", nb == 1 and q.points[COLL][1]["autorises"] == [SID_RH],
              f"retour {nb}")
 
     q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", [G]), 2: p("DIRECTION/Plan.docx", [G])}},
                      ecriture_refusee={"RH/Salaires.xlsx", "DIRECTION/Plan.docx"})
-    lectures = [("//srv/RH/Salaires.xlsx", "RH/Salaires.xlsx", ["BSCULIER\\RH"], [], False),
+    lectures = [("//srv/RH/Salaires.xlsx", "RH/Salaires.xlsx", [SID_RH], [], False),
                 ("//srv/DIRECTION/Plan.docx", "DIRECTION/Plan.docx", [], [], True),
-                ("//srv/RH/Absent.docx", "RH/Absent.docx", ["BSCULIER\\RH"], [], False)]
+                ("//srv/RH/Absent.docx", "RH/Absent.docx", [SID_RH], [], False)]
     r = ar.ecrire_droits(q, lectures)
     statuts = {d["source_name"]: d["statut"] for d in r["rapport"]}
     verifier("résolveur : échec, fermeture en échec et non indexé distingués",
@@ -142,7 +143,7 @@ def passage_complet(q, fichiers):
     sauve = (ar.QdrantClient, ar.lister_fichiers_montes, ar.lire_acl_fichier, ar.socket.getaddrinfo)
     ar.QdrantClient = lambda url=None, api_key=None: q
     ar.lister_fichiers_montes = lambda m: [(f"//srv/{f}", f"/mnt/x/{f}") for f in fichiers]
-    ar.lire_acl_fichier = lambda share, chemin: (["BSCULIER\\RH"], [])
+    ar.lire_acl_fichier = lambda share, chemin: ([SID_RH], [])
     ar.socket.getaddrinfo = lambda *a, **k: [None]
     chemin = tempfile.mktemp(suffix=".json")
     code = 0
@@ -175,6 +176,17 @@ def tests_passage():
     verifier("passage : suppression d'un fichier effacé refusée, code 2",
              code == 2 and r.get("echecs_suppression") == ["RH/Supprime.docx"],
              f"code {code}, suppressions {r.get('echecs_suppression')}")
+
+    # 2.22.0 : contrôle de migration. Un document SMB encore au format des noms
+    # n'est pas migré : compté en échec d'écriture (retiré, alerte), code 2.
+    q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", ["BSCULIER\\RH"]), 2: p("RH/Note.docx", ["BSCULIER\\RH"])},
+                      "documentation": {}}, ecriture_refusee={"RH/Note.docx"})
+    code, r = passage_complet(q, ["RH/Salaires.xlsx", "RH/Note.docx"])
+    migre = q.points[COLL][1]["autorises"] == [SID_RH]
+    verifier("2.22.0 : migration, document réécrit en SID, document non migré signalé et retiré, code 2",
+             code == 2 and migre and r.get("documents_non_migres_sid") == ["RH/Note.docx"]
+             and "RH/Note.docx" in r.get("echecs_ecriture", []),
+             f"code {code}, migré {migre}, non migrés {r.get('documents_non_migres_sid')}")
 
 
 # ─────────────────────────────────────────
@@ -512,6 +524,22 @@ def tests_age():
         refus.append(servie() is False)
     verifier("2.21.10 : limite d'âge nan, inf ou négative au contrôle, question refusée", all(refus), f"{refus}")
 
+    # 2.21.10 : marqueur impossible à retirer en fin de synchronisation : signalé,
+    # questions servies (droits à jour), refus au redémarrage (marqueur présent)
+    remise_a_zero()
+    os.makedirs(main.fichier_marqueur(), exist_ok=True)   # os.remove échoue sur un dossier
+    main.finaliser_synchronisation(True, {"smb": 0}, {"smb"})
+    signale = bool(main._marqueur_non_retire)
+    servie_apres = servie() is True
+    main.charger_bloques()                                  # simule le redémarrage
+    refus_redemarrage = servie() is False
+    os.rmdir(main.fichier_marqueur())
+    main.finaliser_synchronisation(True, {"smb": 0}, {"smb"})
+    leve = main._marqueur_non_retire is None and servie() is True
+    verifier("2.21.10 : marqueur non retiré signalé, questions servies, refus au redémarrage, levé ensuite",
+             signale and servie_apres and refus_redemarrage and leve,
+             f"signalé {signale}, servie {servie_apres}, refus au redémarrage {refus_redemarrage}, levé {leve}")
+
     remise_a_zero()
     for f in (main.FICHIER_BLOQUES, main.fichier_marqueur()):
         if os.path.exists(f):
@@ -541,7 +569,7 @@ def tests_sharepoint():
     coll = sp.idx.COLLECTION
     e = {"name": "Grille.docx", "size": sp.SP_MAX_BYTES + 1, "id": "x"}
     args = argparse.Namespace(dry_run=False, force=False)
-    q = QdrantPannes({coll: {1: p(source, ["BSCULIER\\RH"]), 2: p("SharePoint/RH/Docs/Autre.docx", [G])}})
+    q = QdrantPannes({coll: {1: p(source, [SID_RH]), 2: p("SharePoint/RH/Docs/Autre.docx", [G])}})
     entree = sp.traiter_fichier(None, q, None, {}, set(), "https://x/sites/RH", {"id": "d"}, "Grille.docx", e, source, args)
     restants = {v["source"] for v in q.points[coll].values()}
     verifier("2.21.6 : SharePoint, fichier devenu trop volumineux retiré de l'index",

@@ -319,14 +319,27 @@ def poser_marqueur() -> bool:
         return False
 
 
-def retirer_marqueur() -> None:
+# Échec du retrait du marqueur à la fin de la dernière synchronisation (2.21.10,
+# revue externe) : None si retiré, sinon le message d'erreur. Les droits sont à
+# jour et les questions restent servies ; mais au prochain démarrage, le marqueur
+# fera refuser les questions jusqu'à une synchronisation terminée. /admin/sync le
+# signale donc comme une erreur, pour que l'alerte habituelle parte.
+_marqueur_non_retire: str | None = None
+
+
+def retirer_marqueur() -> bool:
+    global _marqueur_non_retire
     try:
         os.remove(fichier_marqueur())
     except FileNotFoundError:
         pass
     except OSError as e:
+        _marqueur_non_retire = str(e)
         logger.error(f"[DROITS] Marqueur de synchronisation non retiré ({e}) : "
                      "au prochain démarrage, questions refusées jusqu'à une synchronisation")
+        return False
+    _marqueur_non_retire = None
+    return True
 
 
 def sources_bloquees() -> set[str]:
@@ -2689,6 +2702,11 @@ async def admin_sync(
         if _persistance_ko:
             rapport["errors"].append("Registre des documents retirés non enregistré sur le disque (/var/log/rag) : "
                                      "questions suspendues jusqu'à une écriture réussie")
+        if _marqueur_non_retire:
+            rapport["errors"].append(f"Marqueur de synchronisation non retiré ({_marqueur_non_retire}) : "
+                                     "droits à jour et questions servies, mais au prochain démarrage les "
+                                     "questions seront refusées jusqu'à une synchronisation terminée ; "
+                                     "vérifier le disque de /var/log/rag")
         frais, motif = droits_frais()
         if not frais:
             rapport["errors"].append(f"Droits non garantis : {motif} ; questions suspendues")

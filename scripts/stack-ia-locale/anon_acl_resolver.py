@@ -7,7 +7,12 @@ toutes les heures, parce que les permissions peuvent changer sans que
 le contenu des fichiers ne change. Les deux synchronisations sont indépendantes.
 
 Architecture :
-  smbcacls → groupes AD autorisés → SIDs → payload Qdrant (autorisés[])
+  smbcacls --numeric → SID autorisés et refusés → payload Qdrant (autorises[], interdits[])
+
+Depuis la 2.22.0, les droits sont des SID (S-1-5-21-...), lus par
+smbcacls --numeric, et non plus des noms de groupes : un groupe renommé garde
+son SID, deux groupes de même nom ne se confondent plus. La RAG API compare ces
+SID à ceux de l'utilisateur (attribut tokenGroups de l'annuaire).
 
 Le champ autorisés[] est une donnée CONSTATÉE (lu depuis les ACL réelles),
 contrairement à org_name qui est une donnée déduite. C'est autorisés[] qui
@@ -103,13 +108,16 @@ class ErreurAuthentification(Exception):
 
 
 # Groupes à exclure des autorisés[] : comptes système, pas des utilisateurs métier
-GROUPES_EXCLUS = {
-    "autorite nt\\système",
-    "autorite nt\\system",
-    "nt authority\\system",
-    "builtin\\administrateurs",
-    "builtin\\administrators",
-}
+# Identités jamais retenues : Système (S-1-5-18) et Administrateurs intégrés
+# (S-1-5-32-544), comme avant la 2.22.0 avec leurs noms.
+GROUPES_EXCLUS = {"S-1-5-18", "S-1-5-32-544"}
+
+# Ligne d'ACL de smbcacls --numeric : ACL:<SID>:<type>/<drapeaux>/<masque>
+# type : 0 autorisation, 1 refus ; drapeaux : hexadécimal (0x10 hérité,
+# 0x08 héritable seulement) ; masque : hexadécimal.
+RE_ACE_NUMERIQUE = re.compile(r'^ACL:(S-1-[0-9]+(?:-[0-9]+)+):([0-9]+)/(0x[0-9a-fA-F]+)/(0x[0-9a-fA-F]+)$')
+RE_SID = re.compile(r'^S-1-[0-9]+(?:-[0-9]+)+$')
+INHERIT_ONLY_ACE = 0x08
 
 # ─────────────────────────────────────────
 # Lecture des ACL via smbcacls
@@ -124,11 +132,14 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
     Les deux listes sont nécessaires pour le cloisonnement dans auth.py :
       accès accordé si : (user_groups ∩ autorisés != ∅) AND (user_groups ∩ interdits == ∅)
 
-    Le /I indique une règle héritée. On prend toutes les règles ALLOWED et DENIED.
+    Format numérique (2.22.0) : SID, type 0 (autorisation) ou 1 (refus),
+    drapeaux et masque en hexadécimal. Les règles héritées comptent comme les
+    autres. Une ligne d'ACL non reconnue rend le fichier illisible : ignorer une
+    ligne pourrait ignorer un refus.
     """
     # Identifiants passés par fichier (-A), jamais sur la ligne de commande :
     # un argument --password serait visible dans la liste des processus.
-    cmd = ["smbcacls", share, chemin_relatif, "-A", fichier_identifiants()]
+    cmd = ["smbcacls", share, chemin_relatif, "-A", fichier_identifiants(), "--numeric"]
 
     try:
         result = subprocess.run(
@@ -145,35 +156,7 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
             print(f"  Erreur smbcacls sur '{chemin_relatif}' : {message}")
             return [], []
 
-        autorisés = []
-        interdits = []
-        for line in result.stdout.splitlines():
-            # Format : ACL:<identité>:<ALLOWED|DENIED>/<drapeaux>/<masque>
-            m = re.match(r'^ACL:(.+):(ALLOWED|DENIED)/([^/]*)/(.+)$', line.strip(), re.IGNORECASE)
-            if not m:
-                continue
-            identite, type_ace, drapeaux, masque = (g.strip() for g in m.groups())
-            if identite.lower() in GROUPES_EXCLUS:
-                continue
-            # Entrée « héritable seulement » (IO) : ne s'applique pas au fichier lui-même
-            if "IO" in drapeaux.upper().split("|"):
-                continue
-            if type_ace.upper() == "ALLOWED":
-                # Seules les entrées qui accordent la lecture du contenu comptent.
-                # Une entrée d'écriture seule (boîte de dépôt) ne doit pas rendre
-                # le fichier interrogeable.
-                if masque_accorde_lecture(masque):
-                    autorisés.append(identite)
-                else:
-                    STATS_MASQUE["allowed_sans_lecture"] += 1
-                    STATS_MASQUE["fichiers"].add(chemin_relatif)
-            else:
-                # Règles DENIED : toutes conservées, quel que soit le masque.
-                # Choix prudent : un refus partiel (écriture seule) rend le fichier
-                # invisible à tort, mais jamais visible à tort.
-                interdits.append(identite)
-
-        return autorisés, interdits
+        return analyser_acl(result.stdout, chemin_relatif)
 
     except ErreurAuthentification:
         raise
@@ -183,6 +166,49 @@ def lire_acl_fichier(share: str, chemin_relatif: str) -> tuple[list[str], list[s
     except Exception as e:
         print(f"  Erreur inattendue smbcacls : {e}")
         return [], []
+
+
+def analyser_acl(sortie: str, chemin_relatif: str = "") -> tuple[list[str], list[str]]:
+    """Sortie de smbcacls --numeric → (autorisés, interdits), en SID.
+    Fichier illisible ([], []) si une ligne d'ACL n'est pas au format attendu."""
+    autorisés = []
+    interdits = []
+    for line in sortie.splitlines():
+        ligne = line.strip()
+        if not ligne.startswith("ACL:"):
+            continue
+        m = RE_ACE_NUMERIQUE.match(ligne)
+        if not m:
+            # Format inattendu (noms au lieu de SID, champ inconnu) : on ne sait
+            # pas lire cette entrée, qui peut être un refus. Fichier illisible,
+            # donc retiré de la recherche, plutôt que lu partiellement.
+            print(f"  Ligne d'ACL non reconnue sur '{chemin_relatif}', fichier traité comme illisible : {ligne}")
+            return [], []
+        identite, type_ace, drapeaux, masque = m.group(1), int(m.group(2)), int(m.group(3), 16), m.group(4)
+        if identite in GROUPES_EXCLUS:
+            continue
+        # Entrée « héritable seulement » : ne s'applique pas au fichier lui-même
+        if drapeaux & INHERIT_ONLY_ACE:
+            continue
+        if type_ace == 0:
+            # Seules les entrées qui accordent la lecture du contenu comptent.
+            # Une entrée d'écriture seule (boîte de dépôt) ne doit pas rendre
+            # le fichier interrogeable.
+            if masque_accorde_lecture(masque):
+                autorisés.append(identite)
+            else:
+                STATS_MASQUE["allowed_sans_lecture"] += 1
+                STATS_MASQUE["fichiers"].add(chemin_relatif)
+        else:
+            # Refus (type 1), et tout type inconnu traité comme un refus.
+            # Toutes les règles de refus sont conservées, quel que soit le
+            # masque : un refus partiel (écriture seule) rend le fichier
+            # invisible à tort, mais jamais visible à tort.
+            if type_ace != 1:
+                print(f"  Type d'entrée {type_ace} sur '{chemin_relatif}' traité comme un refus")
+            interdits.append(identite)
+
+    return autorisés, interdits
 
 
 # Droits NTFS qui donnent la lecture du contenu d'un fichier
@@ -581,6 +607,7 @@ def resoudre_acl(
 
     # Récupérer tous les source_names présents dans les deux collections
     sources_qdrant = set()
+    sources_format_ancien = set()
     echecs_lecture_orphelins = []
     for col in [COLLECTION, DOCUMENTATION_COLLECTION]:
         if col not in collections:
@@ -592,7 +619,7 @@ def resoudre_acl(
                     collection_name=col,
                     limit=100,
                     offset=next_offset,
-                    with_payload=["source", "source_type"]
+                    with_payload=["source", "source_type", "autorises", "interdits"]
                 )
                 for point in batch:
                     # Seuls les chunks issus du partage SMB sont comparés au partage.
@@ -602,6 +629,10 @@ def resoudre_acl(
                     src = point.payload.get("source", "")
                     if src:
                         sources_qdrant.add(src)
+                    # Contrôle de migration (2.22.0) : droits SMB en SID seulement
+                    valeurs = list(point.payload.get("autorises") or []) + list(point.payload.get("interdits") or [])
+                    if src and any(not RE_SID.match(str(v)) for v in valeurs):
+                        sources_format_ancien.add(src)
                 if next_offset is None:
                     break
             except Exception as e:
@@ -653,6 +684,19 @@ def resoudre_acl(
         else:
             print("  [DRY-RUN] Aucune suppression effectuée.")
 
+    # Contrôle de migration (2.22.0) : un document SMB dont les droits ne sont pas
+    # tous des SID n'est pas migré. Il est invisible (aucun SID d'utilisateur ne
+    # correspond à un nom), mais la synchronisation ne doit pas se dire réussie :
+    # il est compté comme un échec d'écriture, retiré de la recherche, et
+    # l'alerte part. Les orphelins supprimés pendant ce passage ne comptent pas.
+    supprimes = (orphelins - set(echecs_suppression)) if not dry_run else set()
+    non_migres = sorted(sources_format_ancien - supprimes)
+    if non_migres:
+        print(f"\n[ECHEC] {len(non_migres)} document(s) encore au format des noms (non migrés vers les SID) :")
+        for src in non_migres:
+            print(f"  {src}")
+        echecs_ecriture = sorted(set(echecs_ecriture) | set(non_migres))
+
     # Sauvegarder le rapport.
     # Si --rapport n'est pas fourni, le rapport est écrit à côté du script.
     # Depuis le conteneur rag-api, /rag-pipeline est monté en lecture seule :
@@ -678,7 +722,9 @@ def resoudre_acl(
                 "entrees_allowed_sans_lecture": STATS_MASQUE["allowed_sans_lecture"],
                 "echecs_ecriture": len(echecs_ecriture),
                 "echecs_suppression": len(echecs_suppression),
+                "documents_non_migres_sid": len(non_migres),
             },
+            "documents_non_migres_sid": non_migres,
             # Documents dont les droits dans Qdrant ne sont PAS ceux du partage :
             # la RAG API les retire de la recherche jusqu'à une écriture réussie.
             "echecs_ecriture": sorted(echecs_ecriture),

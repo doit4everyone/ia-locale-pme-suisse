@@ -4,6 +4,61 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.0] : Octobre 2026
+
+Les droits SMB sont comparés par **SID**, plus par noms de groupes (point 158, §16.5.3). Règle trois points ouverts du suivi (14, auth.1, auth.2). Validé sur la VM de test le 22 octobre 2026 : `tokenGroups` lu par le compte de service sans droit supplémentaire ; synchronisation `success=True`, 1 692 extraits migrés en SID, aucun document non migré ; `test_sid.py` 16, `test_echec_droits.py` 46, `test_revalidation_bm25.py` 14 tests OK ; droit retiré `Bilan : OK` ; test de non-divulgation 79 OK, 2 INFO, dont un compte réduit au groupe principal qui voit désormais un document autorisé à « Utilisateurs du domaine ».
+
+### Sécurité
+
+- `anon_acl_resolver.py` : `smbcacls --numeric`, droits enregistrés en SID ; une ligne d'ACL non reconnue rend le fichier illisible (avant : ignorée, au risque d'ignorer un refus) ; type d'entrée inconnu traité comme un refus ; contrôle de migration en fin de passage (`documents_non_migres_sid`, comptés en échec).
+- `api/anon_auth.py` : SID du compte et de ses groupes par `tokenGroups` (groupes imbriqués et groupe principal) ; `tokenGroups` illisible, aucun groupe (accès refusé), sans repli ; groupes intégrés (`S-1-5-32-…`) ignorés par défaut ; `ACL_SID_ETENDUS` ; noms des groupes dans le journal pour le dépannage seulement.
+- `docker-compose.yml`, `env.example` : `ACL_SID_ETENDUS` (0 par défaut).
+- `deploy.sh` : `test_sid.py` exigé dans le dépôt, copie contrôlée, obligatoire et bloquant ; en-tête en 2.22.0.
+
+### Comportement modifié
+
+- **Un document lisible par « Utilisateurs du domaine » devient visible pour tous les comptes du domaine** : c'est le droit du partage, que la RAG ignorait. Commande pour lister ces documents : §16.5.3. Dans le lab, 54 documents, la documentation publique du dossier `DOIT4EVERYONE`.
+
+### Tests et outils
+
+- `test_sid.py` (nouveau, 16 tests) : sorties réelles de `smbcacls --numeric`, `tokenGroups`, décision d'accès.
+- `test_echec_droits.py` : contrôle de migration, 46 tests ; `test_revalidation_bm25.py` : groupes de test en SID.
+- `diag_sid.py` (nouveau) : SID d'un compte, lecture de `tokenGroups`, SID retenus.
+- `cas_cloisonnement.exemple.json` : cas `SMB-DOMAINE`.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.3 (nouveau), checklist.
+- `section-05-connecteurs.md` : §5.4 et §5.5 en SID.
+- `section-00-quickstart.md`, `section-03-docker-compose.md`, `section-09-securite.md`, `tests-apres-modification.md`, `scripts/stack-ia-locale/index.md`.
+- `suivi-corrections.md` : point 158 ; points ouverts 14, auth.1 et auth.2 retirés.
+
+---
+
+## [2.21.11] : Octobre 2026
+
+Pas de Release propre : cette version est publiée avec la 2.22.0.
+
+Suite de la septième revue externe : un échec du retrait du marqueur de synchronisation n'apparaissait pas dans le rapport (point 157), et deux précisions de documentation. Validé sur la VM de test le 22 octobre 2026 : 45 et 20 tests unitaires OK, dont l'enchaînement complet du marqueur non retiré (signalé, questions servies, refus au redémarrage, levée par la synchronisation suivante) ; test de non-divulgation inchangé (70 OK, 2 INFO).
+
+### Fiabilité
+
+- `api/anon_main.py` : un marqueur de synchronisation impossible à retirer en fin de passage est signalé comme erreur de `/admin/sync` : l'alerte habituelle part. Les droits sont à jour et les questions restent servies ; au redémarrage, le marqueur fait refuser les questions jusqu'à une synchronisation terminée, comme avant (point 157).
+
+### Tests
+
+- `test_echec_droits.py` : 1 test ajouté, 45 au total.
+- `deploy.sh` : en-tête en 2.21.11.
+
+### Documentation
+
+- `section-16-cloisonnement.md` : §16.5.2, tolérance de 5 minutes sur un horodatage dans le futur ; §16.10, ce que `ok` ne dit pas (origine suspendue après un passage incomplet) ; checklist (45 tests).
+- `scripts/stack-ia-locale/index.md` : installer la dernière Release ; v2.12.0 présentée comme référence historique.
+- `tests-apres-modification.md` : 45 tests.
+- `suivi-corrections.md` : point 157.
+
+---
+
 ## [2.21.10] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une septième revue externe du code (points 154 à 156). Validé sur la VM de test le 22 octobre 2026 : 20, 44 et 14 tests unitaires OK ; test de non-divulgation inchangé (70 OK, 2 INFO) ; mesure du juge 4B : aucune réponse incomplète du juge, ni sur les réponses réelles ni sur les falsifiées, la règle ne bloque donc aucune réponse ; faits inventés 30/30 détectés. Au passage, la protection de la 2.21.8 a joué en conditions réelles : workflow de synchronisation resté désactivé après des mesures, questions refusées au-delà de 3 heures (`droits_perimes`), reprise après une synchronisation.

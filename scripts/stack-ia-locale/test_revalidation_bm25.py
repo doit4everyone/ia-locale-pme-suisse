@@ -40,8 +40,8 @@ except ImportError:  # hors conteneur : fichier du dépôt
 from rank_bm25 import BM25Okapi
 
 COLL = main.COLLECTION
-GROUPE = "BSCULIER\\Direction"
-AUTRE = "BSCULIER\\RH"
+GROUPE = "S-1-5-21-1111-2222-3333-1105"   # SID depuis la 2.22.0
+AUTRE = "S-1-5-21-1111-2222-3333-1201"
 
 
 # ─────────────────────────────────────────

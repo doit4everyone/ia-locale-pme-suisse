@@ -20,7 +20,7 @@ description: "Scripts Python du pipeline RAG local : indexation SMB avec résolu
 
 **Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée en lab (§12).
 
-> **Version de référence des Parties 1 et 2 :** les scripts tels qu'ils ont été validés avant la Partie 3 sont figés dans la Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale). Les modifications de la Partie 3 sont compatibles : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte de la même façon.
+> **Quelle version installer :** toujours la **dernière Release publiée**, qui contient tous les correctifs de sécurité. La Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale) garde les scripts des Parties 1 et 2 tels qu'ils ont été validés avant la Partie 3 : c'est une **référence historique**, à ne pas installer. Les modifications de la Partie 3 sont compatibles : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte de la même façon.
 
 ---
 
@@ -61,9 +61,9 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | Script | Rôle | Exécution |
 |---|---|---|
 | `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel, génération, journalisation nLPD, endpoint `/admin/sync` | Dans le conteneur `rag-api` |
-| `auth.py` | Résolution des groupes Active Directory via LDAP, filtrage des chunks par ACL | Dans le conteneur `rag-api` |
+| `auth.py` | Résolution des SID de l'utilisateur (compte et groupes, `tokenGroups`) via LDAP, filtrage des chunks par ACL | Dans le conteneur `rag-api` |
 | `indexer.py` | Parcours SMB, extraction de texte, embedding, écriture Qdrant avec payload ACL | Sur l'hôte, via `/admin/sync` ou manuel |
-| `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls`, mise à jour `autorises[]` dans Qdrant | Sur l'hôte, via `/admin/sync` ou manuel |
+| `acl_resolver.py` | Lecture des ACL NTFS via `smbcacls --numeric` (SID), mise à jour `autorises[]` et `interdits[]` dans Qdrant, contrôle de migration | Sur l'hôte, via `/admin/sync` ou manuel |
 | `teams.py` | Synthèse des réunions Teams : lecture du VTT, contrôle de longueur, prompt, contrôles déterministes, brouillon | Dans le conteneur `rag-api` |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph, fichier d'état | Dans le conteneur `rag-api` |
 | [`../teams-test/`](../teams-test/) | Fichiers et scripts de test de la synthèse Teams | Voir §12.7 du guide |
@@ -78,6 +78,8 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `test_echec_droits.py` | Tests unitaires des échecs d'écriture des droits : `acl_resolver.py` (trois issues, seconde tentative, code 2), documents retirés de la recherche par la RAG API, passages incomplets, registre (écriture, marqueur, validation), âge maximal des droits, fichier SharePoint trop volumineux ; Qdrant simulé ; un échec bloque `deploy.sh` | `docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py`, voir §16.5.2 |
 | `test_revocation_bm25.py` | Test en lab : retire quelques secondes le droit sur un document dans Qdrant, sans reconstruire l'index, et vérifie que la recherche ne le renvoie plus ; droits remis ensuite | Dans le conteneur `rag-api`, voir §16.5.1 |
 | `test_citations.py` | Tests unitaires du contrôle des citations (accents, ambiguïté, source inventée) et de la lecture du verdict du juge (schéma complet exigé), sans modèle ni Qdrant ; obligatoire dans `deploy.sh` depuis la 2.21.10 | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py`, voir §0 étape 16 |
+| `test_sid.py` | Tests unitaires du contrôle d'accès par SID (2.22.0) : sorties réelles de `smbcacls --numeric`, `tokenGroups` (lecture refusée = aucun groupe), décision d'accès ; obligatoire dans `deploy.sh` | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py`, voir guide §16.5.3 |
+| `diag_sid.py` | Contrôle des SID d'un compte : `tokenGroups` lisible, groupes et noms, SID retenus pour l'accès ; ne modifie rien | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte@domaine>` |
 | [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
 | [`s10/charge_s10.py`](s10/charge_s10.py) | Mesure de charge du §10.12 : 1 à N questions posées en même temps, après une mesure de référence de chaque question seule ; gain de chaque série, débit, écarts | `docker exec -it rag-api python3 /rag-pipeline/s10/charge_s10.py /rag-pipeline/s10/jeu_questions_s10.json --paliers 1,2,4,6,8 --etiquette ma-configuration` |
 | [`s10/mesure_juge.py`](s10/mesure_juge.py) | Ce que le juge détecte (§10.12) : réponses réelles et versions volontairement fausses (chiffre, fait inventé, documents intervertis), jugées plusieurs fois | `docker exec -w /app rag-api python3 /rag-pipeline/s10/mesure_juge.py /rag-pipeline/s10/jeu_questions_s10.json --etiquette reference` |
@@ -157,15 +159,17 @@ LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 
 ## auth.py
 
-Résolution des groupes Active Directory via LDAP. Appelé par `main.py` à chaque requête.
+Résolution de l'identité Active Directory via LDAP, en SID depuis la 2.22.0 (§16.5.3 du guide). Appelé par `main.py` à chaque requête.
 
 Fonctionnalités :
 
 - Extraction de l'identité utilisateur depuis le jeton signé par Open WebUI (`X-OpenWebUI-User-Jwt`, vérifié avec `OWUI_JWT_SECRET` ; en-têtes simples refusés depuis la 2.21.0)
 - Bind LDAP avec TLS : `CERT_REQUIRED` si le certificat CA est présent et non vide, `CERT_NONE` avec avertissement dans les logs si absent
-- Résolution récursive des groupes imbriqués via `memberOf`
+- SID du compte et de tous ses groupes de sécurité via l'attribut calculé `tokenGroups` : groupes imbriqués et groupe principal compris ; `tokenGroups` illisible, aucun groupe (accès refusé)
+- Groupes intégrés (`S-1-5-32-…`) ignorés par défaut ; `ACL_SID_ETENDUS=1` les garde et ajoute « Tout le monde » et « Utilisateurs authentifiés »
 - Cache TTL configurable (défaut 300 secondes)
-- Ajout automatique du compte nominatif dans les groupes résolus (pour les ACE directs)
+- SID du compte nominatif inclus (pour les ACE directs)
+- Noms des groupes dans le journal du conteneur, à côté des SID, pour le dépannage seulement
 - Deny par défaut en cas d'erreur LDAP
 - **Extension Entra ID (Partie 3, désactivée par défaut)** : si `ENTRA_ENABLED=true`, ajoute aux groupes AD les identifiants Entra de l'utilisateur, obtenus via Microsoft Graph (`transitiveMemberOf`), au format `entra:usr:<id>` et `entra:grp:<id>`. Authentification de l'application par certificat (MSAL). Si Graph échoue, les groupes AD sont conservés et le résultat n'est pas mis en cache. Détails et validation : guide §11.
 
@@ -180,7 +184,7 @@ ENTRA_KEY_PATH=/etc/rag-certs/rag-identity.key
 ENTRA_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT>
 ```
 
-> **Validation en lab :** la résolution récursive a été testée avec un groupe `GRP-Clients-Niveau2` imbriqué dans `GRP-Clients`. `auth.py` remonte `GRP-Clients` par récursion `memberOf` malgré l'absence d'appartenance directe. Résultats documentés dans le guide §9.4.5.
+> **Validation en lab :** avant la 2.22.0, la résolution récursive par `memberOf` avait été testée avec un groupe `GRP-Clients-Niveau2` imbriqué dans `GRP-Clients` (guide §9.4.5). Depuis la 2.22.0, `tokenGroups` donne les mêmes groupes imbriqués, plus le groupe principal : validé le 22 octobre 2026, un compte qui n'a que « Utilisateurs du domaine » voit un document autorisé à ce seul groupe (guide §16.5.3).
 
 ---
 
@@ -242,12 +246,13 @@ DOCUMENTATION_PATHS=                      # même valeur que dans le .env de la 
 
 ## acl_resolver.py
 
-Résolveur d'ACL NTFS. Lit les permissions de chaque fichier via `smbcacls` et met à jour le payload Qdrant.
+Résolveur d'ACL NTFS. Lit les permissions de chaque fichier via `smbcacls --numeric` et met à jour le payload Qdrant.
 
 Fonctionnalités :
 
-- Lecture des ACL via `smbcacls` (paquet `smbclient` requis sur l'hôte)
-- Résolution des SID en identifiants `DOMAINE\groupe` exploitables par `auth.py`
+- Lecture des ACL via `smbcacls --numeric` (paquet `smbclient` requis) : SID, type (0 autorisation, 1 refus), drapeaux et masque en hexadécimal ; une ligne non reconnue rend le fichier illisible
+- Droits enregistrés en SID, comparés aux SID de l'utilisateur par `auth.py` (2.22.0)
+- Contrôle de migration : un document SMB encore au format des noms est compté en échec (`documents_non_migres_sid`)
 - Population de `autorises[]` (ALLOW) et `interdits[]` (DENY explicites)
 - Suppression des chunks dont la source a disparu du partage (orphelins). Depuis la v4, seuls les chunks `source_type` `smb` (ou sans ce champ) sont concernés : les chunks SharePoint ne sont jamais supprimés comme orphelins. La suppression se fait par filtre, sans limite du nombre de chunks par fichier
 - Rapport JSON produit à l'issue de chaque passe

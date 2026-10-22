@@ -372,11 +372,13 @@ Résultat attendu :
 
 ```
 [1/12] CLIENTS\ClientA\contrat_maintenance.docx
-Autorises (3) : DOMAINE\Administrateur, DOMAINE\Admins du domaine, DOMAINE\GRP-Clients
+Autorises (3) : S-1-5-21-1111111111-2222222222-3333333333-500, S-1-5-21-1111111111-2222222222-3333333333-512, S-1-5-21-1111111111-2222222222-3333333333-1124
   [DRY-RUN] 7 chunks
-    autorises  : ['DOMAINE\\Administrateur', 'DOMAINE\\Admins du domaine', 'DOMAINE\\GRP-Clients']
+    autorises  : ['S-1-5-21-1111111111-2222222222-3333333333-500', 'S-1-5-21-1111111111-2222222222-3333333333-512', 'S-1-5-21-1111111111-2222222222-3333333333-1124']
 → 7 chunks mis à jour
 ```
+
+Depuis la 2.22.0, les droits sont des **SID** (identifiants de sécurité Windows), lus par `smbcacls --numeric` : `-500` est le compte Administrateur, `-512` les Admins du domaine, `-1124` ici le groupe `GRP-Clients`. Un groupe renommé garde son SID ; deux groupes de même nom ne se confondent plus (§16.5.3). Pour retrouver le nom d'un SID : `Get-ADGroup -Identity <SID>` ou `Get-ADUser -Identity <SID>` en PowerShell sur un contrôleur de domaine.
 
 ### §5.4.4 Lancement réel
 
@@ -410,7 +412,7 @@ Résultat attendu :
 
 ```
 source: CLIENTS/ClientA/contrat_maintenance.docx
-autorises: ['DOMAINE\\Administrateur', 'DOMAINE\\Admins du domaine', 'DOMAINE\\GRP-Clients']
+autorises: ['S-1-5-21-1111111111-2222222222-3333333333-500', 'S-1-5-21-1111111111-2222222222-3333333333-512', 'S-1-5-21-1111111111-2222222222-3333333333-1124']
 acl_updated_at: 2026-09-10T11:03:30Z
 ```
 
@@ -430,15 +432,15 @@ Fichiers non indexés    : 3  ← à indexer avec indexer.py
 
 ## §5.5 Authentification utilisateur : auth.py
 
-`auth.py` résout les groupes AD d'un utilisateur à partir de son email, via LDAP, et retourne la liste au format `DOMAINE\Groupe` compatible avec `autorises[]`.
+`auth.py` résout l'identité d'un utilisateur à partir de son email, via LDAP, et retourne ses **SID** : celui du compte et ceux de tous ses groupes de sécurité, comparables aux SID de `autorises[]` (2.22.0, §16.5.3).
 
 ### §5.5.1 Principe
 
 ```
-Utilisateur connecté → email → LDAP → groupes AD → filtre Qdrant
+Utilisateur connecté → email → LDAP → SID du compte et de ses groupes → filtre Qdrant
 ```
 
-La résolution se fait en deux étapes : trouver le compte par son `userPrincipalName`, puis récupérer ses groupes via `memberOf` avec récursivité pour les groupes imbriqués.
+La résolution se fait en deux étapes : trouver le compte par son `userPrincipalName`, puis lire l'attribut calculé `tokenGroups`, qui donne en une lecture les SID de **tous** ses groupes de sécurité : appartenances directes, groupes imbriqués et groupe principal (« Utilisateurs du domaine »).
 
 ### §5.5.2 Installation
 
@@ -462,6 +464,8 @@ LDAP_BASE_DN=DC=votre-domaine,DC=ch
 LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
 LDAP_BIND_PWD=<mot-de-passe-fort>
 LDAP_DOMAIN=DOMAINE
+# Groupes intégrés, « Tout le monde », « Utilisateurs authentifiés » (§16.5.3) : 0 par défaut
+ACL_SID_ETENDUS=0
 ```
 
 > **`LDAP_BIND_PWD` en clair dans le `.env` :** ce compte lit l'annuaire AD complet pour résoudre les groupes. Traiter le fichier `.env` comme un secret : droits 600, propriétaire root, jamais commité dans Git. En production, préférer un gestionnaire de secrets (HashiCorp Vault, Azure Key Vault) ou les secrets Docker Swarm.
@@ -484,13 +488,13 @@ rag-api:
 
 **Injection LDAP :** l'email reçu du header HTTP est échappé via `escape_filter_chars()` avant injection dans le filtre LDAP. Un email malformé comme `user@domaine)(|(cn=*)` ne peut pas casser la requête.
 
-**Groupes imbriqués :** `memberOf` ne remonte que les appartenances directes. Si un utilisateur appartient à `GRP-Support` qui est lui-même membre de `GRP-Finance`, une implémentation naïve manquerait `GRP-Finance`. `auth.py` résout récursivement les groupes parents jusqu'à épuisement.
+**Groupes imbriqués et groupe principal :** `tokenGroups` les contient. Jusqu'à la 2.21.11, `auth.py` remontait `memberOf` récursivement : les groupes imbriqués étaient trouvés, mais pas le groupe principal, que `memberOf` ne contient jamais. Un document autorisé à « Utilisateurs du domaine » seulement était invisible pour tous.
 
-**Deny by default :** en cas d'erreur LDAP ou d'utilisateur introuvable, `auth.py` retourne une liste vide. L'utilisateur ne voit aucun document.
+**Deny by default :** en cas d'erreur LDAP, d'utilisateur introuvable ou de `tokenGroups` illisible, `auth.py` retourne une liste vide. L'utilisateur ne voit aucun document. Il n'y a pas de repli sur une résolution partielle des groupes.
 
 **Cache TTL :** les groupes sont mis en cache 5 minutes (configurable via `GROUPS_CACHE_TTL`) pour éviter un appel LDAP bloquant à chaque requête RAG.
 
-> **Note sur `tokenGroups` :** l'attribut calculé AD `tokenGroups` résout nativement les groupes imbriqués en une seule requête, mais nécessite des droits étendus sur l'AD que le compte `svc-rag` n'a généralement pas. La récursivité sur `memberOf` est plus portable.
+> **Droit de lecture de `tokenGroups` :** dans le lab, le compte de service l'a lu sans droit supplémentaire. Dans certains domaines durcis, il faut l'ajouter au groupe « Groupe d'accès d'autorisation Windows ». Le symptôme est sans ambiguïté : `[AUTH] SID des groupes de '…' illisibles (…) : accès refusé` dans le journal, et aucun document visible. Contrôle : `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` (§16.5.3).
 
 ---
 

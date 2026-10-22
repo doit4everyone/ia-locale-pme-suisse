@@ -166,7 +166,7 @@ Défaut voisin, sans effet sur les droits : la synchronisation cherchait le stat
 - En cas d'échec, le passage va à son terme, puis le script sort avec le **code 2**, et le rapport liste les documents concernés. La synchronisation est en échec : le courriel et le signal de supervision partent par le circuit existant (§7, §16.10).
 - **Fermeture par défaut, document par document** : la RAG API retire de toute recherche les documents dont les droits n'ont pas pu être écrits, jusqu'au prochain passage sans échec. Seuls ces documents disparaissent, pas le service. La liste est gardée dans `/var/log/rag/acl_bloques.json`, sur le disque chiffré, pour survivre à un redémarrage. Le contrôle d'accès du §16.2 applique la même exclusion : le test de non-divulgation signale alors un `REFUS À TORT` pour les comptes autorisés, ce qui est voulu.
 - Même règle pour SharePoint : un fichier en erreur dans le rapport de `sp_indexer.py` (code 2) est retiré de la recherche.
-- `deploy.sh` : les tests de sécurité des droits sont obligatoires. Absent ou en échec, la RAG API est arrêtée et le déploiement se termine en erreur. Depuis la 2.21.10, `test_citations.py` (citations et lecture du verdict du juge) l'est aussi.
+- `deploy.sh` : les tests de sécurité des droits sont obligatoires. Absent ou en échec, la RAG API est arrêtée et le déploiement se termine en erreur. Depuis la 2.21.10, `test_citations.py` (citations et lecture du verdict du juge) l'est aussi ; depuis la 2.22.0, `test_sid.py` (droits par SID).
 
 **Que faire en cas d'alerte.** Le courriel de synchronisation indique le nombre de documents retirés, et `docker logs rag-api 2>&1 | grep DROITS` les nomme. Corriger la cause (espace disque, état de Qdrant, n8n arrêté), puis relancer une synchronisation : depuis n8n (*Execute workflow*), ou à la main sur la VM :
 
@@ -203,7 +203,7 @@ Les documents reviennent dès que leurs droits sont écrits, et les questions so
 
 **Compléments de la 2.21.8**, à la suite d'une sixième revue :
 
-- **âge maximal des droits.** Le registre garde l'heure de la dernière synchronisation **complète** des droits : chaque origine configurée a terminé son passage, aucune n'est restée incertaine, et le registre a bien été écrit. Un passage partiel ne la change pas. Au-delà de `ACL_AGE_MAX_HEURES` (3 h par défaut ; avec une synchronisation horaire, deux échecs de suite sont tolérés), plus aucune question n'est servie. Un horodatage absent, illisible ou dans le futur vaut refus. Cette règle ne demande aucune écriture : elle survit à un redémarrage, même quand le disque refuse l'écriture, et couvre aussi n8n arrêté, un workflow désactivé et oublié, ou des échecs répétés. `ACL_AGE_MAX_HEURES=0` désactive ce seul contrôle, pas les autres. Depuis la 2.21.10, toute autre valeur doit être un nombre fini strictement positif : une valeur invalide (texte, `nan`, `inf`, négatif) applique la limite de 3 heures et le journal le signale (`[DROITS] ACL_AGE_MAX_HEURES=... invalide`) ;
+- **âge maximal des droits.** Le registre garde l'heure de la dernière synchronisation **complète** des droits : chaque origine configurée a terminé son passage, aucune n'est restée incertaine, et le registre a bien été écrit. Un passage partiel ne la change pas. Au-delà de `ACL_AGE_MAX_HEURES` (3 h par défaut ; avec une synchronisation horaire, deux échecs de suite sont tolérés), plus aucune question n'est servie. Un horodatage absent, illisible, ou situé plus de 5 minutes dans le futur (écart d'horloge toléré) vaut refus. Cette règle ne demande aucune écriture : elle survit à un redémarrage, même quand le disque refuse l'écriture, et couvre aussi n8n arrêté, un workflow désactivé et oublié, ou des échecs répétés. `ACL_AGE_MAX_HEURES=0` désactive ce seul contrôle, pas les autres. Depuis la 2.21.10, toute autre valeur doit être un nombre fini strictement positif : une valeur invalide (texte, `nan`, `inf`, négatif) applique la limite de 3 heures et le journal le signale (`[DROITS] ACL_AGE_MAX_HEURES=... invalide`) ;
 - **le marqueur est posé avant l'indexation**, plus seulement avant les droits : l'indexeur reporte sur le nouveau contenu d'un fichier modifié les droits de son ancienne version. Si le marqueur ne s'écrit pas, rien de la synchronisation ne tourne ;
 - **`/sante` signale l'état des droits** : `ok`, `droits_perimes` ou `droits_inconnus`, toujours avec le code HTTP 200, pour que le contrôle d'état de Docker ne redémarre pas la RAG API. La sonde de supervision du §16.10, qui cherche `ok`, alerte alors même quand aucune synchronisation n'a tourné, donc sans courriel d'échec. La sonde avertit ; c'est la RAG API qui bloque ;
 - **`deploy.sh`** ne crée le registre que sur une installation neuve, et l'y date. Sur une installation existante dont le registre a disparu, il s'arrête au lieu d'en créer un vide. Les deux tests de sécurité sont exigés dans le dépôt, puis comparés après la copie ;
@@ -232,6 +232,44 @@ cd /root/rag-stack && cp docker-compose.yml docker-compose.yml.avant-2.21.8 && c
 > **Validé sur la VM de test, 20 octobre 2026 :** 23 et 14 tests unitaires OK dans le conteneur. Le registre n'existait pas sur cette installation, antérieure à la 2.21.6 : au démarrage, la RAG API a journalisé `Registre ... absent : ... AUCUNE question servie`. Une synchronisation a levé le refus (`questions de nouveau servies`, `success=True`) et créé le registre (droits 640). Après un redémarrage de la RAG API, le registre a été relu sans nouvelle alerte. Registre mis de côté puis RAG API redémarrée : une question posée dans Open WebUI a reçu « Vérification des droits en cours : réessayer après la prochaine synchronisation », sans réponse. La synchronisation horaire suivante a recréé le registre et levé le refus d'elle-même. Droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO).
 
 > **Validé sur la VM de test, 20 octobre 2026 :** `test_echec_droits.py` 12 tests OK et `test_revalidation_bm25.py` 14 tests OK, dans le conteneur ; synchronisation réelle avec le nouveau `acl_resolver.py` : `success=True`, aucun document retiré ; test du droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO) ; une question réelle dans Open WebUI, réponse citée.
+
+### §16.5.3 Des droits par SID, plus par noms (2.22.0)
+
+**Le défaut.** Jusqu'à la 2.21.11, la stack comparait des **noms** : `acl_resolver.py` enregistrait les droits tels que `smbcacls` les affiche (`BSCULIER\RH`), et `auth.py` fabriquait des noms du même format à partir des groupes de l'annuaire (`memberOf`). Windows, lui, raisonne en **SID** (identifiants de sécurité). Trois écarts en découlaient (points 14, auth.1 et auth.2 du suivi) :
+
+- **le groupe principal** (« Utilisateurs du domaine ») n'apparaît jamais dans `memberOf` : un document autorisé à ce seul groupe était invisible pour tous ;
+- **un groupe dont le nom affiché (CN) diffère du nom pré-Windows 2000**, que `smbcacls` affiche, ne correspondait pas ; et si le CN d'un groupe égalait le nom pré-2000 d'un autre, les membres du premier auraient obtenu les droits du second ;
+- **les identités intégrées** (« Utilisateurs authentifiés », « Tout le monde », groupes `BUILTIN`) ne sont pas des groupes de l'annuaire.
+
+Les deux premiers écarts allaient presque toujours dans le sens prudent (documents invisibles), sauf la collision de noms.
+
+**La correction.**
+
+- `acl_resolver.py` lit les droits avec `smbcacls --numeric` : SID, type d'entrée (`0` autorisation, `1` refus), drapeaux et masque en hexadécimal. **Une ligne d'ACL non reconnue rend le fichier illisible**, donc retiré de la recherche : ignorer une ligne pourrait ignorer un refus. Un type d'entrée inconnu est traité comme un refus. Le contrôle du masque (§16.5) est inchangé : une entrée en écriture seule n'accorde rien.
+- `auth.py` lit le SID du compte et l'attribut calculé **`tokenGroups`**, qui donne en une lecture les SID de tous les groupes de sécurité : directs, imbriqués, et le groupe principal. **Si `tokenGroups` ne peut pas être lu, aucun groupe n'est retourné : accès refusé**, sans repli sur une résolution partielle.
+- Un nom ne servant plus à aucune décision, la collision de noms disparaît. Les noms restent dans le journal du conteneur, à côté des SID, pour le dépannage (`[AUTH] SID retenus pour '…' : S-1-5-21-…-513 (Utilisateurs du domaine), …`).
+
+**Les groupes intégrés (`S-1-5-32-…`) sont ignorés par défaut.** `tokenGroups` renvoie ceux de l'annuaire, qui ne valent que sur les contrôleurs de domaine. Sur un serveur de fichiers, une ACL `BUILTIN\Utilisateurs` désigne le groupe **local** du serveur, au même SID mais aux membres définis sur ce serveur. Les confondre recréerait une équivalence approximative, exactement ce que la 2.22.0 supprime. « Tout le monde » (`S-1-1-0`) et « Utilisateurs authentifiés » (`S-1-5-11`) ne figurent pas dans `tokenGroups`. Les documents autorisés à ces seules identités restent donc invisibles, comme avant. `ACL_SID_ETENDUS=1` garde les groupes intégrés et ajoute ces deux identités à tout compte trouvé : plus fidèle à Windows dans le cas courant, mais à décider après revue des droits des partages, souvent trop ouverts pour ces identités.
+
+**Ce qui s'élargit, et qu'il faut regarder avant la mise à jour.** Le groupe principal étant reconnu, **un document lisible par « Utilisateurs du domaine » devient visible pour tous les comptes du domaine**. C'est fidèle aux droits du partage, que Windows applique déjà, mais c'est un changement visible. Pour lister ces documents après la migration :
+
+```bash
+docker exec -w /app rag-api python3 -c "import main; s=set(); [s.add(p.payload['source']) for c in (main.COLLECTION, main.DOCUMENTATION_COLLECTION) for p in main.qdrant.scroll(collection_name=c, limit=10000, with_payload=['source','autorises'])[0] if any(str(a).endswith('-513') for a in p.payload.get('autorises',[]))]; print(len(s)); [print(x) for x in sorted(s)]"
+```
+
+Dans le lab, 54 documents : toute la documentation publique du dossier `DOIT4EVERYONE`, dont le partage accorde bien la lecture à « Utilisateurs du domaine ». Un document qui ne devrait pas y figurer se corrige **sur le partage**, pas dans la RAG.
+
+**La migration, sans mélange.** Après la mise à jour, les droits encore enregistrés dans Qdrant sont des noms : aucun SID d'utilisateur ne leur correspond, les documents SMB sont donc **invisibles** jusqu'à la synchronisation suivante, à lancer aussitôt. À la fin de chaque passage, `acl_resolver.py` vérifie que **tous** les documents SMB ont des droits en SID. Un document encore au format des noms est compté comme un échec d'écriture : retiré de la recherche, signalé dans le rapport (`documents_non_migres_sid`), et l'alerte part. SharePoint et Purview ne sont pas concernés : leurs droits sont des identifiants Entra.
+
+**Contrôler un compte** : `diag_sid.py` affiche les SID de `tokenGroups`, leur nom, et ceux que la RAG API retient. Il vérifie aussi que le compte de service lit `tokenGroups` ; dans certains domaines durcis, il faut l'ajouter au groupe « Groupe d'accès d'autorisation Windows ».
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte@domaine>
+```
+
+**Tests.** `test_sid.py` (16 tests, obligatoire et bloquant dans `deploy.sh`) part de **sorties réelles** de `smbcacls --numeric` relevées sur le partage du lab : boîte de dépôt (écriture seule écartée), refus explicite (prioritaire), entrées héritées, ligne au format des noms (fichier illisible), lecture de `tokenGroups` refusée (aucun groupe). `test_echec_droits.py` vérifie le contrôle de migration. Le test de non-divulgation, qui fonctionne par comptes, sert de contrôle avant et après.
+
+> **Validé sur la VM de test, 22 octobre 2026 (2.22.0) :** `tokenGroups` lu par le compte de service sans droit supplémentaire (18 SID pour un compte administrateur, 3 pour un compte de test) ; synchronisation `success=True`, 70 fichiers relus, 1 692 extraits réécrits en SID, `documents_non_migres_sid` : 0 ; `test_sid.py` 16, `test_echec_droits.py` 46 et `test_revalidation_bm25.py` 14 tests OK ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO), puis complété par le cas `DOC-DOMAINE` : un document autorisé à « Utilisateurs du domaine » est visible pour les 9 comptes, y compris un compte qui n'a que ce groupe (79 OK, 2 INFO). En 2.21.11, ce compte ne le voyait pas.
 
 ## §16.6 Durcissement de la RAG API
 
@@ -360,7 +398,7 @@ Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un.
 | Espace disque | `/srv/rag-donnees`, `/var/log/rag`, espace Docker | Disque plein : Qdrant, journaux nLPD | Non, outil de l'organisation |
 | Moteur d'inférence | Contrôle du serveur Ollama ou vLLM | Questions sans réponse alors que `/sante` répond | Non, outil de l'organisation |
 
-> **Ce que `/sante` ne dit pas :** la réponse prouve que Nginx et la RAG API répondent, et, depuis la 2.21.8, que les droits ont été synchronisés depuis moins de `ACL_AGE_MAX_HEURES` (§16.5.2). Elle ne contrôle ni Qdrant, ni le moteur d'inférence, ni l'annuaire : `/health` est volontairement minimal (§16.6) et ne révèle rien de l'installation. Une question réelle reste le seul contrôle de bout en bout.
+> **Ce que `/sante` ne dit pas :** la réponse prouve que Nginx et la RAG API répondent, et, depuis la 2.21.8, que les droits ont été synchronisés depuis moins de `ACL_AGE_MAX_HEURES` (§16.5.2). Elle ne contrôle ni Qdrant, ni le moteur d'inférence, ni l'annuaire : `/health` est volontairement minimal (§16.6) et ne révèle rien de l'installation. Une question réelle reste le seul contrôle de bout en bout. **`ok` ne dit pas non plus que le dernier passage de chaque origine s'est bien déroulé** : après un passage incomplet, l'origine concernée est suspendue (`ACL_INCERTAIN_FERME=1`), mais `/sante` reste à `ok` tant que la dernière synchronisation complète a moins de `ACL_AGE_MAX_HEURES`. Ce cas est signalé par le rapport de synchronisation et l'alerte du workflow, qui doivent donc être actifs.
 
 **Le certificat de l'autorité interne.** L'outil de supervision doit faire confiance à la racine de l'autorité, sinon la sonde HTTPS échoue ou doit ignorer les erreurs de certificat, et ne contrôle plus rien de ce côté. Pour un outil Node.js : variable `NODE_EXTRA_CA_CERTS` (§9.8.5).
 
@@ -431,7 +469,9 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `14 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
-| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `44 tests OK` |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `46 tests OK` |
+| Droits par SID | `test_sid.py` (§16.5.3) | `16 tests OK` |
+| Migration vers les SID | `rapport_acl.json`, `documents_non_migres_sid` | 0 après la première synchronisation (§16.5.3) |
 | Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json*` | Registre présent, pas de `.en_cours` hors synchronisation ; sinon, questions refusées jusqu'à une synchronisation terminée |
 | Fermeture si les droits sont incertains | `grep ACL_INCERTAIN_FERME /root/rag-stack/.env` | 1, ou absent (1 par défaut) ; 0 seulement par choix documenté |
 | Âge des droits | `curl -s https://<RAG_FQDN>/sante` | `{"status":"ok"}` ; `droits_perimes` ou `droits_inconnus` : synchronisation à relancer |

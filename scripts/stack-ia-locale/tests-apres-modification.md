@@ -335,7 +335,15 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 ```
 
-**Attendu :** `44 tests OK`.
+**Attendu :** `46 tests OK`.
+
+Droits par SID (§16.5.3) : lecture de `smbcacls --numeric` sur des sorties réelles, `tokenGroups`, décision d'accès :
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py
+```
+
+**Attendu :** `16 tests OK`.
 
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 
