@@ -211,7 +211,7 @@ Les documents reviennent dès que leurs droits sont écrits, et les questions so
 
 **Mettre à jour vers la 2.21.8.** Le registre de la 2.21.7 n'est pas daté : après la mise à jour, la RAG API refuse les questions jusqu'à la première synchronisation complète. La lancer aussitôt.
 
-**Remplacer aussi le `docker-compose.yml`.** Les procédures de mise à jour de la 2.21.2 à la 2.21.7 ne remplaçaient que `main.py` : sur une installation mise à jour ainsi, le Compose ne transmet ni `ACL_INCERTAIN_FERME`, ni `ACL_AGE_MAX_HEURES`. Le code applique alors ses valeurs par défaut (1 et 3 heures), mais une valeur écrite dans le `.env` est ignorée sans message. Copier le `docker-compose.yml` du dépôt dans le dossier personnel de l'administrateur, puis comparer :
+**Remplacer aussi le `docker-compose.yml`.** Les procédures de mise à jour de la 2.21.2 à la 2.21.7 ne remplaçaient que `main.py` : sur une installation mise à jour ainsi, le Compose ne transmet ni `ACL_INCERTAIN_FERME`, ni `ACL_AGE_MAX_HEURES`. Le code applique alors ses valeurs par défaut (suspension des origines incertaines, limite de 3 heures), mais une valeur écrite dans le `.env` est ignorée sans message. Copier le `docker-compose.yml` du dépôt dans le dossier personnel de l'administrateur, puis comparer :
 
 ```bash
 cd /root/rag-stack && diff docker-compose.yml /home/<admin>/docker-compose.yml
@@ -237,6 +237,9 @@ cd /root/rag-stack && cp docker-compose.yml docker-compose.yml.avant-2.21.8 && c
 |---|---|---|
 | Mot de passe SMB | Sur la ligne de commande de `smbcacls`, visible dans la liste des processus | Fichier d'identifiants temporaire en mémoire (`-A`), lisible par le seul processus |
 | Juge en échec | Réponse considérée comme ancrée | Considérée comme non vérifiée : `/query` la bloque, le journal indique `verification: erreur` |
+| Verdict du juge incohérent | « Ancrée » retenu même quand le juge cite des affirmations non sourcées | Réponse non ancrée dès que sa liste n'est pas vide, `[JUGE] Verdict incohérent` au journal (2.21.9, §10.12) |
+| Réponse de refus | Moins de 200 caractères contenant « ne figure pas dans les documents » : acceptée sans juge | Seule la phrase de refus exacte est acceptée sans juge (2.21.9) |
+| Verdict de Purview (`mip-service`) | Lu avec `bool()` : une chaîne « false » aurait autorisé | Seul le booléen `true` autorise (2.21.9) |
 | Réponse non vérifiée dans Open WebUI | Rendue sans signal | Rendue, avec une mention invitant à vérifier dans les sources |
 | Citations | Comparées par sous-chaîne | Correspondance exacte sur le nom de fichier |
 | Deux documents de même nom | Lien vers le premier trouvé | Les deux emplacements sont indiqués |

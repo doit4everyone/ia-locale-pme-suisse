@@ -617,7 +617,8 @@ async def droits_purview(utilisateur: str, etiquette_id: str, proprietaire: str)
         if r.status_code != 200:
             logger.warning(f"[PURVIEW] mip-service HTTP {r.status_code} pour {utilisateur} : refus par défaut")
             return False
-        autorise = bool(r.json().get("autorise", False))
+        # Seul le booléen true autorise : une chaîne « false » vaudrait True avec bool()
+        autorise = r.json().get("autorise") is True
     except Exception as e:
         logger.warning(f"[PURVIEW] mip-service injoignable ({e.__class__.__name__}) : refus par défaut")
         return False
@@ -1451,13 +1452,18 @@ def nettoyer_reponse(texte: str) -> str:
     return "\n".join(garder).strip()
 
 
-async def generate_answer(query: str, context: str) -> str:
-    """Génère une réponse ancrée sur le contexte via Ollama."""
-    prompt_user = f"""[DONNÉES DOCUMENTAIRES]
+def prompt_utilisateur(query: str, context: str) -> str:
+    """Message utilisateur de la rédaction."""
+    return f"""[DONNÉES DOCUMENTAIRES]
 {context}
 [FIN DES DONNÉES]
 
 Question : {query}"""
+
+
+async def generate_answer(query: str, context: str) -> str:
+    """Génère une réponse ancrée sur le contexte via Ollama."""
+    prompt_user = prompt_utilisateur(query, context)
 
     async with httpx.AsyncClient(timeout=300) as client:
         if LLM_API == "openai":
@@ -1545,13 +1551,63 @@ async def warmup_judge() -> None:
         pass
 
 
+REGLES_JUGE = """- Une affirmation est sourcée si elle est directement tirée des sources ou en est une reformulation fidèle.
+- Une affirmation est NON sourcée si elle contient un chiffre, une date, un nom ou un fait précis absent des sources.
+- Une affirmation est NON sourcée si elle attribue une fonctionnalité ou une action au mauvais sujet : si la source dit que A fait X, la réponse ne peut pas dire que B fait X.
+- Si la source documente un outil construit autour d'un produit, la réponse ne peut pas présenter cet outil comme une fonctionnalité native du produit.
+- Ne valide pas une affirmation si tu ne la trouves pas dans les sources ou si l'attribution est incorrecte."""
+
+FORMAT_JUGE = """Réponds uniquement en JSON : {"ancree": true ou false, "affirmations_non_sourcees": ["liste des affirmations avec des faits précis absents des sources"]}"""
+
+
+PHRASE_REFUS = "Cette information ne figure pas dans les documents disponibles."
+
+
+def est_refus_standard(answer: str) -> bool:
+    """La réponse est-elle EXACTEMENT la phrase de refus du prompt ? Seul ce cas
+    est accepté sans passer par le juge. Jusqu'à la 2.21.8, il suffisait que la
+    réponse fasse moins de 200 caractères et contienne « ne figure pas dans les
+    documents » : une réponse courte avec un fait inventé suivi de cette phrase
+    échappait au juge. Tolérés : espaces, guillemets, casse, point final."""
+    def norme(t: str) -> str:
+        t = unicodedata.normalize("NFC", t).strip().strip('"«»“” \n').rstrip(".").strip()
+        return " ".join(t.lower().replace("\u2019", "'").split())
+    return norme(answer) == norme(PHRASE_REFUS)
+
+
+def verdict_juge(result) -> dict:
+    """Verdict du juge, lu strictement (fail-closed).
+    - Seul le booléen True vaut « ancrée » : {"ancree": "false"} en chaîne ou une
+      clé absente laisseraient sinon passer une réponse non ancrée.
+    - Verdict incohérent (2.21.9) : le juge répond « ancrée » tout en citant des
+      affirmations non sourcées. Mesuré le 22 octobre 2026 (s10/mesure_juge.py) : une
+      réponse au chiffre falsifié, citée par le juge lui-même, mais déclarée
+      ancrée. La liste l'emporte : réponse non ancrée. Sur 168 jugements de
+      réponses réelles (deux mesures, deux formats de prompt), aucune liste non
+      vide avec « ancrée » : la règle ne bloque aucune réponse mesurée."""
+    if not isinstance(result, dict):
+        result = {}
+    liste = result.get("affirmations_non_sourcees")
+    if result.get("ancree") is not True:
+        result["ancree"] = False
+    elif liste:
+        logger.warning("[JUGE] Verdict incohérent : « ancrée » avec des affirmations "
+                       "non sourcées ; réponse traitée comme non ancrée")
+        result["ancree"] = False
+        result["verdict_incoherent"] = True
+    if not isinstance(liste, list):
+        result["affirmations_non_sourcees"] = [str(liste)] if liste else []
+    result["controle"] = "juge"
+    return result
+
+
 async def groundedness_check(answer: str, chunks: list[dict]) -> dict:
     """Vérifie que chaque affirmation de la réponse est ancrée dans les chunks."""
     # Contrôle 1 : réponse de refus standard (prioritaire sur le reste).
     # Tester avant l'absence de chunks : une réponse de refus est toujours
     # correcte même sans chunks, et ne doit pas polluer le journal nLPD
     # avec ancree: false.
-    if len(answer) < 200 and "ne figure pas dans les documents" in answer:
+    if est_refus_standard(answer):
         return {"ancree": True, "affirmations_non_sourcees": [], "controle": "refus"}
 
     # Contrôle 2 : aucun chunk
@@ -1591,13 +1647,10 @@ Réponse à vérifier :
 {answer}
 
 Instructions :
-- Une affirmation est sourcée si elle est directement tirée des sources ou en est une reformulation fidèle.
-- Une affirmation est NON sourcée si elle contient un chiffre, une date, un nom ou un fait précis absent des sources.
-- Une affirmation est NON sourcée si elle attribue une fonctionnalité ou une action au mauvais sujet : si la source dit que A fait X, la réponse ne peut pas dire que B fait X.
-- Si la source documente un outil construit autour d'un produit, la réponse ne peut pas présenter cet outil comme une fonctionnalité native du produit.
-- Ne valide pas une affirmation si tu ne la trouves pas dans les sources ou si l'attribution est incorrecte.
+{REGLES_JUGE}
 
-Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourcees": ["liste des affirmations avec des faits précis absents des sources"]}}"""
+{FORMAT_JUGE}"""
+    messages = [{"role": "user", "content": juge_prompt}]
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -1610,11 +1663,14 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                         "stream": False,
                         "temperature": 0,
                         "response_format": {"type": "json_object"},
-                        "messages": [{"role": "user", "content": juge_prompt}]
+                        "messages": messages
                     }
                 )
                 verifier_reponse_openai(r)
                 result = json.loads(r.json()["choices"][0]["message"]["content"])
+                usage = r.json().get("usage") or {}
+                jetons = usage.get("prompt_tokens")
+                caches = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
             else:
                 r = await client.post(
                     f"{JUDGE_BASE_URL}/api/chat",
@@ -1625,17 +1681,18 @@ Réponds uniquement en JSON : {{"ancree": true ou false, "affirmations_non_sourc
                         "think": False,
                         "keep_alive": JUDGE_KEEP_ALIVE,
                         "options": options_ollama({"temperature": 0, "num_ctx": JUDGE_NUM_CTX}, JUDGE_NUM_GPU),
-                        "messages": [{"role": "user", "content": juge_prompt}]
+                        "messages": messages
                     }
                 )
                 r.raise_for_status()
                 result = json.loads(r.json()["message"]["content"])
-            # Valider strictement : accepter uniquement True booléen.
-            # {"ancree": "false"} en chaîne ou clé absente vaut True par défaut
-            # sans cette validation, ce qui laisserait passer des réponses non ancrées.
-            if result.get("ancree") is not True:
-                result["ancree"] = False
-            result["controle"] = "juge"
+                jetons, caches = r.json().get("prompt_eval_count"), None
+            result = verdict_juge(result)
+            # Diagnostic (mesures du §10) : jetons lus par le juge, et part déjà
+            # en cache quand le moteur la renvoie (vLLM).
+            result["juge_jetons"] = jetons
+            if caches is not None:
+                result["juge_jetons_caches"] = caches
             return result
     except Exception as e:
         # Fail-closed : une vérification impossible n'est pas une vérification réussie.
@@ -1851,10 +1908,10 @@ async def query(
     else:
         gc_result = await groundedness_check(answer, chunks)
 
-    log_query(request.user_id, request.query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""),
+    log_query(request.user_id, request.query, chunks, gc_result.get("ancree", False), gc_result.get("juge_error", ""),
               gc_result.get("controle", ""))
 
-    if not gc_result.get("ancree", True):
+    if not gc_result.get("ancree", False):
         raise HTTPException(
             status_code=422,
             detail={
@@ -1871,7 +1928,7 @@ async def query(
     return QueryResponse(
         answer=answer,
         sources=[{"source": c["source"], "score": round(c["score"], 3)} for c in chunks],
-        ancree=gc_result.get("ancree", True),
+        ancree=gc_result.get("ancree", False),
         affirmations_non_sourcees=gc_result.get("affirmations_non_sourcees", []),
         user_id=request.user_id
     )
@@ -1992,7 +2049,7 @@ async def _openai_chat_completions(
     context = build_context(chunks)
     answer = normaliser_citations(nettoyer_reponse(await generate_answer(user_query, context)), chunks)
     gc_result = await groundedness_check(answer, chunks)
-    log_query(owui_email2, user_query, chunks, gc_result.get("ancree", True), gc_result.get("juge_error", ""),
+    log_query(owui_email2, user_query, chunks, gc_result.get("ancree", False), gc_result.get("juge_error", ""),
               gc_result.get("controle", ""))
 
     # enrichir_citations après tous les contrôles (même logique que /query).
@@ -2002,7 +2059,7 @@ async def _openai_chat_completions(
     if gc_result.get("juge_error"):
         answer += ("\n\n*Vérification automatique indisponible pour cette réponse : "
                    "contrôlez-la dans les documents cités.*")
-    elif not gc_result.get("ancree", True):
+    elif not gc_result.get("ancree", False):
         answer += ("\n\n*Attention : le contrôle automatique n'a pas pu rattacher toutes les "
                    "affirmations de cette réponse aux documents. Vérifiez-les dans les sources citées.*")
     if entra_en_echec(owui_email2):

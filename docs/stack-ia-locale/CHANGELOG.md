@@ -4,6 +4,31 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.21.9] : Octobre 2026
+
+Correctif de sécurité : avec la configuration Ollama recommandée, le juge laissait passer un fait inventé sur trois, qu'il avait pourtant repéré (points 151 à 153, §10.12). Première mesure de ce que le juge détecte. La piste du juge partagé, qui devait réduire la charge de vLLM, a été mesurée puis abandonnée. Validé sur la VM de test le 22 octobre 2026 : 13, 42 et 14 tests unitaires OK ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO) ; mesure du juge 4B avec la règle : 39 réponses réelles sur 42 acceptées, 33 faits inventés sur 33 détectés.
+
+### Sécurité
+
+- `api/anon_main.py` : verdict du juge incohérent (« ancrée » avec des affirmations non sourcées) traité comme non ancré, avec `[JUGE] Verdict incohérent` au journal (point 151) ; liste du juge normalisée.
+- `api/anon_main.py` : seule la phrase de refus exacte est acceptée sans juge (point 152).
+- `api/anon_main.py` : verdict de Purview lu strictement (booléen `true` seulement) ; valeur par défaut « non ancrée » dans la lecture du résultat du juge (point 153).
+- `deploy.sh` : en-tête en 2.21.9.
+
+### Tests et mesures
+
+- `test_citations.py` : 9 tests ajoutés (lecture du verdict, phrase de refus), 13 au total.
+- `s10/mesure_juge.py` (nouveau) : réponses réelles et versions volontairement fausses (chiffre modifié, fait inventé, documents intervertis), verdicts, localisation de la faute, stabilité.
+
+### Documentation
+
+- `section-10-gpu.md` : §10.12, le juge partagé (mesuré, abandonné) et ce que le juge détecte.
+- `section-16-cloisonnement.md` : §16.6, verdict incohérent, phrase de refus, verdict de Purview ; §16.5.2, valeurs par défaut précisées.
+- `section-00-quickstart.md`, `scripts/stack-ia-locale/index.md` : 13 tests de citations ; `mesure_juge.py`.
+- `suivi-corrections.md` : points 151 à 153.
+
+---
+
 ## [2.21.8] : Octobre 2026
 
 Correctif de sécurité, à la suite d'une sixième revue externe : si les synchronisations s'arrêtaient (n8n arrêté, workflow désactivé), les derniers droits connus restaient appliqués sans limite de durée, sans alerte (points 144 à 148, §5.4, §16.5.2). Compte rendu du test de charge de vLLM, de une à huit questions simultanées (point 149, §10.12). Procédure de mise à jour complétée : le `docker-compose.yml` est aussi remplacé (point 150). Validé sur la VM de test le 21 octobre 2026 : 42 et 14 tests unitaires OK ; droits périmés refusés puis questions servies après retour à la limite de 3 heures ; droit retiré OK ; test de non-divulgation inchangé (70 OK, 2 INFO).

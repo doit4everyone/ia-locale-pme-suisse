@@ -1,13 +1,16 @@
 """
-test_citations.py : tests unitaires du contrôle des citations (2.20.4).
+test_citations.py : tests unitaires du contrôle des citations (2.20.4) et de la
+lecture du verdict du juge et de la phrase de refus (2.21.9).
 
-Vérifie normaliser_citations (correction des accents) et verifier_citations
-(contrôle exact, inchangé) de la RAG API, sans modèle ni Qdrant.
+Vérifie normaliser_citations (correction des accents), verifier_citations
+(contrôle exact, inchangé), verdict_juge (verdict lu strictement, verdict
+incohérent refusé) et est_refus_standard (seule la phrase de refus exacte
+échappe au juge) de la RAG API, sans modèle ni Qdrant.
 
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py
 
-Attendu : « 4 tests OK », code de sortie 0.
+Attendu : « 13 tests OK », code de sortie 0.
 """
 
 import sys
@@ -63,6 +66,49 @@ resultats = [
              "[Contrat_Dupont_Logistique.docx]", ["Contrat_Dupont_Logistique.docx"]),
 ]
 
+
+
+def juge(nom, brut, attendu_ancree):
+    v = main.verdict_juge(brut)
+    ok = v["ancree"] is attendu_ancree and isinstance(v["affirmations_non_sourcees"], list)
+    print(f"{'OK    ' if ok else 'ECHEC '} {nom}")
+    if not ok:
+        print(f"       verdict : {v} (ancrée attendue : {attendu_ancree})")
+    return ok
+
+
+resultats += [
+    # 5. Verdict cohérent : ancrée, liste vide
+    juge("juge : ancrée, liste vide", {"ancree": True, "affirmations_non_sourcees": []}, True),
+    # 6. Verdict incohérent (2.21.9) : « ancrée » mais une affirmation signalée
+    juge("juge : incohérent, liste non vide",
+         {"ancree": True, "affirmations_non_sourcees": ["Série M, Microsoft 377 et Entra ID"]}, False),
+    # 7. « false » en chaîne : non ancrée
+    juge("juge : ancrée en chaîne", {"ancree": "true", "affirmations_non_sourcees": []}, False),
+    # 8. Clé absente : non ancrée
+    juge("juge : clé absente", {"affirmations_non_sourcees": []}, False),
+    # 9. Liste remplacée par une chaîne : non ancrée, liste normalisée
+    juge("juge : liste en chaîne", {"ancree": True, "affirmations_non_sourcees": "36 mois"}, False),
+]
+
+
+def refus(nom, reponse, attendu):
+    ok = main.est_refus_standard(reponse) is attendu
+    print(f"{'OK    ' if ok else 'ECHEC '} {nom}")
+    return ok
+
+
+resultats += [
+    # 10. Phrase de refus exacte : acceptée sans juge
+    refus("refus : phrase exacte", "Cette information ne figure pas dans les documents disponibles.", True),
+    # 11. Guillemets, espaces, sans point final : toujours la phrase exacte
+    refus("refus : guillemets et espaces", "  « Cette information ne figure pas dans les documents disponibles »  ", True),
+    # 12. Fait inventé suivi de la phrase (moins de 200 caractères) : passe par le juge
+    refus("refus : fait ajouté, juge requis",
+          "Le forfait est de CHF 9 999 [21_Contrat.docx]. Le reste ne figure pas dans les documents disponibles.", False),
+    # 13. Autre formulation de refus : passe par le juge
+    refus("refus : autre formulation", "Aucun document fourni ne contient d'information pertinente sur les clients.", False),
+]
 if all(resultats):
     print(f"{len(resultats)} tests OK")
     sys.exit(0)

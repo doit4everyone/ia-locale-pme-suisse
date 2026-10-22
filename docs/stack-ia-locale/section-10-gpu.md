@@ -585,7 +585,48 @@ Une observation reste sans explication : sur la question d'inventaire des règle
 
 **Limites de cette mesure.** Une seule série par configuration ; la mémoire et la température de la carte n'ont pas été relevées ; le processeur du poste a atteint 99 °C en pointe et réduit sa fréquence une partie du temps (relevé HWiNFO à la fin du test), ce qui touche surtout la RAG API et les VM, pas la carte. Les chiffres ne se transposent pas à une autre machine : un DGX Spark a beaucoup plus de mémoire (128 Go) mais moins de bande passante mémoire (273 Go/s, contre 448 Go/s pour la RTX 5060 Ti) ; il soulagerait le cache, pas forcément le calcul. Seule une mesure sur la machine visée le dira.
 
-**Une piste, non testée.** Le juge relit les mêmes extraits que la rédaction. vLLM sait réutiliser le calcul d'un début de texte déjà lu, mais le taux de réutilisation est resté entre 13 et 41 % pendant la mesure. Si le prompt du juge commençait par les extraits, exactement dans la forme de celui de la rédaction, une bonne partie de la seconde lecture pourrait être évitée. C'est une hypothèse à mesurer avant toute conclusion.
+**Une piste mesurée, puis abandonnée : le juge partagé.** Le juge relit les mêmes extraits que la rédaction. vLLM sait réutiliser le calcul d'un début de texte déjà lu, mais seulement si ce début est identique au caractère près ; or le prompt du juge et celui de la rédaction diffèrent dès la première ligne. L'idée était de donner au juge exactement le début du prompt de la rédaction (prompt système, données documentaires, question), puis sa consigne de vérification, pour éviter la seconde lecture. Avant de mesurer le gain de vitesse, il fallait vérifier que le juge jugeait aussi bien : c'est l'objet de `s10/mesure_juge.py` (ci-dessous). Deux versions ont été mesurées le 22 octobre 2026, sur les mêmes réponses que le juge en service :
+
+| | Juge en service | Juge partagé, 1re version | Juge partagé, 2e version |
+|---|---|---|---|
+| Réponses réelles acceptées | 36/42 puis 39/42 | 30/42 | 37/42 |
+| Faute laissée passer alors que le juge en service la détecte | | aucune | **une**, acceptée 3 fois sur 3 |
+| Affirmations justes signalées en plus de la faute | 24 puis 27 | 120 | 60 |
+
+La première version présentait la réponse comme celle du modèle, puis la consigne : sur les réponses longues, le juge signalait presque chaque ligne, y compris des faits recopiés des documents, et refusait deux réponses justes sur quatorze. La seconde encadrait la réponse dans le message de vérification et rappelait qu'une affirmation reformulée reste sourcée : meilleure, mais encore instable sur une réponse longue, et elle a accepté une réponse falsifiée. **Le juge partagé est abandonné** : un gain de vitesse ne justifie pas un juge moins sûr. Le gain lui-même n'a donc pas été mesuré.
+
+### Ce que le juge détecte
+
+Le juge vérifie que chaque affirmation d'une réponse est tirée des sources (§8). Jusqu'ici, on savait qu'il acceptait les bonnes réponses ; on ne savait pas s'il attrapait les mauvaises. `s10/mesure_juge.py` le mesure : pour chaque question, il produit la réponse réelle, puis trois versions volontairement fausses, jugées chacune trois fois :
+
+- **chiffre** : un nombre présent dans les sources est changé (24 mois devient 36 mois) ;
+- **fait inventé** : une phrase absente des sources est ajoutée, avec une vraie citation (« Le document prévoit également une pénalité de CHF 12 517 par jour de retard ») ;
+- **attribution** : les deux premiers documents cités sont intervertis.
+
+**Conditions.** 22 octobre 2026, VM de test, Ollama, rédaction `qwen3:14b`, 14 questions, trois passages. Deux juges : `qwen3:14b` (celui de la configuration vLLM, deux mesures) et `qwen3:4b-instruct` (celui d'Ollama par défaut, une mesure). Les réponses diffèrent d'une mesure à l'autre (température 0,2).
+
+| Version | Juge 14B | Juge 4B (Ollama), 2.21.9 | Juge 4B, lecture de la 2.21.8 |
+|---|---|---|---|
+| Réponses réelles acceptées | 39/42 | 39/42 | 39/42 |
+| Fait inventé | **63/63** | **33/33** | **22/33** |
+| Chiffre modifié, réponse courte | 36/36 | 18/18 | 18/18 |
+| Chiffre modifié, réponse longue | manqué 6 fois sur 15 | manqué 6 fois sur 15 | manqué 9 fois sur 15 |
+| Documents intervertis | 3/9 | 3/6 | 3/6 |
+| Affirmations justes signalées en plus de la faute | 0,5 par réponse fausse | 1,2 par réponse fausse | |
+
+La dernière colonne relit la mesure du 4B comme le faisait la 2.21.8, sans la règle du verdict incohérent décrite plus bas. Les chiffres manqués sur réponse longue : une durée de rétention passée de 10 à 22 ans dans un résumé de procédure, des chiffres dans des réponses sur la configuration YAML. Les documents intervertis sont souvent sans conséquence, deux documents disant parfois la même chose.
+
+**Les verdicts sont stables** d'un passage à l'autre. **Les deux juges ont leurs limites sur les réponses longues** : un chiffre faux noyé dans un résumé d'une page peut passer. C'est une raison de plus de vérifier les chiffres importants dans le document cité, ce que la réponse permet toujours, puisqu'elle cite ses sources. Une piste, non mesurée : un contrôle sans modèle, qui vérifierait que chaque nombre de la réponse figure dans les documents qu'elle cite.
+
+**Un verdict incohérent, corrigé en 2.21.9.** Le juge répond parfois « ancrée » tout en citant lui-même l'affirmation fausse dans sa liste. La RAG API ne lisait que le verdict : la réponse fausse passait pour vérifiée. Le juge 4B d'Ollama l'a fait **14 fois sur 72 jugements de versions fausses**, tous sur des versions falsifiées (fait inventé, chiffre modifié) : avec la configuration Ollama recommandée, **un fait inventé sur trois passait**. Depuis la 2.21.9, **une liste non vide l'emporte** : la réponse est traitée comme non ancrée, et le journal l'indique (`[JUGE] Verdict incohérent`). Sur les 210 jugements de réponses réelles des trois mesures, aucun ne combinait « ancrée » et une liste non vide : la règle ne bloque aucune réponse mesurée.
+
+**Ce que « non ancrée » veut dire pour l'utilisateur.** Dans Open WebUI (`/v1`), une réponse non ancrée n'est pas bloquée : elle est affichée avec la mention « le contrôle automatique n'a pas pu rattacher toutes les affirmations de cette réponse aux documents » (§16.6). Seul `/query`, l'accès d'administration et de test, la bloque.
+
+**Une réponse de refus qui échappait au juge, corrigée en 2.21.9.** Une réponse de moins de 200 caractères contenant « ne figure pas dans les documents » était acceptée sans juge. Une réponse courte avec un fait inventé, suivie de cette phrase, passait donc sans vérification. Seule la phrase de refus exacte est désormais acceptée sans juge ; toute autre réponse est jugée.
+
+> **Validé sur la VM de test, 22 octobre 2026 (2.21.9) :** `test_citations.py` 13 tests OK (dont verdict incohérent et phrase de refus), `test_echec_droits.py` 42 et `test_revalidation_bm25.py` 14 tests OK ; droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO). Les mesures du juge ci-dessus ont été faites sur la même VM.
+
+**Ce que la mesure a montré de la rédaction.** Les réponses réelles refusées ne viennent pas du juge : sur la question « clients axonix », une rédaction sans aucune citation, mêlant des documents hors sujet ; sur « clients », un refus formulé autrement que la phrase prévue, que le contrôle des refus ne reconnaît pas. Deux comportements à suivre (§10.9).
 
 ### Ce que coûte vLLM
 

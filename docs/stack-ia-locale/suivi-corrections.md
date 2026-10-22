@@ -142,6 +142,9 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 148 | `/health` répondait « ok » même avec des droits périmés ou inconnus : la supervision ne voyait rien. État des droits dans la réponse, toujours en HTTP 200. Signalé par une sixième revue externe | v2.21.8 | 2026-10-21 |
 | 149 | `s10/charge_s10.py` comparait les médianes de paliers qui ne posaient pas les mêmes questions (« ×14,8 » à 8 questions, sans rapport avec la charge). Mesure de référence de chaque question seule, gain de chaque série ; compte rendu au §10.12 | v2.21.8 | 2026-10-21 |
 | 150 | Procédures de mise à jour des Releases 2.21.2 à 2.21.7 : seul `main.py` était remplacé, jamais le `docker-compose.yml`. Sur la VM de test, le Compose était resté en 2.21.1 : `ACL_INCERTAIN_FERME` n'était pas transmis (valeur par défaut du code, 1, appliquée) et une valeur d'`ACL_AGE_MAX_HEURES` passée à Compose était ignorée sans message. Remplacement du Compose dans la procédure de la 2.21.8, avec comparaison préalable | v2.21.8 | 2026-10-21 |
+| 151 | Verdict du juge lu sur la seule clé `ancree` : un juge qui répond « ancrée » tout en citant une affirmation non sourcée laissait passer la réponse comme vérifiée. Mesuré le 22 octobre 2026 (`s10/mesure_juge.py`) : le juge 4B d'Ollama l'a fait 14 fois sur 72 jugements de versions falsifiées, soit un fait inventé sur trois accepté. Liste non vide = réponse non ancrée ; aucune des 210 réponses réelles jugées n'est bloquée par la règle | v2.21.9 | 2026-10-22 |
+| 152 | Réponse de moins de 200 caractères contenant « ne figure pas dans les documents » acceptée sans juge : un fait inventé suivi de cette phrase échappait à la vérification. Seule la phrase de refus exacte est acceptée sans juge. Trouvé à la relecture du code après le point 151 | v2.21.9 | 2026-10-22 |
+| 153 | Même relecture : verdict de Purview lu avec `bool()` (une chaîne « false » aurait autorisé ; `mip-service` renvoie un booléen, sans conséquence constatée) ; valeur par défaut « ancrée » dans la lecture du résultat du juge (sans conséquence, toutes les branches la fixent). Lecture stricte et défaut « non ancrée » | v2.21.9 | 2026-10-22 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -288,6 +291,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.21.9 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §10.12 | « Une piste, non testée » remplacée par la mesure : juge partagé abandonné ; ce que le juge détecte | v2.21.9 |
+| §16.6 | Verdict du juge incohérent | v2.21.9 |
+| §16.5.2 | « valeurs par défaut (1 et 3 heures) » précisé | v2.21.9 |
 
 ---
 
