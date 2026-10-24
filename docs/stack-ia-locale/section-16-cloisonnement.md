@@ -249,7 +249,7 @@ Les deux premiers écarts allaient presque toujours dans le sens prudent (docume
 - `auth.py` lit le SID du compte et l'attribut calculé **`tokenGroups`**, qui donne en une lecture les SID de tous les groupes de sécurité : directs, imbriqués, et le groupe principal. **Si `tokenGroups` ne peut pas être lu, aucun groupe n'est retourné : accès refusé**, sans repli sur une résolution partielle.
 - Un nom ne servant plus à aucune décision, la collision de noms disparaît. Les noms restent dans le journal du conteneur, à côté des SID, pour le dépannage (`[AUTH] SID retenus pour '…' : S-1-5-21-…-513 (Utilisateurs du domaine), …`).
 
-**Les groupes intégrés (`S-1-5-32-…`) sont ignorés par défaut.** `tokenGroups` renvoie ceux de l'annuaire, qui ne valent que sur les contrôleurs de domaine. Sur un serveur de fichiers, une ACL `BUILTIN\Utilisateurs` désigne le groupe **local** du serveur, au même SID mais aux membres définis sur ce serveur. Les confondre recréerait une équivalence approximative, exactement ce que la 2.22.0 supprime. « Tout le monde » (`S-1-1-0`) et « Utilisateurs authentifiés » (`S-1-5-11`) ne figurent pas dans `tokenGroups`. Les documents autorisés à ces seules identités restent donc invisibles, comme avant. `ACL_SID_ETENDUS=1` garde les groupes intégrés et ajoute ces deux identités à tout compte trouvé : plus fidèle à Windows dans le cas courant, mais à décider après revue des droits des partages, souvent trop ouverts pour ces identités.
+**Les groupes intégrés (`S-1-5-32-…`) sont ignorés par défaut.** `tokenGroups` renvoie ceux de l'annuaire, qui ne valent que sur les contrôleurs de domaine. Sur un serveur de fichiers, une ACL `BUILTIN\Utilisateurs` désigne le groupe **local** du serveur, au même SID mais aux membres définis sur ce serveur. Les confondre recréerait une équivalence approximative, exactement ce que la 2.22.0 supprime. « Tout le monde » (`S-1-1-0`) et « Utilisateurs authentifiés » (`S-1-5-11`) ne figurent pas dans `tokenGroups`. Les documents autorisés à ces seules identités restent donc invisibles, comme avant. `ACL_SID_ETENDUS=1` garde les groupes intégrés et ajoute ces deux identités à tout compte trouvé : plus fidèle à Windows dans le cas courant, mais à décider après revue des droits des partages, souvent trop ouverts pour ces identités. Même avec ce réglage, l'équivalence avec Windows n'est pas complète : les **autorisations** de Système (`S-1-5-18`) et des Administrateurs intégrés (`S-1-5-32-544`) restent toujours écartées par `acl_resolver.py`, par prudence. Un compte qui ne lit un document que par l'une d'elles ne le voit pas dans la RAG. Leurs **refus**, eux, sont conservés et appliqués (2.22.1).
 
 **Les refus, plus larges que les autorisations (2.22.1).** Windows applique un refus à toute identité du jeton d'accès. Or le jeton d'un accès SMB contient des identités que `tokenGroups` ne donne pas : « Tout le monde » (`S-1-1-0`), « Utilisateurs authentifiés » (`S-1-5-11`), et les groupes intégrés ou locaux du serveur de fichiers. En 2.22.0, un refus à l'une d'elles était ignoré : un document autorisé à un groupe et refusé à « Tout le monde » restait lisible par les membres du groupe dans la RAG, alors que Windows le refuse (point 159, relevé par une revue externe). Depuis la 2.22.1, la règle est asymétrique, toujours du côté prudent :
 
@@ -286,6 +286,19 @@ icacls "D:\FileService" /grant:r "BSCULIER\Utilisateurs du domaine:(OI)(CI)(RX)"
 ```bash
 docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte@domaine>
 ```
+
+**Qualifier l'environnement cible avant un pilote.** Les tests unitaires partent de sorties réelles de `smbcacls`, mais simulent l'annuaire ; le lab compte un seul domaine et un serveur de fichiers. Avant une mise en service, rejouer sur l'annuaire et les partages de l'entreprise, avec de vrais comptes, au moins ces cas (contrôle d'accès par `/admin/verifier-acces`, §16.2, ou ajout au fichier des cas, §16.3) :
+
+| Cas | Attendu |
+|---|---|
+| Compte membre d'un groupe autorisé | Accès |
+| Compte sans aucun droit sur le document | Refus |
+| Refus explicite à « Tout le monde » ou à un groupe local, sur un document autorisé à un groupe | Refus, document listé dans `documents_refus_pour_tous` |
+| Compte membre d'un groupe imbriqué dans le groupe autorisé | Accès |
+| Groupe autorisé renommé dans l'annuaire, sans synchronisation des droits | Accès inchangé (le SID ne change pas) |
+| Document autorisé à « Utilisateurs du domaine » seul | Accès pour tout compte du domaine (§ « Ce qui s'élargit ») |
+
+Dans une forêt de plusieurs domaines, ajouter un compte et un groupe d'un autre domaine : la limite décrite plus haut peut y produire des refus à tort.
 
 **Tests.** `test_sid.py` (32 tests depuis la 2.22.2, obligatoire et bloquant dans `deploy.sh`) part de **sorties réelles** de `smbcacls --numeric` relevées sur le partage du lab : boîte de dépôt (écriture seule écartée), refus explicite (prioritaire), entrées héritées, ligne au format des noms (fichier illisible), lecture de `tokenGroups` refusée (aucun groupe), refus à « Tout le monde », « Utilisateurs authentifiés », aux groupes intégrés et à un SID d'une autre machine (appliqués), à Système et à un autre compte (sans effet), autorisation à « Tout le monde » seul (invisible par défaut), classement du rapport et lecture du SID du domaine (2.22.2). Cinq de ces tests échouent sur le code de la 2.22.0. Les noms des groupes affichés au journal, réservés au dépannage, ne sont pas couverts par les tests : ils ont été contrôlés dans le lab (`[AUTH] SID retenus pour 'test-client@…' : … (test-client), … (GRP-Clients), … (Utilisateurs du domaine), … (GRP-Clients-Niveau2)`). `test_echec_droits.py` vérifie le contrôle de migration. Le test de non-divulgation, qui fonctionne par comptes, sert de contrôle avant et après.
 
@@ -429,6 +442,8 @@ Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un.
 **Le signal de synchronisation.** Le workflow `n8n-sync-corpus.json` du dépôt contient un nœud **Signal supervision (Push)**, **désactivé** par défaut. Branché en parallèle du test de résultat, il appelle l'adresse Push de l'outil après chaque synchronisation, avec `status=up` si elle a réussi, `status=down` sinon. Il ne bloque jamais le courriel d'erreur : en cas d'échec de l'appel, le workflow continue (*On Error* : *Continue*). Pour l'activer : remplacer `<NOM-COMPLET-SUPERVISION>` et `<CLE-PUSH>` dans l'URL, puis activer le nœud.
 
 > **Nom complet obligatoire.** Le conteneur n8n ne résout pas les noms courts du domaine : `http://supervision:3001/...` échoue (`getaddrinfo EAI_AGAIN`), `http://supervision.votre-domaine.ch:3001/...` fonctionne. Le nom doit exister dans le DNS du domaine.
+
+> **La machine de supervision, elle aussi : uniquement les DNS du domaine.** Le piège décrit au §0 (étape 4) pour la VM vaut pour elle : avec un DNS public à côté de celui du domaine, `systemd-resolved` bascule un jour sur le serveur public et n'en revient pas. La sonde échoue alors en `getaddrinfo ENOTFOUND <RAG_FQDN>`, alors que la stack fonctionne. Cas vécu le 24 octobre 2026 : la machine Docker qui porte Uptime Kuma avait `8.8.8.8` dans sa configuration netplan ; `resolvectl status` affichait `Current DNS Server: 8.8.8.8`. Retirer le serveur public de la configuration réseau a réglé la sonde dans la minute.
 
 ### §16.10.2 Exemple : Uptime Kuma
 

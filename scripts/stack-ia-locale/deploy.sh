@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.22.2)
+# Version : beta (2.22.3)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -379,6 +379,18 @@ if [ ! -f /var/log/rag/acl_bloques.json ]; then
     chmod 640 /var/log/rag/acl_bloques.json
 fi
 mkdir -p /etc/smbcredentials
+# Identifiants SMB de svc-rag : sur le disque chiffré quand il est prêt, comme le
+# .env, avec un lien à l'emplacement habituel (2.22.3, §0 étape 5). Un ancien
+# fichier en clair sur le disque système est remplacé par le lien.
+if mountpoint -q /srv/rag-donnees 2>/dev/null; then
+    mkdir -p /srv/rag-donnees/secrets
+    chmod 700 /srv/rag-donnees/secrets
+    if [ -f /etc/smbcredentials/svc-rag ] && [ ! -L /etc/smbcredentials/svc-rag ]; then
+        rm -f /etc/smbcredentials/svc-rag
+        warn "Ancien /etc/smbcredentials/svc-rag (en clair, disque système) supprimé : remplacé par un lien vers le disque chiffré."
+    fi
+    [ -e /etc/smbcredentials/svc-rag ] || ln -sfn /srv/rag-donnees/secrets/smb-svc-rag /etc/smbcredentials/svc-rag
+fi
 # Certificats des applications Microsoft 365 (Partie 3, §11 et §12).
 # Monté en lecture seule dans rag-api : créé ici avec des droits restreints,
 # sinon Docker le créerait au démarrage avec des droits par défaut.
@@ -610,7 +622,7 @@ CREDSEOF
 
 chmod 600 /etc/smbcredentials/svc-rag
 chown root:root /etc/smbcredentials/svc-rag
-ok "/etc/smbcredentials/svc-rag créé"
+ok "/etc/smbcredentials/svc-rag créé ($(readlink -f /etc/smbcredentials/svc-rag))"
 
 # ─────────────────────────────────────────
 # Étape 6 : certificat CA du DC
@@ -724,8 +736,12 @@ if ! grep -q "$SMB_MOUNT" /etc/fstab; then
     {
         echo ""
         echo "# Partage SMB corpus RAG (svc-rag, lecture seule)"
-        echo "${SMB_SHARE} ${SMB_MOUNT} cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail 0 0"
+        # Identifiants sur le disque chiffré : monter le partage après lui (2.22.3)
+        APRES=""
+        [ -L /etc/smbcredentials/svc-rag ] && APRES=",x-systemd.after=/srv/rag-donnees"
+        echo "${SMB_SHARE} ${SMB_MOUNT} cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev${APRES} 0 0"
     } >> /etc/fstab
+    systemctl daemon-reload 2>/dev/null || true
     ok "Entree fstab ajoutee (ro)"
 fi
 

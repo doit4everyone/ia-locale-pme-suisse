@@ -4,6 +4,28 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.3] : Octobre 2026
+
+Rejeu complet de la 2.22.2 sur une VM neuve **à un seul disque**, les 23 et 24 octobre 2026 : `deploy.sh` avec Ollama et un certificat de l'autorité interne, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, test de non-divulgation 79 OK, 2 INFO, aucune fuite. Le rejeu a fait corriger le guide et un point de `deploy.sh`.
+
+### Sécurité
+
+- **Mot de passe de `svc-rag` sur le volume chiffré** (point 162) : le fichier d'identifiants SMB était créé en clair sur le disque système. `deploy.sh` le place désormais sur le volume chiffré, avec un lien à l'emplacement habituel, et remplace un ancien fichier en clair ; `fstab` monte le partage après le volume (`x-systemd.after`, `_netdev`). §0 (étape 5) et §5.3.2 mis à jour.
+
+### Documentation
+
+- **§1.5.1 (nouveau)** : machine à un seul disque, volume logique dans l'espace libre du LVM ou conteneur chiffré dans un fichier, mesures, procédure, validation.
+- **§1.1** : disque virtuel en SCSI sous VMware Workstation ; le contrôleur NVMe bloquait des écritures 30 s avec le noyau 7.0.
+- **§1.2** : ne plus étendre le LVM à 100 % sur une machine à un seul disque.
+- **§15.3.3** : mise à jour dbx du Secure Boot, refus du TPM et réinscription, validés dans le lab.
+- **§0** : contrôle de Docker et du volume chiffré, `qdrant` sur `127.0.0.1`, `tee -a`, statut du rejeu.
+- **§9.8.4** : erreur de révocation de `certreq`.
+- **§16.10** : DNS de la machine de supervision.
+- **§16.5.3** : exception de `ACL_SID_ETENDUS`, qualification de l'environnement cible (dixième revue externe).
+- `suivi-corrections.md` : point 162, point ouvert 35 (écriture directe sur les volumes chiffrés), doc.5 mis à jour.
+
+---
+
 ## [2.22.2] : Octobre 2026
 
 Suite de la neuvième revue externe, qui juge le modèle d'autorisation par SID suffisamment solide pour des pilotes en périmètre maîtrisé et clôt cette série de corrections. Un défaut du rapport, aucun de la décision d'accès. Validé le 22 octobre 2026 sur la VM de test avec un refus à un groupe local du serveur de fichiers (lecture de données seule), dont le compte d'indexation n'est pas membre : document resté indexé, `sid_domaine` lu dans l'annuaire, document listé dans `documents_refus_pour_tous`, `accès False` pour un compte membre du groupe autorisé ; `test_sid.py` 32, `test_echec_droits.py` 46, `test_revalidation_bm25.py` 14 et `test_citations.py` 20 tests OK ; refus et groupe retirés, rapport à 0, test de non-divulgation 79 OK, 2 INFO.

@@ -736,6 +736,8 @@ certreq -submit -attrib "CertificateTemplate:WebServer" rag.csr rag.cer
 
 Sans l'option `-config`, `certreq` affiche la liste des autorités du domaine : choisir l'autorité intermédiaire. Le compte qui soumet la demande doit avoir le droit d'inscription sur le modèle Serveur Web (par défaut : administrateurs du domaine et de l'entreprise).
 
+> Si `certreq` répond `CRYPT_E_REVOCATION_OFFLINE` (0x80092013), l'autorité refuse de signer parce qu'une de ses listes de révocation est expirée ou injoignable. C'est un défaut d'entretien de la PKI, pas de la stack : `certutil -verify -urlfetch` sur le certificat de l'autorité montre la liste en cause, à republier par l'administrateur de la PKI.
+
 **3. Retour sur la VM, construction de la chaîne et contrôles :**
 
 ```bash

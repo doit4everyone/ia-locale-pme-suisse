@@ -226,8 +226,17 @@ nslookup <NOM-FILESERVER>
 
 Ne jamais passer le mot de passe en ligne de commande ou dans l'option `-o password=` : il apparaît dans la liste des processus (`ps aux`) et dans l'historique du shell, lisibles par tout utilisateur de la machine.
 
+**Sur le volume chiffré (2.22.3).** Le fichier contient le mot de passe de `svc-rag` : comme le `.env`, il va sur le volume chiffré (§1.5), avec un lien à l'emplacement habituel. Les commandes de mise à jour (`nano /etc/smbcredentials/svc-rag`, rotation du §9.5.1) passent alors par le lien et écrivent sur le volume chiffré :
+
 ```bash
-# Créer le fichier de credentials
+sudo mkdir -p /etc/smbcredentials
+sudo ln -s /srv/rag-donnees/secrets/smb-svc-rag /etc/smbcredentials/svc-rag
+```
+
+Sans volume chiffré, le fichier est créé directement dans `/etc/smbcredentials`, sur le disque système, en clair.
+
+```bash
+# Créer le fichier de credentials (à travers le lien s'il existe)
 sudo nano /etc/smbcredentials/svc-rag
 
 # Contenu du fichier :
@@ -235,7 +244,7 @@ username=svc-rag
 password=<mot-de-passe-fort>
 domain=DOMAINE
 
-# Protéger en lecture root uniquement
+# Protéger en lecture root uniquement (chmod et chown suivent le lien)
 sudo chmod 600 /etc/smbcredentials/svc-rag
 sudo chown root:root /etc/smbcredentials/svc-rag
 ```
@@ -268,11 +277,11 @@ Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab`
 sudo tee -a /etc/fstab << 'FSTAB'
 
 # Partage SMB FileService (corpus RAG, monté par svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail 0 0
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
 FSTAB
 ```
 
-`ro` : lecture seule, la stack ne modifie jamais le partage (les versions du guide antérieures à la 2.20.4 indiquaient `rw` ici, `deploy.sh` montait déjà en `ro`). `soft` : si le serveur est inaccessible, les opérations I/O retournent une erreur au lieu de bloquer indéfiniment. `nofail` : si le partage est inaccessible au démarrage, la VM démarre quand même au lieu de rester bloquée en attente.
+`ro` : lecture seule, la stack ne modifie jamais le partage (les versions du guide antérieures à la 2.20.4 indiquaient `rw` ici, `deploy.sh` montait déjà en `ro`). `soft` : si le serveur est inaccessible, les opérations I/O retournent une erreur au lieu de bloquer indéfiniment. `nofail` : si le partage est inaccessible au démarrage, la VM démarre quand même au lieu de rester bloquée en attente. `_netdev` : montage réseau. `x-systemd.after=/srv/rag-donnees` : le partage n'est monté qu'après le volume chiffré, qui porte ses identifiants (sans volume chiffré, retirer cette option).
 
 Tester sans rebooter :
 

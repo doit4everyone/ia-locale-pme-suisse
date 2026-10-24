@@ -128,6 +128,16 @@ echo "/dev/mapper/rag-donnees /srv/rag-donnees ext4 defaults,nofail,x-systemd.de
 
 `--tpm2-pcrs=7` lie la clé à l'état du démarrage sécurisé : c'est le choix le plus stable, qui ne casse pas à chaque mise à jour du noyau. `nofail` garantit que le démarrage ne se bloque jamais si le disque ne s'ouvre pas.
 
+**Une exception : la mise à jour de la liste de révocation du Secure Boot (UEFI dbx).** Le PCR 7 mesure aussi cette liste. Ubuntu la propose par `fwupd` (« 1 device has a firmware upgrade available » à la connexion ; `fwupdmgr get-upgrades` affiche « UEFI dbx »). Ce sont des mises à jour de sécurité, à appliquer, mais après chacune **le TPM refuse la clé** au redémarrage suivant : `/srv/rag-donnees` reste fermé, la stack ne démarre pas, et le démarrage n'est pas bloqué (`nofail`). Constaté dans le lab le 24 octobre 2026 (dbx 20230501 → 20260707, VMware Workstation). La procédure, avec la stack arrêtée de ce fait :
+
+```bash
+fwupdmgr update          # puis redémarrer
+rag-deverrouiller        # seul : phrase secrète ; message « TPM policy does not match current system state », attendu
+systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 /dev/disk/by-uuid/$(awk '$1=="rag-donnees"{sub("UUID=","",$2);print $2}' /etc/crypttab)
+```
+
+La dernière commande, seule elle aussi, redemande la phrase, efface l'ancienne inscription du TPM et en crée une nouvelle. Contrôle : `cryptsetup luksDump` montre de nouveau deux emplacements `luks2` et un seul jeton `systemd-tpm2`, puis un redémarrage sans saisie. Après un refus du TPM au démarrage, systemd reste **en attente de la phrase** de chaque volume, et affiche ces demandes dans les sessions root : des invites « Please enter passphrase for disk … » apparaissent alors dans un terminal SSH sans qu'aucune commande les ait posées. Y répondre ouvre le volume ; `rag-deverrouiller` fait de même. Planifier ces mises à jour comme une intervention, avec la phrase sous la main.
+
 **Docker ne doit démarrer qu'avec le disque monté, sans déclencher lui-même le déverrouillage :**
 
 ```bash
@@ -151,6 +161,10 @@ cryptsetup status rag-donnees >/dev/null 2>&1 || cryptsetup open /dev/disk/by-uu
 mountpoint -q /srv/rag-donnees || mount /srv/rag-donnees
 if grep -q " /var/log/rag " /etc/fstab; then
   mountpoint -q /var/log/rag || mount /var/log/rag
+fi
+# Partage du corpus : ses identifiants sont sur le volume chiffré (§0, étape 5)
+if grep -q " /mnt/corpus-root " /etc/fstab; then
+  mountpoint -q /mnt/corpus-root || mount /mnt/corpus-root || echo "Partage non monté : vérifier le réseau, puis mount /mnt/corpus-root"
 fi
 systemctl start docker
 echo "Disque déverrouillé et monté, Docker démarré"

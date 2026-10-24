@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). L'essai avec vLLM sur une VM neuve reste à refaire.
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). L'essai avec vLLM sur une VM neuve reste à refaire.
 
 ---
 
@@ -69,7 +69,7 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 ## Avant de commencer
 
 - **Les droits d'administrateur** sur l'Active Directory et sur le serveur de fichiers.
-- **Une VM Ubuntu Server 26.04** préparée selon le §1 : 6 vCPU, 16 Go de mémoire, 100 Go de disque, Docker installé (§1.4). Préparer aussi le **disque de données chiffré** (§1.5) **avant l'étape 6** : préparé après coup, il laisse des copies en clair des secrets et des données sur le disque système.
+- **Une VM Ubuntu Server 26.04** préparée selon le §1 : 6 vCPU, 16 Go de mémoire, 100 Go de disque (contrôleur SCSI sous VMware Workstation, §1.1), Docker installé (§1.4). Préparer aussi le **disque de données chiffré** (§1.5, ou §1.5.1 pour une machine à un seul disque) **avant l'étape 5** : préparé après coup, il laisse des copies en clair des secrets et des données sur le disque système.
 - **Une carte graphique NVIDIA d'au moins 16 Go** sur le serveur de modèles (le lab : une RTX 5060 Ti 16 Go). Sans carte, Ollama fonctionne sur le processeur, mais une question prend une à deux minutes (§10.4) ; vLLM exige une carte.
 - **Un accès à Internet** pendant l'installation : paquets, images Docker, modèles.
 - **Les informations de votre réseau** : l'adresse IP de la VM, celle du serveur de modèles, le nom DNS du contrôleur de domaine, le nom du serveur de fichiers et du partage à indexer.
@@ -297,7 +297,13 @@ vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code \
 
 ## Étape 4 : préparer la VM
 
-Ouvrir une session root (`sudo -i`), puis :
+Ouvrir une session root (`sudo -i`). Docker doit déjà être installé (§1.4), et le volume chiffré monté (§1.5) : les deux prérequis se sautent facilement, et le rejeu du 23 octobre 2026 en a oublié un. Contrôle :
+
+```bash
+docker compose version && systemctl show docker -p DropInPaths && findmnt /srv/rag-donnees
+```
+
+**Attendu :** la version de Compose, le fichier `rag-donnees.conf` de §15.3.3, et `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees`. Puis :
 
 ```bash
 apt update && apt install -y \
@@ -363,11 +369,12 @@ openssl s_client -connect <NOM-DC>.votre-domaine.ch:636 -CAfile /etc/ssl/certs/a
 
 ## Étape 5 : monter le partage de fichiers
 
-Le mot de passe de `svc-rag` va dans un fichier lisible par root seulement, jamais dans une ligne de commande :
+Le mot de passe de `svc-rag` va dans un fichier lisible par root seulement, jamais dans une ligne de commande, et **sur le volume chiffré** : comme le `.env`, le fichier réel est dans `/srv/rag-donnees/secrets`, avec un lien à l'emplacement habituel. Jusqu'à la 2.22.2, ce fichier était créé dans `/etc/smbcredentials`, sur le disque système, en clair (constat du rejeu du 23 octobre 2026).
 
 ```bash
 mkdir -p /etc/smbcredentials
-nano /etc/smbcredentials/svc-rag
+ln -s /srv/rag-donnees/secrets/smb-svc-rag /etc/smbcredentials/svc-rag
+nano /srv/rag-donnees/secrets/smb-svc-rag
 ```
 
 Contenu :
@@ -379,7 +386,8 @@ domain=VOTREDOMAINE
 ```
 
 ```bash
-chmod 600 /etc/smbcredentials/svc-rag
+chmod 600 /srv/rag-donnees/secrets/smb-svc-rag
+ls -l /etc/smbcredentials/svc-rag /srv/rag-donnees/secrets/smb-svc-rag
 
 mkdir -p /mnt/corpus-root
 mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
@@ -387,16 +395,19 @@ mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
 ls /mnt/corpus-root/
 ```
 
-**Attendu :** les dossiers du partage. Le domaine est donné par la ligne `domain=` du fichier d'identifiants : sans elle, le montage échoue sur un domaine Active Directory. Le montage est en **lecture seule** (`ro`) : la stack ne modifie jamais le partage. Rendre ensuite le montage permanent :
+**Attendu :** le lien vers le volume chiffré, le fichier réel en `-rw-------`, puis les dossiers du partage. Le domaine est donné par la ligne `domain=` du fichier d'identifiants : sans elle, le montage échoue sur un domaine Active Directory. Le montage est en **lecture seule** (`ro`) : la stack ne modifie jamais le partage. Rendre ensuite le montage permanent :
 
 ```bash
+umount /mnt/corpus-root
 cat >> /etc/fstab << 'FSTAB'
 
-# Partage du corpus RAG (monté avec svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail 0 0
+# Partage du corpus RAG (monté avec svc-rag, identifiants sur le volume chiffré)
+//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
 FSTAB
-mount -a && findmnt /mnt/corpus-root
+systemctl daemon-reload && mount -a && findmnt /mnt/corpus-root
 ```
+
+`x-systemd.after=/srv/rag-donnees` fait monter le partage **après** le volume chiffré, qui porte ses identifiants, sans déclencher lui-même le déverrouillage ; `_netdev` le désigne comme un montage réseau. Si le volume reste fermé (TPM refusé, §15.3.3), le partage n'est pas monté et `nofail` laisse le démarrage se poursuivre : `rag-deverrouiller`, puis `mount /mnt/corpus-root`. Validé au redémarrage avec la stack en service, le 24 octobre 2026 : volume chiffré monté, puis le partage une seconde plus tard.
 
 ---
 
@@ -435,7 +446,7 @@ ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 
 **Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `test_citations.py`, `test_sid.py` et `diag_sid.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué trois fois sur une VM neuve, en dernier lieu en version 2.21.1 le 19 octobre 2026 ; ce rejeu a fait déplacer le garde-fou du `.env` au début du script et compléter le résumé final (version 2.21.2). Lancement : `chmod +x deploy.sh && ./deploy.sh`, depuis ce dossier, en root.
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué quatre fois sur une VM neuve, en dernier lieu en version 2.22.2 le 24 octobre 2026, avec un certificat fourni par l'autorité interne ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
 
 ---
 
@@ -563,7 +574,7 @@ docker compose up -d
 docker compose ps
 ```
 
-**Attendu :** `qdrant`, `n8n` et `nginx` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les trois autres. Seul `nginx` publie des ports (80, 443, 5678). Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent un secret refusé, ligne `[SÉCURITÉ]`, une variable manquante dans `.env`, ou le certificat de l'étape 4 absent). Si `nginx` s'arrête : `docker logs nginx` (certificat absent de `/etc/rag-tls`, ou `nginx/rag.conf` manquant).
+**Attendu :** `qdrant`, `n8n` et `nginx` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les trois autres. Seul `nginx` publie des ports sur le réseau (80, 443, 5678) ; `qdrant` publie le sien sur `127.0.0.1` seulement, pour les scripts d'indexation lancés depuis la VM (étapes 12 et 13), et il n'est pas joignable d'une autre machine. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent un secret refusé, ligne `[SÉCURITÉ]`, une variable manquante dans `.env`, ou le certificat de l'étape 4 absent). Si `nginx` s'arrête : `docker logs nginx` (certificat absent de `/etc/rag-tls`, ou `nginx/rag.conf` manquant).
 
 ```bash
 curl -sk https://$(grep '^RAG_FQDN=' .env | cut -d= -f2)/sante
@@ -797,7 +808,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Frontal HTTPS | `curl --cacert /etc/ssl/certs/ad-chain.pem https://<RAG_FQDN>/sante` | `{"status":"ok"}` (auto-signé : `-k`) |
 | Refus par adresse IP | `curl -sk https://<IP-VM>/; echo $?` | `35` |
 | Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
-| Ports exposés | `docker compose ps` | Seul `nginx` publie des ports : 80, 443, 5678 |
+| Ports exposés | `docker compose ps` | `nginx` : 80, 443, 5678 ; `qdrant` : `127.0.0.1:6333` seulement |
 | Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `20 tests OK` |
 | Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `32 tests OK` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
