@@ -20,8 +20,9 @@ services:
     # Chaque image est désignée par sa version ET par son empreinte (@sha256) :
     # l'empreinte garantit que l'image téléchargée est exactement celle validée,
     # même si l'éditeur republie une version sous le même nom. Empreintes
-    # relevées sur la VM de test le 17 octobre 2026 (docker image inspect).
-    image: qdrant/qdrant:v1.19.0@sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc
+    # relevées sur la VM de test le 17 octobre 2026 (docker image inspect) ;
+    # Qdrant 1.19.2 le 24 octobre 2026 (2.22.5).
+    image: qdrant/qdrant:v1.19.2@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :

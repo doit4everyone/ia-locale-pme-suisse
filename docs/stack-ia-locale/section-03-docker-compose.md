@@ -220,7 +220,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 | Service | Image | Empreinte validée |
 |---|---|---|
-| Qdrant | `qdrant/qdrant:v1.19.0` | `sha256:057ee3a8da769fe7310dd3537b4dc7583bf87a95ce8ac43c0af5a46bc580d1fc` |
+| Qdrant | `qdrant/qdrant:v1.19.2` (2.22.5) | `sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad` |
 | n8n | `n8nio/n8n:2.36.9` | `sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d` |
 | Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | `sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933` |
 | Nginx | `nginx:1.30.6-alpine` | `sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5` |
@@ -247,7 +247,7 @@ services:
 
 
   qdrant:
-    image: qdrant/qdrant:v1.19.0
+    image: qdrant/qdrant:v1.19.2
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :

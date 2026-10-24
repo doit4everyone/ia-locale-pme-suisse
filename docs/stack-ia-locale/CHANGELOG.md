@@ -4,6 +4,22 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.5] : Octobre 2026
+
+Qdrant passe de la 1.19.0 à la 1.19.2.
+
+### Sécurité
+
+- `docker-compose.yml` : `qdrant/qdrant:v1.19.2`, empreinte relevée sur la VM de test le 24 octobre 2026. La 1.19.2 (5 octobre 2026) corrige notamment des écritures interrompues qui pouvaient corrompre le stockage, et une recherche filtrée qui pouvait ne renvoyer aucun résultat. Revalidé sur la VM de test : nombre d'extraits inchangé, `test_sid.py` 32, `test_echec_droits.py` 46, `test_revalidation_bm25.py` 14 et `test_citations.py` 20 tests OK, synchronisation réussie, test de non-divulgation 79 OK, 2 INFO, question dans Open WebUI.
+
+### Documentation
+
+- **§3.4** : version et empreinte de Qdrant.
+- **§16.8** : mise à jour de Qdrant revalidée ; la 1.20 attend un premier correctif.
+- **§16.10** : un seul contrôleur de domaine est aussi un seul DNS ; son arrêt prive n8n de son serveur de courriel (constat du 24 octobre 2026).
+
+---
+
 ## [2.22.4] : Octobre 2026
 
 Suite de la onzième revue externe, qui juge le projet solide pour un pilote en périmètre maîtrisé et relève deux garde-fous de stockage à renforcer.

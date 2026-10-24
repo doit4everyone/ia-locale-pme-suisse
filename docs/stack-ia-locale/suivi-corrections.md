@@ -303,6 +303,16 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 
 ---
 
+## Corrections documentaires v2.22.5 (octobre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §3.4 | Qdrant 1.19.2, empreinte relevée le 24 octobre 2026 | v2.22.5 |
+| §16.8 | Mise à jour de Qdrant revalidée ; la 1.20 attend un premier correctif | v2.22.5 |
+| §16.10 | Un seul contrôleur de domaine est aussi un seul DNS : courriel d'alerte impossible pendant son arrêt | v2.22.5 |
+
+---
+
 ## Corrections documentaires v2.22.4 (octobre 2026)
 
 | Section | Correction | Version |

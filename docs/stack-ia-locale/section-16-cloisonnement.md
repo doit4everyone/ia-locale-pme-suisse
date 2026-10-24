@@ -404,6 +404,8 @@ En cas de problème, remettre l'ancienne ligne `image:` et relancer `docker comp
 
 > **Branche suivie pour Nginx :** la branche *stable* (paire : 1.30 en octobre 2026). Une branche stable n'est plus maintenue quand la suivante sort : la 1.28 ne reçoit plus de correctifs depuis la sortie de la 1.30. Validé sur la VM de test avec la 1.30.6.
 
+> **Qdrant 1.19.2 (2.22.5).** Passage de la 1.19.0 à la 1.19.2, publiée le 5 octobre 2026. Parmi ses corrections : des écritures interrompues qui pouvaient corrompre le stockage, et une recherche filtrée qui pouvait ne renvoyer aucun résultat. Revalidé sur la VM de test le 24 octobre 2026 : nombre d'extraits inchangé dans les deux collections, `test_sid.py`, `test_echec_droits.py`, `test_revalidation_bm25.py` et `test_citations.py` OK, synchronisation réussie, test de non-divulgation 79 OK, 2 INFO, question dans Open WebUI. La 1.20, publiée le 22 octobre 2026, attend un premier correctif : ses snapshots ne se restaurent pas sur une 1.19, le retour en arrière ne passe donc que par une sauvegarde prise avant.
+
 **Revue des versions.** Figer n'est pas oublier : les correctifs de sécurité n'arrivent que si quelqu'un met à jour. Revoir les versions de chaque composant lors de l'audit périodique (§17.6), et plus tôt en cas d'alerte de sécurité publiée pour l'un d'eux. Comme la bannière de mise à jour d'Open WebUI est désactivée, cette revue est le seul signal.
 
 ## §16.9 Une perte d'accès doit se détecter
@@ -444,6 +446,8 @@ Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un.
 > **Nom complet obligatoire.** Le conteneur n8n ne résout pas les noms courts du domaine : `http://supervision:3001/...` échoue (`getaddrinfo EAI_AGAIN`), `http://supervision.votre-domaine.ch:3001/...` fonctionne. Le nom doit exister dans le DNS du domaine.
 
 > **La machine de supervision, elle aussi : uniquement les DNS du domaine.** Le piège décrit au §0 (étape 4) pour la VM vaut pour elle : avec un DNS public à côté de celui du domaine, `systemd-resolved` bascule un jour sur le serveur public et n'en revient pas. La sonde échoue alors en `getaddrinfo ENOTFOUND <RAG_FQDN>`, alors que la stack fonctionne. Cas vécu le 24 octobre 2026 : la machine Docker qui porte Uptime Kuma avait `8.8.8.8` dans sa configuration netplan ; `resolvectl status` affichait `Current DNS Server: 8.8.8.8`. Retirer le serveur public de la configuration réseau a réglé la sonde dans la minute.
+
+> **Un seul contrôleur de domaine, c'est aussi un seul DNS.** Son arrêt coupe à la fois l'annuaire et la résolution de noms. Constaté sur la VM de test le 24 octobre 2026 : synchronisation en échec, droits devenus trop anciens, test de non-divulgation entièrement en erreur ; la RAG API refuse alors de servir des droits qu'elle ne peut plus vérifier (§16.5.2), c'est le comportement voulu. En revanche, le courriel d'alerte de n8n désigne son serveur par son nom (`smtp.office365.com`) : sans DNS, il ne peut pas partir. La sonde de supervision, qui n'utilise elle aussi que ce DNS, échoue alors sur la résolution du nom : elle alerte, mais sans indiquer la bonne cause (non vérifié dans le lab). Un second contrôleur de domaine, avec son DNS, règle ce point ; à défaut, vérifier d'abord le contrôleur de domaine quand la sonde échoue en `ENOTFOUND`.
 
 ### §16.10.2 Exemple : Uptime Kuma
 
