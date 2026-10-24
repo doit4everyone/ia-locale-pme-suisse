@@ -196,6 +196,8 @@ sed -i 's|- \./qdrant_data:|- /srv/rag-donnees/qdrant_data:|; s|- \./openwebui_d
 # /var/log/rag redirigé vers le disque chiffré
 mv /var/log/rag /var/log/rag.ancien && mkdir /var/log/rag
 echo "/srv/rag-donnees/log-rag /var/log/rag none bind,nofail,x-systemd.requires-mounts-for=/srv/rag-donnees 0 0" >> /etc/fstab
+# Docker ne démarre qu'avec les journaux montés : sinon il écrirait dans le dossier vide du disque système
+echo "ConditionPathIsMountPoint=/var/log/rag" >> /etc/systemd/system/docker.service.d/rag-donnees.conf
 systemctl daemon-reload && mount /var/log/rag
 
 # Anciens dossiers mis de côté, pas supprimés
@@ -204,6 +206,8 @@ docker compose up -d
 ```
 
 Valider (compteurs de chunks identiques, historique Open WebUI présent, synchronisation n8n réussie, redémarrage complet sans intervention), **puis seulement** supprimer les dossiers `.ancien`.
+
+**Pourquoi la seconde condition de Docker (2.22.4).** Avec un montage bind, `/var/log/rag` est un **dossier du disque système** sur lequel le volume est monté. Si ce montage échoue alors que `/srv/rag-donnees` est monté, Docker démarrerait quand même : `After=` impose un ordre, pas un montage. La RAG API écrirait alors le journal nLPD, les rapports et le registre des droits dans le dossier vide du disque système, en clair (relevé par une revue externe). La condition `ConditionPathIsMountPoint=/var/log/rag` l'empêche, sans déclencher le déverrouillage. Elle ne vaut **que** pour ce montage bind : avec le lien du §1.5 (installation neuve), `/var/log/rag` n'est pas un point de montage, et cette ligne empêcherait Docker de démarrer. Contrôle : `systemctl cat docker | grep Condition` affiche deux lignes en migration, une seule en installation neuve. Pour unifier, une installation migrée peut aussi passer au lien du §1.5 : retirer la ligne bind de `/etc/fstab` et la seconde condition, `umount /var/log/rag && rmdir /var/log/rag && ln -s /srv/rag-donnees/log-rag /var/log/rag`, la stack arrêtée.
 
 Pour une **nouvelle** installation, cette migration n'a pas lieu d'être : le disque chiffré et les liens sont préparés avant le déploiement (§1.5).
 

@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.22.3)
+# Version : beta (2.22.4)
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -345,14 +345,53 @@ info "Étape 2 : creation des répertoires..."
 
 # Le disque de données chiffré doit être prêt AVANT le déploiement (§1.5) :
 # sinon, .env, clés et données sont écrits en clair sur le disque système.
-if ! mountpoint -q /srv/rag-donnees 2>/dev/null || [ ! -L /root/rag-stack/.env ]; then
-    warn "Disque de données chiffré non préparé (/srv/rag-donnees non monté, ou liens de §1.5 absents)."
+# Volume monté : chaque chemin sensible doit aboutir SUR ce volume (lien du §1.5,
+# ou montage bind du §15.3.4). Un chemin absent est créé comme lien ; un chemin
+# qui aboutit sur le disque système arrête le déploiement (2.22.4, revue externe).
+VOLUME_CHIFFRE=/srv/rag-donnees
+CHEMINS_CHIFFRES="/root/rag-stack/qdrant_data:qdrant_data
+/root/rag-stack/openwebui_data:openwebui_data
+/root/rag-stack/n8n_data:n8n_data
+/root/rag-stack/.env:secrets/.env
+/var/log/rag:log-rag
+/etc/rag-certs:secrets/rag-certs
+/etc/rag-tls:secrets/rag-tls"
+
+verifier_chemins_chiffres() {
+    local dev_volume chemin cible reel lieu
+    dev_volume=$(stat -c %d "$VOLUME_CHIFFRE")
+    mkdir -p /root/rag-stack
+    while IFS=: read -r chemin cible; do
+        if [ ! -e "$chemin" ] && [ ! -L "$chemin" ]; then
+            # Absent : lien vers le volume ; la cible est créée, sauf le .env (écrit plus loin)
+            if [ "$cible" = "secrets/.env" ]; then
+                mkdir -p "$VOLUME_CHIFFRE/secrets"
+            else
+                mkdir -p "$VOLUME_CHIFFRE/$cible"
+            fi
+            chmod 700 "$VOLUME_CHIFFRE/secrets" 2>/dev/null || true
+            ln -s "$VOLUME_CHIFFRE/$cible" "$chemin"
+            ok "Lien créé : $chemin -> $VOLUME_CHIFFRE/$cible"
+            continue
+        fi
+        reel=$(readlink -f "$chemin")
+        # Le .env peut ne pas exister encore : on contrôle son dossier
+        if [ -e "$reel" ]; then lieu="$reel"; else lieu=$(dirname "$reel"); fi
+        if [ ! -e "$lieu" ] || [ "$(stat -c %d "$lieu")" != "$dev_volume" ]; then
+            error "$chemin aboutit à $reel, HORS du volume chiffré $VOLUME_CHIFFRE : les données y seraient en clair. Corriger (§1.5, étape 2 ; installation existante : §15.3.4), puis relancer."
+        fi
+    done <<< "$CHEMINS_CHIFFRES"
+}
+
+if mountpoint -q "$VOLUME_CHIFFRE" 2>/dev/null; then
+    verifier_chemins_chiffres
+    ok "Disque de données chiffré monté, chemins sensibles vérifiés sur le volume"
+else
+    warn "Disque de données chiffré non préparé ($VOLUME_CHIFFRE non monté, §1.5)."
     warn "Les secrets et les données seraient écrits en clair sur le disque système."
     printf "Continuer quand même ? (o/N, la lettre o pour oui) : "
     read -r CONTINUER_SANS_CHIFFREMENT
     est_oui "$CONTINUER_SANS_CHIFFREMENT" || error "Déploiement interrompu : préparer d'abord le disque chiffré (§1.5)."
-else
-    ok "Disque de données chiffré monté, liens en place"
 fi
 
 mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}

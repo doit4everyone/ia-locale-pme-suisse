@@ -4,6 +4,21 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.22.4] : Octobre 2026
+
+Suite de la onzième revue externe, qui juge le projet solide pour un pilote en périmètre maîtrisé et relève deux garde-fous de stockage à renforcer.
+
+### Sécurité
+
+- `deploy.sh` (point 164) : chaque chemin sensible (`qdrant_data`, `openwebui_data`, `n8n_data`, `.env`, `/var/log/rag`, `/etc/rag-certs`, `/etc/rag-tls`) doit aboutir sur le volume chiffré ; absent, il est créé comme lien ; sur le disque système, le déploiement s'arrête. Avant : seul le lien `.env` était contrôlé. Vérifié par simulation.
+- `section-15-securite-donnees.md` (point 165) : migration avec journaux en montage bind, seconde condition de démarrage de Docker (`ConditionPathIsMountPoint=/var/log/rag`), pour qu'un montage manqué n'envoie pas les journaux sur le disque système.
+
+### Documentation
+
+- `section-12-teams.md` : §12.10, perspective documentaire (non implémentée, non testée) d'une extension du mécanisme aux courriels par Microsoft Graph, sur le principe de Copilot : adhésion volontaire, résumé envoyé au seul titulaire de la boîte, rien d'indexé ni de conservé ; portée de `Mail.Read` à restreindre, données personnelles, droit du travail.
+
+---
+
 ## [2.22.3] : Octobre 2026
 
 Rejeu complet de la 2.22.2 sur une VM neuve **à un seul disque**, les 23 et 24 octobre 2026 : `deploy.sh` avec Ollama et un certificat de l'autorité interne, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, test de non-divulgation 79 OK, 2 INFO, aucune fuite. Le rejeu a fait corriger le guide et un point de `deploy.sh`.
@@ -22,7 +37,7 @@ Rejeu complet de la 2.22.2 sur une VM neuve **à un seul disque**, les 23 et 24 
 - **§9.8.4** : erreur de révocation de `certreq`.
 - **§16.10** : DNS de la machine de supervision.
 - **§16.5.3** : exception de `ACL_SID_ETENDUS`, qualification de l'environnement cible (dixième revue externe).
-- `suivi-corrections.md` : point 162, point ouvert 35 (écriture directe sur les volumes chiffrés), doc.5 mis à jour.
+- `suivi-corrections.md` : point 162, point ouvert 163 (écriture directe sur les volumes chiffrés), doc.5 mis à jour.
 
 ---
 

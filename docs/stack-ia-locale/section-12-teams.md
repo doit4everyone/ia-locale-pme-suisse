@@ -449,6 +449,31 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 ---
 
+## §12.10 Perspective : le même principe pour les courriels
+
+> **Documentaire, non implémenté, non testé.** Cette section décrit comment le mécanisme de ce chapitre pourrait s'étendre aux courriels. Aucun code n'est fourni ; les permissions et les commandes Exchange citées sont à vérifier dans la documentation de Microsoft avant tout essai.
+
+**Le principe, repris de Copilot.** Comme pour Teams (§12) et Purview (§14), la règle est celle que Microsoft applique à Copilot : un utilisateur n'obtient que ce qu'il pourrait déjà lire lui-même. Pour les courriels, cela se traduit ainsi :
+
+| Règle | Application aux courriels |
+|---|---|
+| Adhésion volontaire | Seules les boîtes des membres d'un groupe d'adhésion sont lues, comme `GRP-Teams-CompteRendu-IA` pour Teams (§12.3.2) |
+| Un seul destinataire | Le résumé d'une boîte n'est envoyé **qu'à son titulaire**, jamais à un tiers ni à un administrateur |
+| Rien d'indexé | Les courriels ne vont pas dans Qdrant : ils sont lus, résumés, puis oubliés. Le résumé ne devient pas un document interrogeable par d'autres |
+| Rien de conservé | Ni le contenu des courriels, ni le résumé ne sont gardés par la stack ; le journal nLPD n'en note que la trace (date, boîte, nombre de messages), comme `teams_summary` |
+
+**La chaîne serait la même que pour Teams :** une application Entra dédiée avec un certificat (§11), la lecture par Microsoft Graph, la synthèse par la RAG API, la planification et l'envoi par n8n.
+
+**Trois points qui rendent les courriels plus délicats que Teams :**
+
+- **La portée de la permission.** La permission d'application `Mail.Read` donne accès à **toutes** les boîtes du tenant. Elle doit être restreinte aux boîtes du groupe d'adhésion, par le contrôle d'accès basé sur les rôles d'Exchange Online pour les applications (étendue de gestion limitée à ce groupe). Sans cette restriction, l'application peut lire la direction, les RH et toute l'organisation. Méthode à vérifier auprès de Microsoft : elle a remplacé les anciennes stratégies d'accès des applications Exchange.
+- **Les données personnelles.** Une boîte contient bien plus de données personnelles qu'une transcription de réunion, souvent celles de tiers (clients, candidats, fournisseurs), et parfois des données sensibles au sens de la nLPD (santé, opinions). L'analyse d'impact relative à la protection des données (nLPD art. 22, §17) doit couvrir ce traitement avant tout essai.
+- **Le droit du travail.** Un traitement automatique des courriels des employés touche à la surveillance au travail. L'adhésion volontaire et le destinataire unique vont dans le bon sens, mais ne remplacent pas un avis juridique. Ce guide ne donne pas d'avis juridique.
+
+**Ce qui n'est pas visé :** les boîtes partagées (`support@`, `info@`) relèvent d'un autre cas d'usage, avec plusieurs lecteurs légitimes ; le principe du destinataire unique ne s'y applique pas tel quel.
+
+---
+
 [Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | [Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
 
 ---
