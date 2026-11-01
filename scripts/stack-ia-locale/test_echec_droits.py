@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 54 tests OK », code de sortie 0.
+Attendu : « 55 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -678,6 +678,13 @@ def tests_extraction():
             verifier("2.23.0 : fichier réellement vide, anciens extraits supprimés",
                      entree.get("statut") == "vide" and supprimes == ["COMMUN/Vide.txt"],
                      f"statut {entree.get('statut')}, supprimés {supprimes}")
+            # Fichier texte « ANSI » (Windows-1252) : lu en entier, accents compris
+            ansi = os.path.join(d, "Note.txt")
+            with open(ansi, "wb") as f:
+                f.write("Délai de résiliation : 24 mois, préavis écrit.".encode("cp1252"))
+            blocs = idx.extract_blocks(ansi)
+            verifier("2.23.0 : texte Windows-1252 lu en entier, accents compris",
+                     blocs == ["Délai de résiliation : 24 mois, préavis écrit."], f"blocs {blocs}")
         finally:
             idx.supprimer_chunks = sauve
 

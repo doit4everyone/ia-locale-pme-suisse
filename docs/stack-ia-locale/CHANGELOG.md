@@ -16,7 +16,7 @@ Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la R
 
 ### Droits et synchronisation
 
-- `acl_resolver.py` (point 183) : un dossier illisible pendant le parcours du partage n'efface plus les extraits de ses documents ; ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec. `indexer.py` signale aussi un parcours incomplet, et refuse `--reset` dans ce cas, sur un corpus vide ou si le serveur d'embedding ne calcule pas, avant de toucher aux collections (points 188 et 191). Un fichier illisible n'est plus traité comme vide : ses anciens extraits restent, l'erreur est comptée (point 191).
+- `acl_resolver.py` (point 183) : un dossier illisible pendant le parcours du partage n'efface plus les extraits de ses documents ; ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec. `indexer.py` signale aussi un parcours incomplet, et refuse `--reset` dans ce cas, sur un corpus vide ou si le serveur d'embedding ne calcule pas, avant de toucher aux collections (points 188 et 191). Un fichier illisible n'est plus traité comme vide : ses anciens extraits restent, l'erreur est comptée ; un texte Windows-1252 est lu en entier (point 191).
 - `deploy.sh` (point 184) : rotation du journal nLPD sur 365 jours créée au déploiement.
 - `deploy.sh` (point 189) : la RAG API est redémarrée après la première indexation, sinon la recherche par mots-clés restait inactive jusqu'à la première synchronisation (constaté au rejeu du 1er novembre 2026). Même étape ajoutée au §0 (étape 13).
 
@@ -52,7 +52,7 @@ Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la R
 
 - `comparer_vecteurs.py` : compare les vecteurs de Qdrant à ceux du serveur vLLM (§2.5).
 - `test_reranker.py` : 6 tests (formats des deux services, clé, repli).
-- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 54 tests (dossier illisible pendant le parcours, `--reset` refusé, fichier illisible).
+- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 55 tests (dossier illisible pendant le parcours, `--reset` refusé, fichier illisible, texte Windows-1252).
 
 ### Documentation
 

@@ -387,12 +387,25 @@ def extract_pptx(path: str) -> list[str]:
 
 
 def extract_txt(path: str) -> list[str]:
+    """Texte brut : UTF-8 (avec ou sans BOM), sinon Windows-1252, l'encodage
+    « ANSI » des fichiers créés sous Windows en Europe de l'Ouest (2.23.0).
+    Jusqu'ici, errors='ignore' retirait sans le dire les caractères non UTF-8
+    (accents d'un fichier ANSI) : un fichier pouvait être lu en partie, ou
+    paraître vide et perdre ses extraits (revue externe du 1er novembre 2026).
+    Un caractère indéchiffrable même en Windows-1252 est remplacé et compté."""
     try:
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-        return [p.strip() for p in content.split('\n\n') if p.strip()]
+        with open(path, 'rb') as f:
+            brut = f.read()
     except Exception as e:
         raise ErreurExtraction(f"lecture du texte impossible : {e}") from e
+    try:
+        content = brut.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        content = brut.decode('cp1252', errors='replace')
+        remplaces = content.count('\ufffd')
+        print(f"  Texte lu en Windows-1252 (pas en UTF-8)"
+              + (f", {remplaces} caractère(s) indéchiffrable(s)" if remplaces else "") + f" : {path}")
+    return [p.strip() for p in content.split('\n\n') if p.strip()]
 
 
 def extract_blocks(path: str) -> list[str]:

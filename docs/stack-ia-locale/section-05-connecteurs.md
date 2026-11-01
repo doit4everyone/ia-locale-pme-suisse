@@ -365,7 +365,10 @@ Depuis la 2.20.4, deux cas s'arrêtent avant même ce seuil, toujours sans modif
 
 `indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, si le corpus est vide, ou si le serveur d'embedding ne calcule pas un premier vecteur, avant de toucher aux collections (§5.9).
 
-**Fichier illisible (2.23.0).** Un fichier dont la lecture ou l'extraction échoue (fichier abîmé, verrouillé, bibliothèque absente) n'est plus traité comme un document vide : ses anciens extraits restent en place, avec leurs droits relus par `acl_resolver.py`, il est compté en erreur et l'indexation rend le code 2. Seul un document réellement vide (aucun texte extractible) voit ses extraits supprimés.
+**Fichier illisible (2.23.0).** Un fichier dont la lecture ou l'extraction échoue (fichier abîmé, verrouillé, bibliothèque absente) n'est plus traité comme un document vide : ses anciens extraits restent en place, avec leurs droits relus par `acl_resolver.py`, il est compté en erreur et l'indexation rend le code 2. Seul un document réellement vide (aucun texte extractible) voit ses extraits supprimés. Deux cas précis :
+
+- **un PDF sans texte extractible** (document scanné, sans reconnaissance de caractères) est traité comme un document sans contenu indexable : le journal de l'indexeur le signale (« PDF vide ou scanné »), et ses éventuels anciens extraits sont supprimés. C'est voulu : s'il en avait, le fichier a été remplacé, et l'ancien texte ne correspond plus au document. Le RAG ne lit pas les images ; les PDF scannés sont à passer en reconnaissance de caractères avant indexation, ou à écarter ;
+- **un fichier `.txt` ou `.md`** est lu en UTF-8, sinon en Windows-1252, l'encodage des fichiers « ANSI » créés sous Windows. Jusqu'à la 2.22, les caractères non UTF-8 étaient retirés sans le dire, accents compris.
 
 Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API reprend dans le rapport de synchronisation et donc dans le courriel d'alerte.
 
