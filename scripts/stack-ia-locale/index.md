@@ -83,7 +83,12 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | [`s10/mesure_s10.py`](s10/mesure_s10.py) | Campagne de mesure du §10 : pose le jeu de questions comme Open WebUI, évalue chaque réponse (document principal, éléments attendus et interdits, refus, ancrage), rapport JSON | Dans le conteneur rag-api, voir §10.3 |
 | [`s10/charge_s10.py`](s10/charge_s10.py) | Mesure de charge du §10.12 : 1 à N questions posées en même temps, après une mesure de référence de chaque question seule ; gain de chaque série, débit, écarts | `docker exec -it rag-api python3 /rag-pipeline/s10/charge_s10.py /rag-pipeline/s10/jeu_questions_s10.json --paliers 1,2,4,6,8 --etiquette ma-configuration` |
 | [`s10/mesure_juge.py`](s10/mesure_juge.py) | Ce que le juge détecte (§10.12) : réponses réelles et versions volontairement fausses (chiffre, fait inventé, documents intervertis), jugées plusieurs fois | `docker exec -w /app rag-api python3 /rag-pipeline/s10/mesure_juge.py /rag-pipeline/s10/jeu_questions_s10.json --etiquette reference` |
-| [`s10/jeu_questions_s10.json`](s10/jeu_questions_s10.json) | Jeu de 17 questions du corpus de démonstration, avec leurs critères ; à adapter à votre corpus | Lu par `mesure_s10.py` |
+| [`s10/jeu_questions_s10.json`](s10/jeu_questions_s10.json) | Jeu de 35 questions du corpus de démonstration Axonix (2.23.0), avec leurs critères ; à adapter à votre corpus | Lu par `mesure_s10.py` |
+| [`s10/rescorer.py`](s10/rescorer.py) | Réévalue des rapports de `mesure_s10.py` avec le jeu installé (mêmes réponses), après une correction de l'évaluation (2.23.0) | `docker exec rag-api python3 /rag-pipeline/s10/rescorer.py …` |
+| `test_reranker.py` | Tests unitaires du reclassement : formats Text Embeddings Inference et `llama-server`, clé, repli sur l'ordre de la recherche (2.23.0) | `docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py` |
+| `comparer_vecteurs.py` | Compare les vecteurs de Qdrant à ceux du serveur d'embedding vLLM, 50 extraits par collection (§2.5, 2.23.0) | Dans le conteneur `rag-api` |
+| [`reranker/demarrer-reranker.ps1`](reranker/demarrer-reranker.ps1) | Lance `llama-server --reranking` sur le serveur de modèles Windows, clé lue dans un fichier (§10.8, 2.23.0) | Tâche planifiée, sur le serveur de modèles |
+| [`corpus-demo/`](corpus-demo/generer.py) | Générateur du corpus de démonstration Axonix SA (fictif), de ses droits et du jeu de questions du §10 (2.23.0) | `python3 generer.py <dossier>`, puis `Droits-Corpus-Axonix.ps1` sur le serveur de fichiers |
 | `nginx/rag.conf` | Frontal HTTPS de la stack : Open WebUI sur le port 443, n8n sur le port 5678, `/sante` pour la supervision, refus des requêtes par adresse IP ou autre nom | Conteneur `nginx`, `deploy.sh` remplace `<NOM-STACK>`, voir §9.8 |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 
@@ -106,10 +111,12 @@ Fonctionnalités :
 
 - Retrieval Qdrant avec filtre ACL (`autorises[]` et `interdits[]`)
 - Extension de contexte par `chunk_index ± radius` sur le document le mieux classé : les chunks voisins sont récupérés dans l'ordre du document, le chunk pertinent reste dans le contexte. Contrôle ACL appliqué après le scroll
-- Retrieval hybride BM25 + vectoriel fusionné par Reciprocal Rank Fusion (RRF) :
-  l'index BM25 est construit en mémoire au démarrage depuis Qdrant et reconstruit
-  après chaque synchronisation réussie. Chaque chunk BM25 inclut son `chunk_index` pour que l'extension de contexte fonctionne même quand BM25 gagne le RRF. BM25 capture les termes exacts (noms de fichiers,
+- Retrieval hybride mots-clés (BM25) + vectoriel fusionné par Reciprocal Rank Fusion (RRF) :
+  depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (1.20 au minimum), sur un
+  index plein texte du champ `text`, avec le filtre des groupes autorisés dans la requête ;
+  index créé au démarrage s'il manque, sans réindexer. Chaque candidat porte son `chunk_index` pour que l'extension de contexte fonctionne même quand les mots-clés gagnent le RRF. Les mots-clés capturent les termes exacts (noms de fichiers,
   acronymes, commandes) là où la recherche vectorielle seule échoue sur les reformulations.
+- Reranker optionnel (2.23.0, §10.8) : `llama-server --reranking` sur la carte du serveur de modèles (`RERANKER_API=llamacpp`) ou conteneur du Compose ; ordre de la recherche conservé en cas d'échec
 - `TOP_K` configurable (défaut 20), validé en lab pour améliorer le recall sur les gros fichiers .md
 - `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire (sans objet avec vLLM, dont les modèles restent chargés)
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
@@ -135,7 +142,7 @@ JUDGE_MODEL=qwen3:4b-instruct     # qwen3:14b avec vLLM
 JUDGE_KEEP_ALIVE=2h       # Ollama seulement : rétention du juge en mémoire après chaque appel.
                           # Format : "5m", "2h", "-1" (indéfiniment).
                           # Passer à -1 une fois le GPU installé.
-EMBED_MODEL=nomic-embed-text
+EMBED_MODEL=bge-m3
 QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
 DOCUMENTATION_COLLECTION=documentation  # Collection pour la documentation technique
@@ -200,7 +207,7 @@ Fonctionnalités :
   - PDF : extraction page par page via `pdfplumber`. Les PDF scannés sans couche texte produisent un avertissement et tombent en quarantaine.
   - PowerPoint : extraction slide par slide sur les zones de texte. Les tables et SmartArt ne sont pas extraits.
 - Chunking par blocs de mots avec recouvrement configurable
-- Embedding via Ollama ou vLLM (`EMBED_API`, `nomic-embed-text` par défaut, configurable). Avec vLLM, un texte plus long que la fenêtre du serveur, refusé par celui-ci, est raccourci avec un avertissement
+- Embedding via Ollama ou vLLM (`EMBED_API`, `bge-m3` par défaut depuis la 2.23.0, configurable). Avec vLLM, un texte plus long que la fenêtre du serveur, refusé par celui-ci, est raccourci avec un avertissement
 - Vérification de la dimension du modèle contre la collection existante au démarrage
 - Indexation incrémentale : comparaison `content_hash` + paramètres d'indexation + `chunker_version`. Les fichiers non modifiés sont ignorés sans appel au serveur de modèles. ACL reportées sur les fichiers modifiés.
 - IDs de chunks déterministes + upsert : plus de fenêtre d'indisponibilité lors d'une réindexation
@@ -236,7 +243,7 @@ EMBED_API=ollama                                # « openai » avec vLLM
 VLLM_API_KEY=                                   # avec vLLM
 QDRANT_URL=http://localhost:6333
 ORG_OWNER=<Nom de l'organisation>
-EMBED_MODEL=nomic-embed-text
+EMBED_MODEL=bge-m3
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8         # Seuil minimal en mots pour conserver un chunk (8 préserve les sections courtes des .md)
@@ -383,10 +390,7 @@ PyJWT
 # Vector store
 qdrant-client
 
-# Retrieval hybride BM25
-# Index en mémoire : ~1 Mo pour 1 000 chunks, ~200 Mo pour 50 000 chunks.
-# Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (voir §10).
-rank-bm25
+# Recherche par mots-clés : dans Qdrant depuis la 2.23.0 (qdrant-client), rank-bm25 retiré
 
 # Résolution LDAP
 ldap3
@@ -425,12 +429,12 @@ Structure du payload stocké pour chaque chunk :
   "source_id": "md5-tronqué",
   "org_name": "ClientA",
   "detection_niveau": 2,
-  "embed_model": "nomic-embed-text",
+  "embed_model": "bge-m3",
   "chunk_index": 0,
   "chunk_size": 150,
-  "chunker_version": 2,
+  "chunker_version": 3,
   "content_hash": "3c7db804...",
-  "autorises": ["DOMAINE\\GRP-Clients", "DOMAINE\\Admins du domaine"],
+  "autorises": ["S-1-5-21-<domaine>-1105", "S-1-5-21-<domaine>-512"],
   "interdits": [],
   "acl_updated_at": "2026-09-14T10:06:02Z"
 }

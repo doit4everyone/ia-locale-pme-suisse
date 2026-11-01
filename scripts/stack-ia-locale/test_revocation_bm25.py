@@ -1,23 +1,26 @@
 """
-test_revocation_bm25.py : test en lab d'un droit retiré sur le chemin BM25 (2.21.3, point 10).
+test_revocation_bm25.py : test en lab d'un droit retiré sur le chemin BM25 (2.21.3, point 10 ; 2.23.0).
 
-Reproduit, sur le vrai Qdrant, le cas corrigé en 2.21.3 : un droit retiré dans
-Qdrant après la construction de l'index BM25, sans reconstruction de l'index.
+Vérifie, sur le vrai Qdrant, qu'un droit retiré dans Qdrant est respecté aussitôt
+par la recherche par mots-clés. Jusqu'à la 2.22, cette recherche passait par un
+index en mémoire, instantané des droits (corrigé en 2.21.3 par la relecture
+revalider_bm25). Depuis la 2.23.0, elle est faite par Qdrant avec le filtre
+d'accès : il n'y a plus d'instantané, et la relecture reste en seconde barrière.
 
 Déroulement :
-  1. construit un index BM25 dans ce processus, comme la RAG API au démarrage ;
-  2. pose la question au nom du compte : le document doit être renvoyé ;
+  1. met en place l'index plein texte, comme la RAG API au démarrage ;
+  2. pose la question au nom du compte : le document doit être renvoyé, et
+     trouvé par la recherche par mots-clés ;
   3. retire le droit dans Qdrant : les extraits du document ne sont plus
      autorisés qu'à un groupe fictif (« test-revocation-bm25 ») ;
-  4. repose la question SANS reconstruire l'index, avec puis sans extension
-     du contexte : le document ne doit plus être renvoyé ;
+  4. repose la question, avec puis sans extension du contexte : le document ne
+     doit plus être renvoyé, ni par la recherche par mots-clés seule ;
   5. remet les droits d'origine, dans tous les cas, puis les contrôle.
 
 Le test ne fait que RETIRER un droit, pendant quelques secondes : il ne donne
 accès à rien. Pendant ce temps, le document est invisible pour tous.
 
-Sur une installation en 2.21.2 ou avant : FUITE attendue (le défaut).
-Après la 2.21.3 : OK attendu.
+Demande la RAG API 2.23.0 ou plus, et Qdrant 1.20 ou plus.
 
 Lancement, depuis la VM, dans le conteneur de la RAG API, hors de l'heure
 pleine (la synchronisation horaire réécrit les droits) :
@@ -39,9 +42,10 @@ import sys
 sys.path.insert(0, "/app")
 import main  # code de la RAG API, dans le conteneur
 
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny, MatchText
 
 GROUPE_FICTIF = "test-revocation-bm25"
+COLLECTIONS = (main.COLLECTION, main.DOCUMENTATION_COLLECTION)
 
 
 def correspond(source: str, document: str) -> bool:
@@ -53,28 +57,53 @@ def sources_trouvees(chunks: list[dict], document: str) -> list[str]:
     return sorted({c["source"] for c in chunks if correspond(c.get("source", ""), document)})
 
 
-def trouve_par_bm25(question: str, document: str) -> bool:
-    """Le document figure-t-il parmi les candidats BM25 de la question ?"""
-    if main._bm25_index is None:
-        return False
-    scores = main._bm25_index.get_scores(question.lower().split())
-    classes = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:main.CANDIDATS * 2]
-    return any(s >= 0.01 and correspond(main._bm25_chunks[i]["source"], document) for i, s in classes)
+def filtre_acces(groupes: list[str]) -> Filter:
+    """Le filtre ALLOW de search_qdrant."""
+    return Filter(must=[FieldCondition(key="autorises", match=MatchAny(any=groupes))])
 
 
-def question_automatique(document: str, nombre: int = 4) -> str:
-    """Les mots les plus rares du document, d'après l'index BM25 (idf le plus élevé).
-    Mots de cinq lettres au moins, sans chiffres, pris dans ses premiers extraits."""
-    if main._bm25_index is None:
-        return ""
-    idf = main._bm25_index.idf
-    mots: dict[str, float] = {}
-    extraits = [c for c in main._bm25_chunks if correspond(c["source"], document)][:3]
-    for c in extraits:
-        for m in c["text"].lower().split():
-            if len(m) >= 5 and m.isalpha():
-                mots[m] = idf.get(m, 0.0)
-    choisis = sorted(mots, key=lambda m: mots[m], reverse=True)[:nombre]
+def trouve_par_mots_cles(question: str, document: str, groupes: list[str]) -> bool:
+    """Le document figure-t-il parmi les candidats de la recherche par mots-clés ?"""
+    candidats = main.recherche_mots_cles(question, filtre_acces(groupes), main.CANDIDATS)
+    return any(correspond(c["source"], document) for c in candidats)
+
+
+def trouver_source(document: str) -> tuple[str, str] | None:
+    """(collection, chemin complet) du document, d'après les sources indexées."""
+    for collection in COLLECTIONS:
+        offset = None
+        while True:
+            try:
+                page, offset = main.qdrant.scroll(collection_name=collection, limit=2_000, offset=offset,
+                                                  with_payload=["source"])
+            except Exception:
+                break  # collection absente
+            for p in page:
+                if correspond(p.payload.get("source", ""), document):
+                    return collection, p.payload["source"]
+            if offset is None:
+                break
+    return None
+
+
+def question_automatique(collection: str, source: str, nombre: int = 4) -> str:
+    """Les mots les plus rares du document dans sa collection (le moins d'extraits
+    qui les contiennent, d'après l'index plein texte). Mots de cinq lettres au
+    moins, sans chiffres, pris dans ses premiers extraits."""
+    page, _ = main.qdrant.scroll(
+        collection_name=collection, limit=3, with_payload=["text"],
+        scroll_filter=Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))]))
+    mots = {m.strip(".,;:!?()«»\"'").lower() for p in page for m in p.payload.get("text", "").split()}
+    rarete = {}
+    for m in mots:
+        if len(m) >= 5 and m.isalpha():
+            try:
+                rarete[m] = main.qdrant.count(
+                    collection_name=collection, exact=True,
+                    count_filter=Filter(must=[FieldCondition(key=main.CHAMP_TEXTE, match=MatchText(text=m))])).count
+            except Exception:
+                continue
+    choisis = sorted((m for m in rarete if rarete[m] > 0), key=lambda m: rarete[m])[:nombre]
     return " ".join(choisis)
 
 
@@ -86,7 +115,7 @@ def rechercher(question: str, groupes: list[str], compte: str, seuil: float) -> 
 def lire_droits(source: str) -> list[tuple]:
     """(collection, identifiant, autorises, interdits) de chaque extrait du document."""
     droits = []
-    for collection in (main.COLLECTION, main.DOCUMENTATION_COLLECTION):
+    for collection in COLLECTIONS:
         offset = None
         while True:
             try:
@@ -125,6 +154,10 @@ def principal() -> int:
     ap.add_argument("--question", default="", help="facultatif : mots rares du document")
     a = ap.parse_args()
 
+    if not hasattr(main, "recherche_mots_cles"):
+        print("NON CONCLUANT : RAG API antérieure à la 2.23.0 (index BM25 en mémoire). "
+              "Utiliser le test_revocation_bm25.py de sa version.")
+        return 3
     groupes = main.get_user_groups(a.compte)
     if not groupes:
         print(f"NON CONCLUANT : droits de {a.compte} introuvables dans l'annuaire")
@@ -137,23 +170,28 @@ def principal() -> int:
     # contrôle est désactivé ici, dans ce processus de test uniquement.
     if hasattr(main, "ACL_AGE_MAX_HEURES"):
         main.ACL_AGE_MAX_HEURES = 0
-    main.build_bm25_index()
-    if not any(correspond(c["source"], a.document) for c in main._bm25_chunks):
-        print(f"NON CONCLUANT : aucun extrait de « {a.document} » dans l'index. Vérifier le nom du fichier.")
+    main.preparer_index_texte()
+    trouve = trouver_source(a.document)
+    if not trouve:
+        print(f"NON CONCLUANT : aucun extrait de « {a.document} » dans Qdrant. Vérifier le nom du fichier.")
+        return 3
+    collection, source = trouve
+    if collection not in main._collections_texte:
+        print(f"NON CONCLUANT : index plein texte absent dans '{collection}' (Qdrant 1.20 ou plus requis, "
+              "voir le journal [BM25])")
         return 3
     if not a.question:
-        a.question = question_automatique(a.document)
+        a.question = question_automatique(collection, source)
     print(f"Question : {a.question}")
-    if not trouve_par_bm25(a.question, a.document):
+    if not trouve_par_mots_cles(a.question, source, groupes):
         print("NON CONCLUANT : la recherche par mots-clés ne trouve pas ce document. "
               "Choisir des mots plus rares du document.")
         return 3
-    avant = sources_trouvees(rechercher(a.question, groupes, a.compte, seuil_config), a.document)
+    avant = sources_trouvees(rechercher(a.question, groupes, a.compte, seuil_config), source)
     if not avant:
         print("NON CONCLUANT : le document n'est pas renvoyé avant le retrait du droit. "
               "Choisir une autre question.")
         return 3
-    source = avant[0]
     droits = lire_droits(source)
     print(f"Document : {source} ({len(droits)} extrait(s)), renvoyé avant le retrait : oui")
 
@@ -161,15 +199,19 @@ def principal() -> int:
     restaure = False
     try:
         par_collection: dict[str, list] = {}
-        for collection, pid, _, _ in droits:
-            par_collection.setdefault(collection, []).append(pid)
-        for collection, ids in par_collection.items():
-            main.qdrant.set_payload(collection_name=collection, points=ids,
+        for coll, pid, _, _ in droits:
+            par_collection.setdefault(coll, []).append(pid)
+        for coll, ids in par_collection.items():
+            main.qdrant.set_payload(collection_name=coll, points=ids,
                                     payload={"autorises": [GROUPE_FICTIF], "interdits": []})
-        print(f"Droit retiré dans Qdrant (autorisé à « {GROUPE_FICTIF} » seulement), index BM25 inchangé")
+        print(f"Droit retiré dans Qdrant (autorisé à « {GROUPE_FICTIF} » seulement)")
+        mots_cles = trouve_par_mots_cles(a.question, source, groupes)
+        verdicts.append("FUITE" if mots_cles else "OK")
+        print(f"{verdicts[-1]:6} recherche par mots-clés seule : document "
+              f"{'trouvé' if mots_cles else 'non trouvé'}")
         for seuil, libelle in ((seuil_config, "avec extension du contexte (réglage actuel)"),
                                (2.0, "sans extension du contexte")):
-            apres = sources_trouvees(rechercher(a.question, groupes, a.compte, seuil), a.document)
+            apres = sources_trouvees(rechercher(a.question, groupes, a.compte, seuil), source)
             verdict = "FUITE" if apres else "OK"
             verdicts.append(verdict)
             print(f"{verdict:6} {libelle} : document {'renvoyé' if apres else 'non renvoyé'}")

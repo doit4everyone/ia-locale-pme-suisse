@@ -234,9 +234,9 @@ Le retrieval combine deux approches fusionnées par Reciprocal Rank Fusion (RRF)
 | Vectorielle (Qdrant) | Similarité sémantique, reformulations | Moins efficace sur les termes exacts |
 | BM25 (mots-clés) | Termes exacts : noms de fichiers, acronymes, commandes | Ne comprend pas le sens |
 
-L'index BM25 est construit en mémoire au démarrage du conteneur et reconstruit après chaque synchronisation. Il couvre les deux collections (`documents` et `documentation`). Chaque chunk BM25 inclut son `chunk_index` : si un chunk BM25 gagne le RRF, l'extension de contexte peut récupérer ses voisins par `chunk_index ± radius` au lieu de faire un scroll aléatoire.
+Depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (1.20 au minimum), sur un index plein texte du champ `text` de chaque collection (`documents` et `documentation`), avec le score BM25 (§3.3). L'index fait partie de la collection : il est tenu à jour par Qdrant à chaque écriture, sans reconstruction au démarrage ni après la synchronisation. Les mots-clés sont classés par rang dans chaque collection, leurs scores ne se comparant pas d'une collection à l'autre. Chaque candidat porte son `chunk_index` : si un extrait trouvé par mots-clés gagne le RRF, l'extension de contexte récupère ses voisins par `chunk_index ± radius`.
 
-**Les droits ne viennent pas de l'index.** L'index est un instantané : entre deux reconstructions, il garde les droits du moment où il a été construit. Depuis la 2.21.3, chaque candidat trouvé par mots-clés est relu dans Qdrant avant d'être utilisé, et les droits sont contrôlés sur cette lecture ; un extrait disparu ou devenu interdit est écarté (§16.5.1).
+**Les droits.** Le filtre des groupes autorisés (`autorises`) est passé à Qdrant avec la requête, comme pour la recherche vectorielle. Les refus explicites (`interdits`) sont appliqués ensuite, sur les candidats renvoyés (`check_access`), puis chaque candidat est relu dans Qdrant avant d'être utilisé (§16.5.1, depuis la 2.21.3). Jusqu'à la 2.22, l'index était construit en mémoire de la RAG API : un instantané des droits entre deux reconstructions.
 
 ### Note sur les PDF avec tables des matières
 

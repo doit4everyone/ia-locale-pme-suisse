@@ -12,7 +12,7 @@ Guides décisionnels, procédures RAG, scripts Python. Publié à titre document
 
 ### Guides décisionnels
 
-Deux documents PDF destinés aux décideurs et consultants IT : le guide décisionnel « IA locale pour PME suisse » (architectures, TCO sur 3 ans, performances d'inférence, ingénierie RAG, sécurité nLPD) et le plan d'apprentissage RAG local en 17 phases (12 sur file server Windows, 3 pour les connecteurs Microsoft 365, 2 pour la preuve du cloisonnement et la mesure), refondu en octobre 2026 pour refléter la stack validée en lab, sur CPU puis sur GPU.
+Deux documents PDF destinés aux décideurs et consultants IT : le guide décisionnel « IA locale pour PME suisse » (architectures, TCO sur 3 ans, performances d'inférence, ingénierie RAG, sécurité nLPD) et le plan d'apprentissage RAG local en 17 phases (12 sur file server Windows, 3 pour les connecteurs Microsoft 365, 2 pour la preuve du cloisonnement et la mesure), refondu en octobre 2026 pour refléter la stack validée en lab, sur CPU puis sur GPU. Les deux documents sont des photographies datées : le guide décisionnel au 31 août 2026 (prix et configurations indicatifs), le plan d'apprentissage au 11 octobre 2026, avant `bge-m3`, la recherche par mots-clés dans Qdrant et les SID ; le guide en ligne fait foi.
 
 ### Guide de déploiement stack IA locale
 
@@ -22,11 +22,11 @@ Procédures pas à pas pour déployer un pipeline RAG local opérationnel sur VM
 
 - Les utilisateurs s'authentifient via leur compte Active Directory dans Open WebUI.
 - Chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
-- Les réponses du LLM sont vérifiées par un juge LLM secondaire avant affichage.
+- Les réponses du LLM sont évaluées par un juge LLM secondaire : une réponse non ancrée est bloquée sur `/query`, et signalée par un avertissement sur l'interface compatible OpenAI utilisée par Open WebUI (§8.3).
 - Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
-Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + n8n + Nginx, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS, et un serveur de modèles au choix : Ollama pour un à deux utilisateurs simultanés, vLLM pour plusieurs (§2). Retrieval hybride BM25+vectoriel (RRF), indexation incrémentale. Validé en lab sur CPU (i7-14700, 64 Go DDR5), puis sur GPU (NVIDIA RTX 5060 Ti 16 Go, §10), avec les deux moteurs.
+Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + n8n + Nginx, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS, et un serveur de modèles au choix : Ollama pour un à deux utilisateurs simultanés, vLLM pour plusieurs (§2). Retrieval hybride mots-clés (BM25 calculé par Qdrant depuis la 2.23.0) et vectoriel (RRF), embedding `bge-m3`, reranker optionnel sur la carte du serveur de modèles, indexation incrémentale. Validé en lab sur CPU (i7-14700, 64 Go DDR5), puis sur GPU (NVIDIA RTX 5060 Ti 16 Go, §10), avec les deux moteurs.
 
 **Partie 3 (§11 à §17) : Microsoft 365.** Publiée :
 
@@ -38,11 +38,11 @@ Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entrepr
 - §16 : contrôle du cloisonnement. Test de non-divulgation automatisé, rejoué après chaque synchronisation avec alerte par courriel, et durcissement de la stack à la suite d'une revue externe.
 - §17 : gouvernance. Responsabilités, rotation des secrets et certificats, politique de corpus, droit à l'effacement, audit, et ce que la nLPD exige au-delà de la technique.
 
-**Sécurité de la stack (version 2.21) :** accès en HTTPS derrière un frontal Nginx, sous un nom DNS propre à la stack ; identité de l'utilisateur signée entre Open WebUI et la RAG API ; démarrage refusé sur un secret d'exemple ; images Docker et dépendances figées à la version exacte ; supervision externe ; procédure de renouvellement du certificat et matrice RACI. Depuis la 2.21.3, les droits des résultats de la recherche par mots-clés sont relus dans Qdrant à chaque question (§16.5.1).
+**Sécurité de la stack (depuis la 2.21) :** accès en HTTPS derrière un frontal Nginx, sous un nom DNS propre à la stack ; identité de l'utilisateur signée entre Open WebUI et la RAG API ; démarrage refusé sur un secret d'exemple ; images Docker et dépendances figées à la version exacte ; supervision externe ; procédure de renouvellement du certificat et matrice RACI. Depuis la 2.21.3, les droits des résultats de la recherche par mots-clés sont relus dans Qdrant à chaque question (§16.5.1). Depuis la 2.22, les droits sont comparés en SID : ACL lues par `smbcacls --numeric`, groupes de l'utilisateur par `tokenGroups` (§16.5.3). Depuis la 2.23.0, le filtre des groupes autorisés s'applique aussi pendant la recherche par mots-clés, dans Qdrant.
 
-**Validation :** la procédure complète a été rejouée de bout en bout sur une VM neuve le 19 octobre 2026 (déploiement, certificat de l'autorité interne, indexation, droits, test de cloisonnement sans aucune fuite, redémarrage). C'est un lab validé, pas une installation de production : le §17.7 liste ce qu'il reste à faire pour y arriver.
+**Validation :** la procédure complète a été rejouée de bout en bout sur une VM neuve à un seul disque le 1er novembre 2026, en version 2.23.0 (volume chiffré et TPM, déploiement, indexation, droits, test de cloisonnement sans aucune fuite, mesure de la qualité des réponses, sauvegarde et restauration de Qdrant, redémarrage). C'est un lab validé, pas une installation de production : le §17.7 liste ce qu'il reste à faire pour y arriver.
 
-Les versions validées sont publiées sous forme de [Releases](https://github.com/doit4everyone/ia-locale-pme-suisse/releases) ; le [CHANGELOG](docs/stack-ia-locale/CHANGELOG.md) détaille chaque version. La Release v2.12.0 fige les scripts des Parties 1 et 2 dans leur état d'origine.
+Les versions validées sont publiées sous forme de [Releases](https://github.com/doit4everyone/ia-locale-pme-suisse/releases) ; le [CHANGELOG](docs/stack-ia-locale/CHANGELOG.md) détaille chaque version. La Release v2.12.0 fige les scripts des Parties 1 et 2 dans leur état d'origine : c'est une référence historique, à ne pas installer.
 
 ### Scripts Python
 
@@ -52,8 +52,8 @@ Scripts du pipeline RAG local, publiés avec les valeurs sensibles remplacées p
 |---|---|
 | `indexer.py` | Indexation SMB incrémentale, extraction `.docx` `.pdf` `.pptx` `.txt` `.md`, embedding Qdrant, deux collections |
 | `acl_resolver.py` | Lecture des ACL NTFS, propagation vers Qdrant, nettoyage des chunks orphelins |
-| `main.py` | RAG API FastAPI : retrieval hybride BM25+vectoriel (RRF), génération, groundedness check, journalisation nLPD, synthèse Teams |
-| `auth.py` | Résolution des groupes AD via LDAP (récursive), extension Entra ID via Microsoft Graph, filtrage ACL |
+| `main.py` | RAG API FastAPI : retrieval hybride mots-clés (dans Qdrant) et vectoriel (RRF), reranker optionnel, génération, groundedness check, journalisation nLPD, synthèse Teams |
+| `auth.py` | Résolution des SID de l'utilisateur et de ses groupes AD (`tokenGroups`, LDAP), extension Entra ID via Microsoft Graph, filtrage ACL |
 | `teams.py` | Synthèse des réunions Teams : lecture VTT, prompt, contrôles déterministes, brouillon |
 | `teams_graph.py` | Récupération des transcriptions Teams via Microsoft Graph |
 | `sp_indexer.py` | Indexation SharePoint Online avec traduction des permissions |

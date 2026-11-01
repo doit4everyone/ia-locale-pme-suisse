@@ -128,7 +128,7 @@ echo "/dev/mapper/rag-donnees /srv/rag-donnees ext4 defaults,nofail,x-systemd.de
 
 `--tpm2-pcrs=7` lie la clé à l'état du démarrage sécurisé : c'est le choix le plus stable, qui ne casse pas à chaque mise à jour du noyau. `nofail` garantit que le démarrage ne se bloque jamais si le disque ne s'ouvre pas.
 
-**Une exception : la mise à jour de la liste de révocation du Secure Boot (UEFI dbx).** Le PCR 7 mesure aussi cette liste. Ubuntu la propose par `fwupd` (« 1 device has a firmware upgrade available » à la connexion ; `fwupdmgr get-upgrades` affiche « UEFI dbx »). Ce sont des mises à jour de sécurité, à appliquer, mais après chacune **le TPM refuse la clé** au redémarrage suivant : `/srv/rag-donnees` reste fermé, la stack ne démarre pas, et le démarrage n'est pas bloqué (`nofail`). Constaté dans le lab le 24 octobre 2026 (dbx 20230501 → 20260707, VMware Workstation). La procédure, avec la stack arrêtée de ce fait :
+**Une exception : la mise à jour de la liste de révocation du Secure Boot (UEFI dbx).** Le PCR 7 mesure aussi cette liste. Ubuntu la propose par `fwupd` (« 1 device has a firmware upgrade available » à la connexion). Pour la chercher : `fwupdmgr refresh --force`, puis `fwupdmgr get-upgrades`, où elle apparaît sous « UEFI dbx » avec une flèche de version (`Current version: 20230501`, puis `New version: 20260707`). Sans `refresh`, des métadonnées périmées peuvent la masquer ; et le nom « UEFI dbx » figure aussi dans la liste des appareils **sans** mise à jour : seule la version fait foi (rejeu du 1er novembre 2026). Ce sont des mises à jour de sécurité, à appliquer, mais après chacune **le TPM refuse la clé** au redémarrage suivant : `/srv/rag-donnees` reste fermé, la stack ne démarre pas, et le démarrage n'est pas bloqué (`nofail`). Constaté dans le lab le 24 octobre 2026 (dbx 20230501 → 20260707, VMware Workstation), et de nouveau le 1er novembre 2026 sous VMware Workstation 26.0.0 : procédure ci-dessous rejouée, volume rouvert par le TPM au redémarrage suivant. La procédure, avec la stack arrêtée de ce fait :
 
 ```bash
 fwupdmgr update          # puis redémarrer
@@ -293,7 +293,7 @@ La plupart des entreprises disposent déjà d'un outil de sauvegarde de machines
 | Élément | Où | Reconstructible ? |
 |---|---|---|
 | Index Qdrant (texte des chunks, permissions) | `qdrant_data`, sur le disque chiffré | **Oui, à partir des sources** : le serveur de fichiers et SharePoint font foi. Il suffit de relancer l'indexation et la synchronisation des droits (§0, étapes 12 et 13). Le temps nécessaire dépend du corpus et n'a pas été mesuré pour une restauration |
-| Index BM25 | En mémoire de la RAG API | Oui : reconstruit à chaque démarrage et après chaque synchronisation |
+| Index plein texte (recherche par mots-clés, 2.23.0) | Dans les collections Qdrant, `qdrant_data` | Oui : la RAG API le recrée à son démarrage à partir des extraits déjà stockés, sans réindexer |
 | Open WebUI (comptes, historique des conversations) | `openwebui_data` | **Non** |
 | n8n (workflows, identifiants) | `n8n_data` | **Non** (les workflows sont aussi dans le dépôt, les identifiants non) |
 | `.env`, `/etc/rag-certs` (clés des applications Entra) | Disque chiffré | Non pour le `.env` ; les certificats se régénèrent mais exigent de les réinscrire dans les App Registrations |

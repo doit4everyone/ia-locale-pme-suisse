@@ -2,7 +2,7 @@
 # =============================================================================
 # deploy.sh : Déploiement de la stack IA locale (conçue pour faciliter la conformité à la nLPD)
 # DoIt4Everyone | https://doit4everyone.github.io
-# Version : beta (2.22.5)
+# Version : 2.23.0
 #
 # Usage : cloner le dépôt, puis depuis scripts/stack-ia-locale/ :
 #   chmod +x deploy.sh && sudo ./deploy.sh
@@ -13,7 +13,7 @@
 #   - Certificat CA du DC exporté si disponible (voir §9.2)
 #   - DNS de la VM : uniquement les serveurs DNS du domaine (§0, étape 4)
 #   - Serveur de modèles prêt et joignable depuis la VM (voir §2 du guide) :
-#     Ollama  : ollama pull nomic-embed-text && ollama pull qwen3:14b && ollama pull qwen3:4b-instruct
+#     Ollama  : ollama pull bge-m3 && ollama pull qwen3:14b && ollama pull qwen3:4b-instruct
 #     vLLM    : serveurs de génération (port 8000) et d'embedding (port 8001)
 #               lancés, clé d'API VLLM_API_KEY à portée de main
 # =============================================================================
@@ -129,7 +129,7 @@ if [ "$MOTEUR_CHOIX" = "1" ]; then
     TAGS=$(curl -s -m 10 "${LLM_URL}/api/tags") \
         || error "Ollama injoignable sur ${LLM_URL}. Vérifier OLLAMA_HOST=0.0.0.0 et le pare-feu de la machine (§2.3)."
 
-    for m in "nomic-embed-text" "qwen3:14b" "qwen3:4b-instruct"; do
+    for m in "bge-m3" "qwen3:14b" "qwen3:4b-instruct"; do
         if echo "$TAGS" | grep -qE "\"${m}[\":]"; then
             ok "Modele $m present"
         else
@@ -149,7 +149,7 @@ else
     [[ -n "$VLLM_API_KEY" ]] || error "La clé d'API vLLM ne peut pas etre vide (§2.4.4)."
 
     # Tester les deux serveurs vLLM : sans clé (refus attendu), puis avec la clé
-    for couple in "de génération|${LLM_URL}|qwen3:14b" "d'embedding|${EMBED_URL}|nomic-embed-text"; do
+    for couple in "de génération|${LLM_URL}|qwen3:14b" "d'embedding|${EMBED_URL}|bge-m3"; do
         IFS='|' read -r ROLE URL MODELE <<< "$couple"
         info "Test du serveur vLLM ${ROLE} sur ${URL}..."
         CODE_SANS=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "${URL}/v1/models" || true)
@@ -401,6 +401,29 @@ mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data}
 chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 mkdir -p /root/rag-pipeline
 mkdir -p /var/log/rag
+# Rotation et rétention du journal nLPD (§9.4.4) : un an, fichiers en 640 (2.23.0).
+# Jusqu'ici à créer à la main : sans elle, le journal grandissait sans fin et la
+# rétention annoncée n'était pas appliquée (revue externe du 31 octobre 2026).
+# Une configuration existante, peut-être adaptée par l'administrateur, est gardée.
+if [ ! -f /etc/logrotate.d/rag-nlpd ]; then
+    cat > /etc/logrotate.d/rag-nlpd << 'ROTEOF'
+/var/log/rag/rag-queries.jsonl {
+    daily
+    rotate 365
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 root root
+    dateext
+    dateformat -%Y%m%d
+}
+ROTEOF
+    chmod 644 /etc/logrotate.d/rag-nlpd
+    ok "Rotation du journal nLPD : /etc/logrotate.d/rag-nlpd (365 jours)"
+else
+    info "Rotation du journal nLPD : /etc/logrotate.d/rag-nlpd existant, conservé"
+fi
 # Registre des documents retirés de la recherche (§16.5.2). Créé vide, et daté,
 # sur une installation NEUVE seulement : le corpus est vide ou ses droits viennent
 # d'être résolus. Sur une installation existante, un registre absent est anormal :
@@ -481,6 +504,7 @@ if [ -f "test_cloisonnement.py" ]; then
 fi
 # Tests unitaires du contrôle des citations et des droits sur la recherche par
 # mots-clés (lancés à l'étape 10), test en lab d'un droit retiré (§16.5.1)
+# et contrôle des vecteurs entre Ollama et vLLM (comparer_vecteurs.py, §2.5)
 # Les tests de sécurité sont exigés dans le dépôt (2.21.8 ; test_citations.py,
 # qui contrôle aussi la lecture du verdict du juge, depuis la 2.21.10) : sinon,
 # une ancienne copie restée dans /root/rag-pipeline serait lancée à leur place.
@@ -490,7 +514,7 @@ for f in test_citations.py test_sid.py test_revalidation_bm25.py test_echec_droi
         exit 1
     fi
 done
-for f in test_citations.py test_sid.py test_revalidation_bm25.py test_revocation_bm25.py test_echec_droits.py; do
+for f in test_citations.py test_sid.py test_revalidation_bm25.py test_revocation_bm25.py test_echec_droits.py test_reranker.py comparer_vecteurs.py; do
     [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
 done
 for f in test_citations.py test_sid.py test_revalidation_bm25.py test_echec_droits.py; do
@@ -499,6 +523,14 @@ for f in test_citations.py test_sid.py test_revalidation_bm25.py test_echec_droi
         exit 1
     fi
 done
+# Campagne de mesure du §10 : script, jeu de questions et réévaluation (2.23.0).
+# Sans cette copie, la commande du §10.3 ne trouvait pas /rag-pipeline/s10/.
+if [ -d "s10" ]; then
+    mkdir -p /root/rag-pipeline/s10
+    for f in s10/mesure_s10.py s10/charge_s10.py s10/mesure_juge.py s10/rescorer.py s10/jeu_questions_s10.json; do
+        [ -f "$f" ] && cp "$f" "/root/rag-pipeline/$f"
+    done
+fi
 # Service de déchiffrement Purview (§14), construit seulement avec le profil « purview »
 if [ -d "mip-service" ]; then
     mkdir -p /root/rag-stack/mip-service
@@ -530,7 +562,7 @@ LLM_BASE_URL=${LLM_URL}
 EMBED_BASE_URL=${EMBED_URL}
 JUDGE_BASE_URL=
 LLM_MODEL=qwen3:14b
-EMBED_MODEL=nomic-embed-text
+EMBED_MODEL=bge-m3
 JUDGE_MODEL=${JUDGE_MODEL}
 VLLM_API_KEY=${VLLM_API_KEY}
 # Avec Ollama seulement
@@ -817,7 +849,7 @@ source .venv/bin/activate
 # --retries et --timeout : une coupure passagère vers pypi.org faisait échouer le
 # déploiement (rejeu en lab). Le script reste relançable après une erreur.
 pip install -q --retries 10 --timeout 60 qdrant-client python-docx pdfplumber python-pptx httpx \
-    ldap3 impacket rank-bm25 smbprotocol \
+    ldap3 impacket smbprotocol \
     || error "Installation des paquets Python échouée (réseau vers pypi.org ?). Relancer deploy.sh : il reprend sans dommage. Ne pas ajouter de DNS public pour contourner (§0, « En cas de problème »)."
 
 ok "Environnement Python prêt"
@@ -962,6 +994,25 @@ if est_oui "$LANCER_INDEXATION"; then
                         --rapport "/var/log/rag/rapport_acl_initial_${HORODATAGE}.json" ) >>"$JOURNAL" 2>&1; then
                 ok "Droits d'accès recopiés dans l'index"
                 INDEXATION_FAITE=oui
+                # Index plein texte de la recherche par mots-clés (2.23.0) : la RAG API
+                # le crée à son démarrage et après chaque /admin/sync. Elle a démarré
+                # avant l'indexation, quand les collections n'existaient pas : sans ce
+                # redémarrage, la recherche par mots-clés restait inactive jusqu'à la
+                # première synchronisation n8n, sans message (rejeu du 1er novembre 2026).
+                info "Redémarrage de la RAG API : index de la recherche par mots-clés..."
+                ( cd /root/rag-stack && docker compose restart rag-api ) >>"$JOURNAL" 2>&1
+                INDEX_TEXTE=non
+                for _ in $(seq 1 30); do
+                    if docker logs --since 2m rag-api 2>&1 | grep -q "Recherche par mots-clés dans Qdrant"; then
+                        INDEX_TEXTE=oui; break
+                    fi
+                    sleep 2
+                done
+                if [ "$INDEX_TEXTE" = "oui" ]; then
+                    ok "Recherche par mots-clés active : $(docker logs --since 2m rag-api 2>&1 | grep -o 'Recherche par mots-clés dans Qdrant.*' | tail -1)"
+                else
+                    warn "Recherche par mots-clés non confirmée : docker logs rag-api | grep BM25 (§0, En cas de problème)."
+                fi
             else
                 warn "Résolution des droits en échec : voir ${JOURNAL} (fin du fichier)."
                 warn "Tant qu'elle n'a pas réussi, les documents restent invisibles pour tous (refus par défaut)."

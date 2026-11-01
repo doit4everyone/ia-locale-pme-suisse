@@ -134,7 +134,7 @@ Set-DossierACLPropre "D:\FileService\SERVICE INFO\ADMIN" "GRP-ServiceInfo"
 
 Casser l'héritage retire aussi, sur ces dossiers, la lecture du compte d'indexation accordée plus haut dans l'arborescence : `Set-AccesIndexationRAG.ps1` (§5.2.4) la rétablit.
 
-> **Sur les accès nominatifs :** une ACL posée directement sur un compte utilisateur (`DOMAINE\prenom.nom`) fonctionne et est correctement lue par `acl_resolver.py`. Elle apparaîtra dans `autorises[]` sous la forme `DOMAINE\prenom.nom`, et `auth.py` l'ajoutera automatiquement dans les groupes résolus de l'utilisateur concerné (voir §5.5). C'est un comportement intentionnel, utile pour les exceptions ponctuelles. Par hygiène, préférer les groupes pour les accès structurels et réserver les accès nominatifs aux exceptions documentées.
+> **Sur les accès nominatifs :** une ACL posée directement sur un compte utilisateur (`DOMAINE\prenom.nom`) fonctionne et est correctement lue par `acl_resolver.py`. Elle apparaîtra dans `autorises[]` sous la forme du SID du compte (depuis la 2.22.0 ; `DOMAINE\prenom.nom` auparavant), et `auth.py` inclut le SID du compte parmi ceux de l'utilisateur (voir §5.5). C'est un comportement intentionnel, utile pour les exceptions ponctuelles. Par hygiène, préférer les groupes pour les accès structurels et réserver les accès nominatifs aux exceptions documentées.
 
 ### §5.2.4 Compte de service svc-rag
 
@@ -356,6 +356,15 @@ Depuis la 2.20.4, deux cas s'arrêtent avant même ce seuil, toujours sans modif
 - **Authentification refusée** (`NT_STATUS_LOGON_FAILURE`, `NT_STATUS_ACCOUNT_LOCKED_OUT`, compte désactivé ou expiré) : arrêt au **premier** fichier. Continuer sur les autres verrouillerait `svc-rag` dans l'Active Directory, et avec lui la connexion de tous les utilisateurs. Cas vécu dans le lab : un test avec un mot de passe faux a verrouillé le compte dès le quatrième fichier.
 - **Nom du serveur de fichiers introuvable** : contrôle DNS avant la première lecture. Sans lui, chaque fichier échouait avec `NT_STATUS_INVALID_PARAMETER`, un message qui n'oriente pas vers le DNS.
 
+**Dossier illisible pendant le parcours (2.23.0).** Le garde-fou compte les fichiers trouvés dont l'ACL ne se lit pas. Un **dossier** que le parcours ne peut pas ouvrir est un autre événement : ses fichiers ne sont même pas trouvés. Jusqu'à la 2.22, il était ignoré sans message, et ses documents, absents de l'inventaire, étaient effacés de Qdrant comme orphelins. Désormais :
+
+| Événement | Exemple | Effet |
+|---|---|---|
+| ACL d'un fichier illisible | Fichier verrouillé, droit de lecture des ACL retiré | Compté pour le garde-fou ; au-delà de 20 %, abandon sans modifier Qdrant (code 1) |
+| Dossier illisible pendant le parcours | Droit retiré à `svc-rag` sur un sous-dossier, incident SMB | Droits des fichiers lus mis à jour ; **aucun orphelin supprimé** ; documents non retrouvés retirés de la recherche jusqu'à un parcours complet ; dossiers listés dans `erreurs_parcours` du rapport ; code 2 et alerte |
+
+`indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, ou si le corpus est vide, avant de toucher aux collections (§5.9).
+
 Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API reprend dans le rapport de synchronisation et donc dans le courriel d'alerte.
 
 **Tester le garde-fou sans risque** : désigner un partage inexistant sur le bon serveur. Le compte s'authentifie normalement, chaque lecture échoue, et le garde-fou doit abandonner (code 1). Ne pas tester avec un mot de passe faux.
@@ -503,7 +512,7 @@ rag-api:
 
 **Cache TTL :** les groupes sont mis en cache 5 minutes (configurable via `GROUPS_CACHE_TTL`) pour éviter un appel LDAP bloquant à chaque requête RAG.
 
-> **Droit de lecture de `tokenGroups` :** dans le lab, le compte de service l'a lu sans droit supplémentaire. Dans certains domaines durcis, il faut l'ajouter au groupe « Groupe d'accès d'autorisation Windows ». Le symptôme est sans ambiguïté : `[AUTH] SID des groupes de '…' illisibles (…) : accès refusé` dans le journal, et aucun document visible. Contrôle : `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` (§16.5.3).
+> **Droit de lecture de `tokenGroups` :** dans le lab, le compte de service l'a lu sans droit supplémentaire. Dans un domaine durci, il faut contrôler les permissions effectives du compte sur **cet attribut**. Le groupe « Groupe d'accès d'autorisation Windows » est souvent cité, mais la documentation de Microsoft le décrit pour un attribut voisin, `tokenGroupsGlobalAndUniversal`, et non pour `tokenGroups` : l'y ajouter ne règle pas forcément le problème, ce qui n'a pas été testé dans le lab. Microsoft précise aussi que `tokenGroups` ne peut pas être calculé sans catalogue global joignable, et que sa lecture est coûteuse pour les contrôleurs de domaine dans les grands environnements. Le symptôme est sans ambiguïté : `[AUTH] SID des groupes de '…' illisibles (…) : accès refusé` dans le journal, et aucun document visible. Contrôle : `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` (§16.5.3).
 
 ---
 
@@ -633,6 +642,8 @@ La fonction `check_access()` dans `auth.py` implémente la logique NTFS : accès
 
 Deux cas de test ont été validés en lab sur un corpus de documents d'entreprise.
 
+> **Résultats historiques, antérieurs à la 2.22.0.** Les journaux et les payloads ci-dessous montrent les groupes par leur nom (`DOMAINE\GRP-RH`). Depuis la 2.22.0, `autorises[]`, `interdits[]` et les groupes résolus contiennent des SID ; le principe des deux cas est inchangé (§16.5.3, et `diag_sid.py` pour afficher les SID d'un compte avec leur nom).
+
 ### §5.8.1 Cas 1 : administrateur du domaine (accès complet)
 
 **Compte :** membre de `Admins du domaine`.
@@ -709,6 +720,7 @@ Seul un administrateur peut créer des dossiers à la racine du partage.
 docker compose build --no-cache rag-api && docker compose up -d rag-api
 cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
+# --reset efface les collections : refusé (2.23.0) si un dossier est illisible ou le corpus vide
 python indexer.py --corpus /mnt/corpus-root --reset
 # Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
 # --post-data est obligatoire : /admin/sync n'accepte que POST (sinon réponse 405).

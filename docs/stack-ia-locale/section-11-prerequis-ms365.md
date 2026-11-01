@@ -34,11 +34,11 @@ La stack des Parties 1 et 2 cloisonne les documents du file server à partir des
 | Élément | Stack SMB (Parties 1 et 2) | Ajout Partie 3 |
 |---|---|---|
 | Source des permissions | ACL NTFS du file server | Permissions SharePoint (§13) |
-| Format dans `autorises[]` | `DOMAINE\Groupe` | `entra:grp:<id>`, `entra:usr:<id>` |
-| Résolution de l'utilisateur | LDAP sur le contrôleur de domaine | Microsoft Graph |
+| Format dans `autorises[]` | SID (`S-1-5-21-…`) depuis la 2.22.0 ; `DOMAINE\Groupe` jusqu'à la 2.21 | `entra:grp:<id>`, `entra:usr:<id>` |
+| Résolution de l'utilisateur | LDAP sur le contrôleur de domaine (`objectSid` et `tokenGroups`, §16.5.3) | Microsoft Graph |
 | Interface utilisateur | Open WebUI, authentification LDAP AD | Inchangée |
 
-Les deux formats coexistent dans la même liste de groupes. Un chunk SMB ne contient que des groupes `DOMAINE\Groupe` : les identifiants Entra ajoutés à l'utilisateur ne lui donnent accès à aucun document SMB supplémentaire.
+Les deux formats coexistent dans la même liste de groupes. Un chunk SMB ne contient que des SID de l'annuaire : les identifiants Entra ajoutés à l'utilisateur ne lui donnent accès à aucun document SMB supplémentaire. Les noms de groupes ne servent plus à aucune décision d'accès SMB ; ils n'apparaissent que dans les journaux, pour le dépannage.
 
 ### §11.1.2 Le chemin réseau
 
@@ -382,7 +382,7 @@ C'est la démonstration de §11.1.3 : le groupe dynamique « Tous les utilisateu
 **Test 3 : extension activée.**
 
 ```bash
-sed -i 's/^ENTRA_ENABLED=false/ENTRA_ENABLED=true/' .env
+sed -i --follow-symlinks 's/^ENTRA_ENABLED=false/ENTRA_ENABLED=true/' .env
 docker compose up -d rag-api
 ```
 
@@ -392,7 +392,7 @@ Après une question posée dans Open WebUI avec `test-client` :
 docker logs rag-api 2>&1 | grep "\[AUTH\]" | tail -5
 ```
 
-**Validé en lab, septembre 2026 :**
+**Validé en lab, septembre 2026** (avant la 2.22.0 : les groupes apparaissaient par leur nom ; ils sont aujourd'hui résolus en SID, §16.5.3) :
 
 ```
 [AUTH] Utilisateur trouvé : 'test-client' (test-client@votre-domaine.ch)

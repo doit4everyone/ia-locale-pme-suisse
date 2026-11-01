@@ -17,7 +17,7 @@ description: "Choisir et installer le moteur qui fait tourner les modèles d'IA 
 
 [Retour au sommaire](index.md) | [Section précédente : §1 Prérequis et création de la VM](section-01-prerequis.md) | [Section suivante : §3 Docker Compose : stack complète](section-03-docker-compose.md)
 
-**Statut :** validé en lab, octobre 2026, sur une carte NVIDIA RTX 5060 Ti 16 Go. Ollama : validé sous Windows, puis sous Linux dans WSL2. vLLM 0.31.0 : validé dans WSL2 (Ubuntu 26.04), avec le jeu de questions, le test de cloisonnement (44 sur 44) et deux campagnes de questions simultanées. Services systemd (§2.4.7) : validés dans WSL2. **Non validés :** un serveur Linux dédié, le DGX Spark (§2.6), le démarrage de WSL2 au lancement de Windows sans session ouverte.
+**Statut :** validé en lab, octobre 2026, sur une carte NVIDIA RTX 5060 Ti 16 Go. Ollama : validé sous Windows, puis sous Linux dans WSL2. vLLM 0.31.0 : validé dans WSL2 (Ubuntu 26.04), avec le jeu de questions, le test de cloisonnement (44 sur 44) et deux campagnes de questions simultanées. Services systemd (§2.4.7) : validés dans WSL2. Modèle d'embedding `bge-m3` (2.23.0) : validé avec les deux moteurs, avec des vecteurs identiques entre Ollama et vLLM (§2.5), le test de cloisonnement (207 sur 207) et le jeu de questions du corpus enrichi. **Non validés :** un serveur Linux dédié, le DGX Spark (§2.6), le démarrage de WSL2 au lancement de Windows sans session ouverte.
 
 ---
 
@@ -29,7 +29,7 @@ La stack confie trois tâches à des modèles d'IA. Ils tournent tous sur une m�
 |---|---|---|
 | Rédiger la réponse | `qwen3:14b` | Lit les extraits de documents retrouvés et rédige la réponse, avec ses sources |
 | Vérifier la réponse | Le **juge** | Relit la réponse et ses sources, et signale une affirmation qui n'y figure pas (§8) |
-| Retrouver les passages | `nomic-embed-text` | Transforme chaque extrait de document, puis chaque question, en **vecteur** : une empreinte numérique du sens, qui permet de retrouver les passages proches d'une question |
+| Retrouver les passages | `bge-m3` | Transforme chaque extrait de document, puis chaque question, en **vecteur** : une empreinte numérique du sens, qui permet de retrouver les passages proches d'une question |
 
 La VM de la stack ne fait tourner aucun modèle. Elle envoie ses demandes au serveur de modèles par le réseau. Le logiciel qui reçoit ces demandes et fait travailler la carte s'appelle le **moteur**. Ce guide en documente deux, **Ollama** et **vLLM**. Le reste de la stack est identique dans les deux cas.
 
@@ -95,12 +95,12 @@ C'est la configuration la plus éprouvée du lab. Les détails, et la façon de 
 
 Quitter ensuite Ollama depuis la zone de notification (clic droit sur l'icône, puis *Quit*), et le relancer : les variables ne sont lues qu'au démarrage.
 
-**3. Télécharger les trois modèles** (environ 12 Go) :
+**3. Télécharger les trois modèles** (environ 13 Go) :
 
 ```powershell
 ollama pull qwen3:14b
 ollama pull qwen3:4b-instruct
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ollama list
 ```
 
@@ -153,7 +153,9 @@ vLLM est un moteur conçu pour servir plusieurs requêtes en même temps. Ce qu'
 |---|---|---|
 | Rédaction | `qwen3:14b` | `Qwen/Qwen3-14B-AWQ`, la version officielle de Qwen, servie sous le nom `qwen3:14b` |
 | Juge | `qwen3:4b-instruct` | Le même `Qwen3-14B-AWQ` |
-| Embedding | `nomic-embed-text` | `nomic-ai/nomic-embed-text-v1.5`, servi sous le nom `nomic-embed-text` |
+| Embedding | `bge-m3` | `BAAI/bge-m3`, servi sous le nom `bge-m3` |
+
+> **Depuis la 2.23.0, le modèle d'embedding du guide est `bge-m3`**, à la place de `nomic-embed-text` : la comparaison des modèles est au §10.7. Changer de modèle d'embedding change la taille des vecteurs : une installation existante réindexe ses documents (§10.7).
 
 ### §2.4.1 Où l'installer
 
@@ -258,9 +260,11 @@ sudo mkdir -p /opt/hf /etc/vllm
 sudo chown $USER /opt/hf
 export HF_HOME=/opt/hf
 hf download Qwen/Qwen3-14B-AWQ
-hf download nomic-ai/nomic-embed-text-v1.5
+hf download BAAI/bge-m3 --exclude "onnx/*" --exclude "imgs/*"
 du -sh /opt/hf
 ```
+
+Le dépôt de bge-m3 contient aussi une version ONNX du modèle, inutile pour vLLM : `--exclude` l'écarte. Un seul motif par option `--exclude` : avec deux motifs derrière la même option, `hf` prend le second pour un nom de fichier à télécharger et s'arrête sur `File not found in repository` (rencontré dans le lab).
 
 **La clé d'API**, que la stack devra présenter à chaque requête. Elle est créée directement dans un fichier lisible par root et par votre utilisateur seulement, sans jamais s'afficher :
 
@@ -309,26 +313,29 @@ Attendre la ligne `Application startup complete` : une à trois minutes, le prem
 cd /opt/vllm && source .venv/bin/activate
 set -a; source /etc/vllm/vllm.env; set +a
 export HF_HOME=/opt/hf
-vllm serve nomic-ai/nomic-embed-text-v1.5 \
-  --runner pooling --trust-remote-code \
-  --served-model-name nomic-embed-text \
+vllm serve BAAI/bge-m3 \
+  --runner pooling \
+  --served-model-name bge-m3 \
   --max-model-len 2048 \
-  --gpu-memory-utilization 0.06 \
+  --gpu-memory-utilization 0.11 \
+  --enforce-eager \
   --host 0.0.0.0 --port 8001 --api-key "$VLLM_API_KEY"
 ```
 
-Au premier démarrage, ce serveur télécharge le code du modèle depuis Hugging Face (dépôt `nomic-ai/nomic-bert-2048`) : l'accès Internet est nécessaire à ce moment.
+vLLM prend bge-m3 en charge nativement : le modèle n'apporte pas de code Python à exécuter, et l'option `--trust-remote-code`, nécessaire avec nomic-embed-text jusqu'à la 2.22, n'a plus lieu d'être.
+
+> **La mémoire de bge-m3, mesurée dans le lab.** Lancé seul, avec une part de 15 % et ses graphes de calcul, bge-m3 occupe 2 084 Mio de la carte (poids 1,06 Gio, graphes 0,20 Gio, plus le contexte CUDA). Une fois Qwen3-14B démarré avec ses 87 %, il ne reste que 1 937 Mio : trop juste. Sans graphes de calcul (`--enforce-eager`) et avec une part de 11 %, bge-m3 démarre à côté de Qwen3-14B et occupe 1 299 Mio ; il reste 638 Mio libres. Le calcul d'un vecteur prend 25 à 27 ms, réseau compris. Avec ces deux modèles, une carte de 16 Go est pleine : rien d'autre ne doit l'utiliser.
 
 | Option | Valeur | Pourquoi |
 |---|---|---|
-| `--served-model-name` | `qwen3:14b`, `nomic-embed-text` | Le nom sous lequel la stack appelle le modèle : le même qu'avec Ollama |
+| `--served-model-name` | `qwen3:14b`, `bge-m3` | Le nom sous lequel la stack appelle le modèle : le même qu'avec Ollama |
 | `--max-model-len` | `16384` | La fenêtre de contexte : question, extraits et réponse. Même valeur que `LLM_NUM_CTX` avec Ollama |
-| `--gpu-memory-utilization` | `0.87` et `0.06` | La part de la mémoire de la carte réservée par chaque serveur : 87 % et 6 %. Le reste sert à l'affichage de Windows |
+| `--gpu-memory-utilization` | `0.87` et `0.11` | La part de la mémoire de la carte réservée par chaque serveur : 87 % et 11 %. Il reste environ 2 % de la carte (638 Mio mesurés) |
 | `--max-num-seqs` | `4` | Au plus quatre questions traitées ensemble |
 | `--reasoning-parser` et `--default-chat-template-kwargs` | `qwen3`, réflexion désactivée | Qwen3 répond directement, sans écrire de raisonnement : c'est l'équivalent du `think: false` d'Ollama |
 | `--api-key` | La clé | Toute requête sans la clé est refusée (code HTTP 401) |
 | `--runner pooling` | | Mode embedding : le serveur produit des vecteurs, pas du texte |
-| `--trust-remote-code` | | Le modèle nomic s'accompagne de code Python, exécuté par vLLM. Nécessaire pour ce modèle, qui vient de son éditeur |
+| `--enforce-eager` | | Le serveur d'embedding ne prépare pas de graphes de calcul à l'avance : environ 200 Mio de moins, ce qui lui permet de tenir à côté du modèle de rédaction |
 | `VLLM_USE_FLASHINFER_SAMPLER=0` | | Écarte un composant qui exige le compilateur CUDA, non installé (§2.4.9) |
 
 Dans le journal du terminal 1, quatre lignes confirment la configuration :
@@ -419,7 +426,7 @@ FIN
 
 sudo tee /etc/systemd/system/vllm-embed.service > /dev/null <<'FIN'
 [Unit]
-Description=vLLM : embedding (nomic-embed-text)
+Description=vLLM : embedding (bge-m3)
 After=network-online.target vllm-llm.service
 Wants=network-online.target
 
@@ -431,7 +438,7 @@ Environment=HF_HOME=/opt/hf
 # Attendre que le serveur de rédaction ait réservé sa mémoire
 TimeoutStartSec=600
 ExecStartPre=/usr/bin/timeout 500 /bin/bash -c 'until curl -s -o /dev/null http://127.0.0.1:8000/v1/models; do sleep 5; done'
-ExecStart=/opt/vllm/.venv/bin/vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code --served-model-name nomic-embed-text --max-model-len 2048 --gpu-memory-utilization 0.06 --host 0.0.0.0 --port 8001 --api-key ${VLLM_API_KEY}
+ExecStart=/opt/vllm/.venv/bin/vllm serve BAAI/bge-m3 --runner pooling --served-model-name bge-m3 --max-model-len 2048 --gpu-memory-utilization 0.11 --enforce-eager --host 0.0.0.0 --port 8001 --api-key ${VLLM_API_KEY}
 Restart=on-failure
 RestartSec=15
 
@@ -467,7 +474,7 @@ EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:8001
 JUDGE_BASE_URL=
 LLM_MODEL=qwen3:14b
 JUDGE_MODEL=qwen3:14b
-EMBED_MODEL=nomic-embed-text
+EMBED_MODEL=bge-m3
 VLLM_API_KEY=<clé-vllm>
 ```
 
@@ -489,7 +496,7 @@ print('rédaction', httpx.get(os.environ['LLM_BASE_URL'] + '/v1/models', headers
 
 **Attendu :** `openai` deux fois, les deux adresses, `qwen3:14b` deux fois, puis `rédaction 200 | embedding 200`. La VM qui joint le serveur ne suffit pas : c'est le conteneur qui l'interroge, et dans le lab, la VM le joignait alors que le conteneur ne le pouvait pas (§2.4.9).
 
-Terminer par une question dans Open WebUI, puis le test de cloisonnement (§16) : **44 sur 44** dans le lab après la bascule.
+Terminer par une question dans Open WebUI, puis le test de cloisonnement (§16) : **44 sur 44** dans le lab après la première bascule, **207 sur 207** avec le corpus enrichi et bge-m3 (2.23.0).
 
 ### §2.4.9 Les pièges rencontrés
 
@@ -516,7 +523,7 @@ Ce qui précède est validé sur un réseau de lab de confiance. Trois points ne
 | Point | Situation | À faire avant la production |
 |---|---|---|
 | Transport | La VM parle aux deux serveurs en HTTP : la clé d'API et les questions circulent sans chiffrement. La clé protège l'accès, pas le contenu des échanges. | Limiter l'accès aux ports 8000 et 8001 à l'adresse de la VM, placer les deux machines sur un réseau isolé, ou chiffrer le lien (TLS). Non testé en lab. |
-| Modèles téléchargés | Les commandes de §2.4.4 désignent les modèles par leur nom de dépôt, qui renvoie à la version courante au moment du téléchargement. Le modèle d'embedding est lancé avec `--trust-remote-code`, qui exécute le code Python fourni avec lui. | Relever la révision de chaque modèle, en conserver une copie locale validée (le répertoire `/opt/hf`) et lire le code distant avant d'autoriser son exécution. vLLM propose les options `--revision` et `--code-revision` : à vérifier dans la documentation de votre version, non testé en lab. |
+| Modèles téléchargés | Les commandes de §2.4.4 désignent les modèles par leur nom de dépôt, qui renvoie à la version courante au moment du téléchargement. | Relever la révision de chaque modèle et en conserver une copie locale validée (le répertoire `/opt/hf`). vLLM propose l'option `--revision` : à vérifier dans la documentation de votre version, non testé en lab. Aucun des deux modèles du guide n'exige plus `--trust-remote-code` (2.23.0) : un modèle qui l'exigerait exécuterait du code Python fourni avec lui, à lire avant de l'autoriser. |
 | Charge | Seules deux séries de questions simultanées ont été mesurées (§10.12). | Mesurer la charge attendue (par exemple quatre questions simultanées, avec les durées maximales et la mémoire de la carte) avant d'annoncer une capacité. |
 
 ---
@@ -525,36 +532,29 @@ Ce qui précède est validé sur un réseau de lab de confiance. Trois points ne
 
 ### Pas de réindexation
 
-L'index des documents ne dépend que du modèle d'embedding. Le même modèle, `nomic-embed-text` en version 1.5, sert avec les deux moteurs. Le lab l'a vérifié avant de basculer : 50 extraits pris au hasard dans l'index construit avec Ollama, recalculés avec vLLM, donnent des vecteurs **identiques** (similarité de 1,00000 pour chacun). La seule différence : vLLM ne ramène pas ses vecteurs à une longueur de 1, ce que la RAG API fait désormais elle-même.
+L'index des documents ne dépend que du modèle d'embedding, et le même modèle sert avec les deux moteurs. Le lab l'a vérifié avant chaque bascule : des extraits pris au hasard dans l'index construit avec Ollama, recalculés avec vLLM, comparés à leur vecteur stocké.
 
-La vérification n'est à refaire que si vous changez de version du modèle d'embedding. Le script utilisé, à lancer sur la VM, la clé vLLM étant saisie sans affichage par `read -rs VK` :
+| Modèle d'embedding | Extraits comparés | Similarité minimale |
+|---|---|---|
+| `nomic-embed-text` (v1.5) | 50 | 1,00000 : vecteurs identiques |
+| `bge-m3` (2.23.0) | 50 par collection | 0,99994 (documents), 0,99995 (documentation) |
+
+Avec bge-m3, les vecteurs ne sont pas identiques au chiffre près, sans doute à cause de la précision de calcul propre à chaque moteur. L'écart reste très au-dessus du seuil ci-dessous : aucune réindexation. Autre différence : vLLM ne ramène pas ses vecteurs à une longueur de 1, ce que la RAG API fait elle-même.
+
+La vérification est à refaire à chaque changement de modèle d'embedding ou de version du modèle. Le script `comparer_vecteurs.py` du dépôt, copié par `deploy.sh` dans `/root/rag-pipeline`, compare 50 extraits de chaque collection. Il prend l'adresse du serveur dans `EMBED_BASE_URL` (port 8001) et le modèle dans `EMBED_MODEL` : il peut donc tourner avant la bascule, la stack étant encore raccordée à Ollama, dès que le serveur d'embedding vLLM répond. Sur la VM, la clé vLLM étant saisie sans affichage :
 
 ```bash
-docker exec -i -e VLLM_API_KEY="$VK" -e VLLM_URL=http://<IP-SERVEUR-MODELES>:8001 rag-api python3 - <<'FIN'
-import os, re, random, math, httpx
-from qdrant_client import QdrantClient
-q = QdrantClient(url=os.environ["QDRANT_HOST"], api_key=os.environ["QDRANT_API_KEY"])
-pts, _ = q.scroll(collection_name="documents", limit=400, with_payload=["text"], with_vectors=True)
-random.seed(1); pts = random.sample(pts, min(50, len(pts)))
-cos = lambda a, b: sum(x*y for x, y in zip(a, b)) / (math.sqrt(sum(x*x for x in a)) * math.sqrt(sum(y*y for y in b)))
-h = {"Authorization": "Bearer " + os.environ["VLLM_API_KEY"]}
-res = []
-for p in pts:
-    t = re.sub(r'[. ]{10,}', ' ', p.payload["text"]).strip()
-    r = httpx.post(os.environ["VLLM_URL"] + "/v1/embeddings", headers=h, json={"model": "nomic-embed-text", "input": t}, timeout=60)
-    v = p.vector if isinstance(p.vector, list) else list(p.vector.values())[0]
-    res.append(cos(v, r.json()["data"][0]["embedding"]))
-print("extraits :", len(res), "| similarité minimale : %.5f" % min(res))
-FIN
+read -rs VK
+docker exec -e VLLM_API_KEY="$VK" rag-api python3 /rag-pipeline/comparer_vecteurs.py
 ```
 
-**Attendu :** une similarité minimale d'au moins 0,999. En dessous de 0,99, réindexer.
+**Attendu :** une ligne par collection, avec le modèle qui a construit l'index et une similarité minimale d'au moins 0,999. En dessous de 0,99, réindexer.
 
 ### La bascule
 
 | Étape | Vers vLLM | Retour à Ollama |
 |---|---|---|
-| 1. Sauvegarder | `cp /root/rag-stack/.env /root/rag-stack/.env.avant-bascule` | |
+| 1. Sauvegarder, sur le volume chiffré (§1.5) | `cp --dereference /root/rag-stack/.env /srv/rag-donnees/secrets/.env.avant-bascule && chmod 600 /srv/rag-donnees/secrets/.env.avant-bascule` | |
 | 2. Libérer la carte | Arrêter Ollama : sous Windows, le quitter et retirer son démarrage automatique ; sous Linux, `sudo systemctl disable --now ollama` | `sudo systemctl disable --now vllm-llm vllm-embed` |
 | 3. Démarrer l'autre moteur | §2.4.5 ou §2.4.7 | Relancer Ollama |
 | 4. Changer le `.env` | Bloc B (§2.4.8) | Bloc A, ou restaurer la sauvegarde |

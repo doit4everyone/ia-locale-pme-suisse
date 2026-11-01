@@ -283,10 +283,15 @@ def fichier_identifiants() -> str:
     return _FICHIER_IDENTIFIANTS
 
 
-def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
+def lister_fichiers_montes(mount_point: str, erreurs: list[str] | None = None) -> list[tuple[str, str]]:
     """
     Liste récursivement les fichiers depuis le point de montage.
     Retourne une liste de (chemin_relatif_smb, chemin_absolu_local).
+
+    Un dossier illisible pendant le parcours (droits, incident SMB) est ajouté à
+    `erreurs` (2.23.0) : sans cela, os.walk l'ignorait sans rien dire, ses
+    documents passaient pour supprimés du partage et leurs extraits étaient
+    effacés de Qdrant comme orphelins (revue externe du 31 octobre 2026).
 
     Le chemin relatif SMB utilise des backslashes (format Windows).
     """
@@ -303,7 +308,11 @@ def lister_fichiers_montes(mount_point: str) -> list[tuple[str, str]]:
     }
     fichiers = []
 
-    for root, dirs, files in os.walk(mount_point):
+    def sur_erreur(err: OSError) -> None:
+        if erreurs is not None:
+            erreurs.append(f"{err.filename} : {err.strerror}")
+
+    for root, dirs, files in os.walk(mount_point, onerror=sur_erreur):
         # Élager les répertoires exclus avant la descente (dirs[:] modifie en place)
         dirs[:] = [d for d in dirs if d.lower() not in EXCLUDE_DIR_PATTERNS]
         for f in sorted(files):
@@ -519,7 +528,14 @@ def resoudre_acl(
         sys.exit(1)
 
     # Lister les fichiers
-    fichiers = lister_fichiers_montes(mount_point)
+    erreurs_parcours: list[str] = []
+    fichiers = lister_fichiers_montes(mount_point, erreurs_parcours)
+    if erreurs_parcours:
+        print(f"[ECHEC] Parcours du partage incomplet : {len(erreurs_parcours)} dossier(s) illisible(s) :")
+        for err in erreurs_parcours:
+            print(f"  {err}")
+        print("Les droits des fichiers lus sont mis à jour ; aucun orphelin ne sera supprimé, "
+              "et les documents non retrouvés sont retirés de la recherche (§16.5.2).")
     if not fichiers:
         print(f"Aucun fichier supporté trouvé dans {mount_point}")
         sys.exit(1)
@@ -682,7 +698,15 @@ def resoudre_acl(
         for src in sorted(orphelins):
             print(f"  {src}")
 
-        if not dry_run:
+        if erreurs_parcours and not dry_run:
+            # Parcours incomplet (2.23.0) : un document absent de la liste peut se
+            # trouver dans un dossier illisible. Rien n'est supprimé ; ces documents
+            # sont comptés en échec de suppression, donc retirés de la recherche
+            # par la RAG API jusqu'à un passage complet, et l'alerte part (code 2).
+            echecs_suppression = sorted(orphelins)
+            print(f"\n[ECHEC] Parcours incomplet : {len(orphelins)} orphelin(s) non supprimé(s), "
+                  "retirés de la recherche jusqu'à un parcours complet")
+        elif not dry_run:
             nb_supprimes = 0
             for src in sorted(orphelins):
                 try:
@@ -765,6 +789,7 @@ def resoudre_acl(
                 "entrees_allowed_sans_lecture": STATS_MASQUE["allowed_sans_lecture"],
                 "echecs_ecriture": len(echecs_ecriture),
                 "echecs_suppression": len(echecs_suppression),
+                "erreurs_parcours": len(erreurs_parcours),
                 "documents_non_migres_sid": len(non_migres),
                 "documents_refus_pour_tous": len(refus_tous),
             },
@@ -776,6 +801,7 @@ def resoudre_acl(
             "echecs_ecriture": sorted(echecs_ecriture),
             "echecs_suppression": sorted(echecs_suppression),
             "echecs_lecture_orphelins": echecs_lecture_orphelins,
+            "erreurs_parcours": erreurs_parcours,
             "fichiers_avec_entree_allowed_ignoree": sorted(STATS_MASQUE["fichiers"]),
             "documents": rapport,
             "orphelins": sorted(orphelins),
@@ -787,10 +813,11 @@ def resoudre_acl(
 
     # Code 2 : passage terminé, mais des droits n'ont pas pu être écrits.
     # La synchronisation est en échec et l'alerte part (courriel, supervision).
-    if echecs_ecriture or echecs_suppression or echecs_lecture_orphelins:
+    if echecs_ecriture or echecs_suppression or echecs_lecture_orphelins or erreurs_parcours:
         msg = (f"[ECHEC] Droits non écrits : {len(echecs_ecriture)} document(s) ; "
                f"suppressions en échec : {len(echecs_suppression)} ; "
-               f"lectures des orphelins en échec : {len(echecs_lecture_orphelins)}. "
+               f"lectures des orphelins en échec : {len(echecs_lecture_orphelins)} ; "
+               f"dossiers illisibles : {len(erreurs_parcours)}. "
                "Ces documents sont retirés de la recherche jusqu'à une écriture réussie (§16.5.2).")
         print(f"\n{msg}")
         print(msg, file=sys.stderr)

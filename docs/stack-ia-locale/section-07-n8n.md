@@ -94,7 +94,7 @@ Send Email → <destinataire>
 
 L'endpoint est implémenté dans `main.py` de la RAG API. Il lance `indexer.py` puis `acl_resolver.py` en sous-processus et retourne un rapport JSON structuré.
 
-> **Depuis la Partie 3 :** une troisième étape, `sp_indexer.py`, s'ajoute si `SP_SITES` est renseigné ([§13.6](section-13-sharepoint.md)), et l'index BM25 est reconstruit après chaque synchronisation, même partiellement en échec. Le délai d'attente du nœud HTTP du workflow est porté à 30 minutes (1800000 ms), et celui de `wget` à 1800 secondes (`-T 1800`) pour un appel manuel.
+> **Depuis la Partie 3 :** une troisième étape, `sp_indexer.py`, s'ajoute si `SP_SITES` est renseigné ([§13.6](section-13-sharepoint.md)), et l'index plein texte de la recherche par mots-clés est vérifié après chaque synchronisation, même partiellement en échec (créé pour une collection apparue entre-temps ; jusqu'à la 2.22, l'index BM25 en mémoire était reconstruit). Le délai d'attente du nœud HTTP du workflow est porté à 30 minutes (1800000 ms), et celui de `wget` à 1800 secondes (`-T 1800`) pour un appel manuel.
 
 ```python
 # Extrait de main.py - endpoint /admin/sync

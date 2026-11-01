@@ -1,13 +1,15 @@
 # mip-service : image Ubuntu 24.04 (noble), version prise en charge par le SDK MIP pour Linux,
 # indépendamment de la version d'Ubuntu de l'hôte.
-FROM mcr.microsoft.com/dotnet/sdk:8.0-noble AS build
+# Images figées par empreinte (2.23.0) : runtime .NET 8.0.33, qui corrige CVE-2026-111497 (Brotli).
+# Mettre à jour en connaissance de cause : nouvelle empreinte, reconstruction, tests du §14.
+FROM mcr.microsoft.com/dotnet/sdk:8.0-noble@sha256:42eb9e70b190d0cca893d93724e67fb89e7570e4309c4b1c20b7f6016a90202d AS build
 WORKDIR /src
 COPY MipService.csproj .
 RUN dotnet restore
 COPY Program.cs .
 RUN dotnet publish -c Release -o /app --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-noble
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-noble@sha256:d0a0fa004862a9cca83208800f706dcc2523c4db29f09d501395f80969e03070
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libgsf-1-114 libgmime-3.0-0t64 libsecret-1-0 libglib2.0-0 libcurl4 libssl3 libuuid1 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

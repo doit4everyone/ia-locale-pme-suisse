@@ -1,12 +1,15 @@
 services:
-  # Reranker (§10.8), OPTIONNEL : désactivé dans la configuration recommandée.
+  # Reranker sur le processeur de la VM (§10.8), OPTIONNEL : mesuré trop lent pour un
+  # usage en service (2.23.0). Le reranker recommandé tourne sur la carte du serveur
+  # de modèles (llama-server, RERANKER_API=llamacpp), hors de ce Compose.
   # Seule image NON figée par empreinte : profil facultatif, non qualifié en 2.21.
   # Démarrage : docker compose --profile reranker up -d reranker, puis RERANKER_URL=http://reranker:80
+  # Modèle : RERANKER_MODEL dans le .env (2.23.0), bge-reranker-v2-m3 par défaut (mesuré, §10.8).
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
     container_name: reranker
     profiles: ["reranker"]
-    command: ["--model-id", "Alibaba-NLP/gte-multilingual-reranker-base", "--auto-truncate", "--max-batch-tokens", "4096", "--max-concurrent-requests", "64"]
+    command: ["--model-id", "${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}", "--auto-truncate", "--max-batch-tokens", "4096", "--max-concurrent-requests", "64"]
     mem_limit: 4g
     environment:
       - HF_HUB_OFFLINE=${RERANKER_OFFLINE:-0}
@@ -21,8 +24,8 @@ services:
     # l'empreinte garantit que l'image téléchargée est exactement celle validée,
     # même si l'éditeur republie une version sous le même nom. Empreintes
     # relevées sur la VM de test le 17 octobre 2026 (docker image inspect) ;
-    # Qdrant 1.19.2 le 24 octobre 2026 (2.22.5).
-    image: qdrant/qdrant:v1.19.2@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
+    # Qdrant 1.20.0 le 24 octobre 2026 (2.23.0).
+    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
@@ -41,7 +44,8 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:2.36.9@sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d
+    # 2.45.6 (2.23.0) : avis de sécurité GHSA-9p7v-45m2-wxgj, GHSA-gx3v-3x3v-f8r5, GHSA-prmc-fg87-r4gh et suivants
+    image: n8nio/n8n:2.45.6@sha256:45edf89655fd66dd55ea9336c1791ad14777599fdbf6c5aec6db583ede99a40b
     container_name: n8n
     # Aucun port publié : n8n est joint par Nginx, https://<NOM-STACK>:5678 (§9.8)
     environment:
@@ -62,6 +66,14 @@ services:
       # Sans lui, n8n compte en America/New_York.
       - GENERIC_TIMEZONE=Europe/Zurich
       - TZ=Europe/Zurich
+      # Aucune connexion aux serveurs de n8n (2.23.0) : télémétrie, recherche de
+      # nouvelles versions, modèles en ligne. Réglages de la page « Isolate n8n ».
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
+      - N8N_DIAGNOSTICS_CONFIG_FRONTEND=
+      - N8N_DIAGNOSTICS_CONFIG_BACKEND=
+      - EXTERNAL_FRONTEND_HOOKS_URLS=
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -85,6 +97,9 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL}
       - EMBED_BASE_URL=${EMBED_BASE_URL}
       - EMBED_MODEL=${EMBED_MODEL}
+      # Préfixes attendus par certains modèles d'embedding, vides par défaut (2.23.0, §10.7)
+      - EMBED_PREFIXE_QUESTION=${EMBED_PREFIXE_QUESTION:-}
+      - EMBED_PREFIXE_DOCUMENT=${EMBED_PREFIXE_DOCUMENT:-}
       - LLM_MODEL=${LLM_MODEL}
       - JUDGE_MODEL=${JUDGE_MODEL}
       # Protocole des serveurs de modèles (§2) : « ollama » (défaut) ou « openai »
@@ -111,6 +126,8 @@ services:
       - ACL_SID_ETENDUS=${ACL_SID_ETENDUS:-0}
       - MAX_CONTEXT_CHUNKS=${MAX_CONTEXT_CHUNKS}
       - CANDIDATS=${CANDIDATS:-30}
+      # Racinisation de l'index plein texte de Qdrant : 0 par défaut (2.23.0)
+      - BM25_RACINISATION=${BM25_RACINISATION:-0}
       - PRINCIPAL_MAX=${PRINCIPAL_MAX:-9}
       - CONTEXT_OTHER_DOCS=${CONTEXT_OTHER_DOCS:-6}
       - EXTRAITS_PAR_COMPLEMENT=${EXTRAITS_PAR_COMPLEMENT:-4}
@@ -121,6 +138,8 @@ services:
       - COMPLEMENT_VOISINS=${COMPLEMENT_VOISINS:-1}
       - DOC_COMPLET_MAX=${DOC_COMPLET_MAX:-15}
       - RERANKER_URL=${RERANKER_URL:-}
+      - RERANKER_API=${RERANKER_API:-tei}
+      - RERANKER_API_KEY=${RERANKER_API_KEY:-}
       - RERANK_CANDIDATS=${RERANK_CANDIDATS:-20}
       - RERANK_MODE=${RERANK_MODE:-fusion}
       - RERANK_RRF_K=${RERANK_RRF_K:-10}
@@ -199,7 +218,7 @@ services:
       - /mnt/corpus-root:/mnt/corpus-root:ro
       # Certificat CA du contrôleur de domaine pour la validation TLS LDAP
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
-      # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
+      # Logs nLPD persistants sur l'hôte (audit, rétention 365 jours, §9.4.4)
       - /var/log/rag:/var/log/rag
       # Certificat et clé de l'App Registration Entra (lecture seule)
       - /etc/rag-certs:/etc/rag-certs:ro

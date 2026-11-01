@@ -8,7 +8,11 @@ from fastapi import FastAPI, HTTPException, Security, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
+from qdrant_client.models import (
+    Filter, FieldCondition, MatchValue, MatchAny,
+    TextQuery, TextIndexParams, TextIndexType, TokenizerType, Language,
+    SnowballParams, Snowball, SnowballLanguage, TextScoringParams, TextScoringType,
+)
 import httpx
 import json
 import re
@@ -35,7 +39,6 @@ def _env_nombre(nom: str, defaut, conv=int):
     return conv(valeur) if valeur else conv(defaut)
 import teams
 import teams_graph
-from rank_bm25 import BM25Okapi
 
 # ─────────────────────────────────────────
 # Configuration
@@ -147,7 +150,11 @@ DOCUMENTATION_PATHS = [
 ]
 LOG_FILE     = os.getenv("LOG_FILE", "/var/log/rag/rag-queries.jsonl")
 TOP_K              = _env_nombre("TOP_K", "12")
-EMBED_MODEL        = os.getenv("EMBED_MODEL", "nomic-embed-text")
+EMBED_MODEL        = os.getenv("EMBED_MODEL", "bge-m3")
+# Préfixes attendus par certains modèles d'embedding (2.23.0), vides par défaut :
+# question ici, document dans indexer.py (transmis à l'indexeur). « \n » = retour à la ligne.
+EMBED_PREFIXE_QUESTION = os.getenv("EMBED_PREFIXE_QUESTION", "").replace("\\n", "\n")
+EMBED_PREFIXE_DOCUMENT = os.getenv("EMBED_PREFIXE_DOCUMENT", "")
 EMBED_BASE_URL     = os.getenv("EMBED_BASE_URL", "") or os.getenv("LLM_BASE_URL", "http://<IP-HOTE-OLLAMA>:11434")
 CONTEXT_THRESHOLD  = _env_nombre("CONTEXT_THRESHOLD", "0.75", float)
 MAX_CONTEXT_CHUNKS = _env_nombre("MAX_CONTEXT_CHUNKS", "15")
@@ -169,6 +176,11 @@ DOC_COMPLET_MAX         = _env_nombre("DOC_COMPLET_MAX", "15")
 # Reranker (§10) : service Text Embeddings Inference avec bge-reranker-v2-m3.
 # Vide = désactivé (ordre de la recherche hybride conservé).
 RERANKER_URL     = os.getenv("RERANKER_URL", "").rstrip("/")
+# Format du service (2.23.0) : « tei » (Text Embeddings Inference, conteneur
+# reranker du Compose) ou « llamacpp » (llama-server --reranking, sur la carte
+# du serveur de modèles). La clé n'est envoyée que si elle est renseignée.
+RERANKER_API     = (os.getenv("RERANKER_API", "") or "tei").strip().lower()
+RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
 RERANK_TIMEOUT   = _env_nombre("RERANK_TIMEOUT", "20", float)
 # Nombre de meilleurs candidats reclassés (au plus 32, limite par défaut du service).
 # Sur CPU, la durée croît avec ce nombre (environ 0,45 s par extrait mesuré en lab).
@@ -607,14 +619,52 @@ def lever_incertitude_registre() -> None:
 
 
 # ─────────────────────────────────────────
-# Index BM25 : chargé au démarrage depuis Qdrant
+# Recherche par mots-clés : index plein texte de Qdrant (2.23.0)
 # ─────────────────────────────────────────
-# L'index BM25 tient en RAM : ~1 Mo pour 1 000 chunks,
-# ~200 Mo pour 50 000 chunks (estimations, non mesurées au-delà de quelques
-# milliers de chunks). Au-delà de 200 000 chunks,
-# préférer Qdrant BM42 (sparse vectors, index sur disque).
-_bm25_index: BM25Okapi | None = None
-_bm25_chunks: list[dict] = []
+# Jusqu'à la 2.22, l'index BM25 était construit en mémoire (rank_bm25) au
+# démarrage et après chaque synchronisation : un instantané, découpé sur les
+# seules espaces et sensible aux accents (point 30), limité par la mémoire de
+# la RAG API (point 75). Depuis Qdrant 1.20, le score BM25 est calculé par
+# Qdrant sur un index plein texte du champ « text » : toujours à jour, et filtré
+# par les droits dans la même requête, comme la recherche vectorielle.
+CHAMP_TEXTE = "text"
+BM25_RACINISATION = os.getenv("BM25_RACINISATION", "0").strip() == "1"
+QDRANT_VERSION_MIN = (1, 20)
+# Collections dont l'index plein texte est en place (preparer_index_texte)
+_collections_texte: set[str] = set()
+
+
+def params_index_texte() -> TextIndexParams:
+    """Réglage de l'index plein texte, identique pour les deux collections.
+    Mots découpés sur les espaces et la ponctuation, en minuscules, accents
+    retirés (« règlement » et « reglement » se confondent), mots vides français
+    ignorés (« le », « de », « la »). Racinisation (« règlements » = « règlement »)
+    seulement avec BM25_RACINISATION=1 : elle élargit beaucoup les
+    correspondances, à mesurer sur le jeu de questions (§10) avant de l'activer."""
+    return TextIndexParams(
+        type=TextIndexType.TEXT,
+        tokenizer=TokenizerType.WORD,
+        lowercase=True,
+        ascii_folding=True,
+        stopwords=Language.FRENCH,
+        stemmer=SnowballParams(type=Snowball.SNOWBALL, language=SnowballLanguage.FRENCH)
+        if BM25_RACINISATION else None,
+        scoring=TextScoringParams(type=TextScoringType.BM25),
+    )
+
+
+# En-tête que indexer.py place en tête de chaque extrait depuis la 2.23.0
+# (« Extrait de « fichier », dossier … : titre. »). Il est retiré pour calculer
+# l'empreinte : deux extraits au texte identique dans deux documents gardent la
+# même clé, comme avant (fusion RRF et détection des copies, §8.9).
+EN_TETE_DEBUT = "Extrait de « "
+
+
+def cle_extrait(texte: str) -> str:
+    """Empreinte du texte de l'extrait, sans l'en-tête du document."""
+    if texte.startswith(EN_TETE_DEBUT) and "\n" in texte:
+        texte = texte.split("\n", 1)[1]
+    return hashlib.md5(texte.encode()).hexdigest()
 
 
 def champs_purview(payload: dict) -> dict:
@@ -684,75 +734,136 @@ def get_collection_for_source(source_name: str) -> str:
     return COLLECTION
 
 
-def _load_collection_chunks(collection_name: str) -> list[dict]:
-    """Charge les chunks d'une collection Qdrant pour l'index BM25."""
+def _version_qdrant() -> tuple[int, ...]:
+    """(majeure, mineure) du serveur Qdrant."""
+    return tuple(int(x) for x in str(qdrant.info().version).split(".")[:2])
+
+
+def _index_conforme(schema, attendu: TextIndexParams) -> bool:
+    """L'index existant a-t-il le réglage attendu ? Seuls les champs que la stack
+    fixe sont comparés (y compris la racinisation, absente quand elle est
+    désactivée) : un champ ajouté par une version future de Qdrant, avec sa
+    valeur par défaut, ne doit pas faire recréer l'index à chaque démarrage."""
+    params = getattr(schema, "params", None)
+    if params is None or not hasattr(params, "model_dump"):
+        return False
+    actuel = params.model_dump(exclude_none=True)
+    voulu = attendu.model_dump(exclude_none=True)
+    champs = set(voulu) | {"stemmer"}
+    return all(actuel.get(k) == voulu.get(k) for k in champs)
+
+
+def preparer_index_texte() -> None:
+    """
+    Met en place l'index plein texte du champ « text » dans chaque collection
+    existante (2.23.0) : créé s'il manque, recréé si son réglage diffère
+    (BM25_RACINISATION modifié), sans effet sinon. Appelé au démarrage, ce qui
+    migre une installation existante sans réindexer, et après chaque
+    synchronisation : indexer.py peut avoir créé une collection entre-temps.
+
+    Qdrant antérieur à la 1.20, erreur ou collection absente : pas de recherche
+    par mots-clés dans cette collection, recherche vectorielle seule, et le
+    journal le dit. Ce n'est pas une question de droits : la recherche
+    vectorielle applique les mêmes filtres.
+    """
+    global _collections_texte
     try:
-        # Lecture par pages jusqu'à épuisement : un seul appel plafonnait la lecture
-        # à 100 000 chunks par collection, sans avertissement.
-        points = []
-        offset = None
-        while True:
-            page, offset = qdrant.scroll(
-                collection_name=collection_name,
-                limit=2_000,
-                offset=offset,
+        version = _version_qdrant()
+    except Exception as e:
+        logger.warning(f"[BM25] Version de Qdrant illisible ({type(e).__name__}) : "
+                       "recherche par mots-clés désactivée jusqu'à la prochaine synchronisation")
+        _collections_texte = set()
+        return
+    if version < QDRANT_VERSION_MIN:
+        logger.error(f"[BM25] Qdrant {'.'.join(map(str, version))} : la recherche par mots-clés "
+                     "demande Qdrant 1.20 ou plus (§3.4). Recherche vectorielle seule")
+        _collections_texte = set()
+        return
+    attendu = params_index_texte()
+    prets = set()
+    for collection in (COLLECTION, DOCUMENTATION_COLLECTION):
+        try:
+            if not qdrant.collection_exists(collection):
+                continue  # avant la première indexation
+            schema = (qdrant.get_collection(collection).payload_schema or {}).get(CHAMP_TEXTE)
+            if schema is None or not _index_conforme(schema, attendu):
+                if schema is not None:
+                    qdrant.delete_payload_index(collection_name=collection,
+                                                field_name=CHAMP_TEXTE, wait=True)
+                debut = time.monotonic()
+                qdrant.create_payload_index(collection_name=collection, field_name=CHAMP_TEXTE,
+                                            field_schema=attendu, wait=True)
+                logger.warning(
+                    f"[BM25] Index plein texte {'recréé (réglage modifié)' if schema is not None else 'créé'} : "
+                    f"'{collection}'.{CHAMP_TEXTE}, racinisation {'oui' if BM25_RACINISATION else 'non'}, "
+                    f"{time.monotonic() - debut:.1f} s")
+            prets.add(collection)
+        except Exception as e:
+            logger.warning(f"[BM25] Index plein texte de '{collection}' indisponible "
+                           f"({type(e).__name__}) : recherche vectorielle seule dans cette collection")
+    _collections_texte = prets
+    if prets:
+        logger.info(f"[BM25] Recherche par mots-clés dans Qdrant : {', '.join(sorted(prets))}")
+
+
+def recherche_mots_cles(query: str, query_filter: Filter | None, limite: int) -> list[dict]:
+    """
+    Candidats par mots-clés : score BM25 calculé par Qdrant sur l'index plein
+    texte, dans chaque collection prête, avec le filtre d'accès de la recherche
+    vectorielle (ALLOW). Un extrait est candidat s'il contient au moins un mot
+    de la question. Sans filtre, aucun candidat : jamais de recherche sans droits.
+
+    Les deux collections ont chacune leurs statistiques de mots : leurs scores
+    ne sont PAS comparables. Un mot fréquent dans « documents » (le nom de
+    l'entreprise, présent dans chaque contrat) y pèse peu, et beaucoup dans
+    « documentation » s'il y est plus rare : un classement commun par score
+    favorisait la documentation (constaté sur test-rag1, question sur les
+    clients d'Axonix). Chaque candidat porte donc son rang dans SA collection
+    (« rang »), et les candidats sont classés par rang, puis par score : les
+    deux collections sont alternées, et la fusion RRF utilise ce rang.
+    """
+    if query_filter is None or not query.strip():
+        return []
+    candidats = []
+    for collection in (COLLECTION, DOCUMENTATION_COLLECTION):
+        if collection not in _collections_texte:
+            continue
+        try:
+            points = qdrant.query_points(
+                collection_name=collection,
+                query=TextQuery(text=query),
+                using=CHAMP_TEXTE,
+                query_filter=query_filter,
+                limit=limite,
                 with_payload=True,
-            )
-            points.extend(page)
-            if offset is None:
-                break
-        return [
-            {
+            ).points
+        except Exception as e:
+            logger.warning(f"[BM25] Recherche par mots-clés impossible dans '{collection}' "
+                           f"({type(e).__name__}) : recherche vectorielle seule pour cette question")
+            continue
+        for rang, p in enumerate(points):
+            payload = p.payload or {}
+            texte = payload.get("text", "")
+            candidats.append({
+                "rang":        rang,
                 # Empreinte du texte (chunk_key) : clé de fusion des classements et
                 # détection des copies (§8.9). Voir search_qdrant pour le choix.
-                "chunk_key":   hashlib.md5(p.payload.get("text", "").encode()).hexdigest(),
-                # Identifiant du point : chaque candidat BM25 est relu dans Qdrant
-                # avant usage (revalider_bm25), ses droits ne viennent jamais d'ici.
+                "chunk_key":   cle_extrait(texte),
+                # Identifiant du point : chaque candidat est relu par revalider_bm25.
                 "point_id":    p.id,
-                "text":        p.payload.get("text", ""),
-                "source":      p.payload.get("source", "inconnu"),
-                "source_id":   p.payload.get("source_id", ""),
-                "web_url":     p.payload.get("web_url", ""),
-                "collection":  collection_name,
-                "chunk_index": p.payload.get("chunk_index", None),
-                "autorises":   p.payload.get("autorises", []),
-                "interdits":   p.payload.get("interdits", []),
-                **champs_purview(p.payload),
-            }
-            for p in points
-        ]
-    except Exception as e:
-        logger.warning(f"[BM25] Impossible de charger {collection_name} : {e}")
-        return []
-
-
-def build_bm25_index() -> None:
-    """Charge les chunks des deux collections et construit l'index BM25.
-    Appelé au démarrage et après chaque synchronisation réussie.
-    Si Qdrant n'est pas disponible, l'index reste None et le retrieval
-    retombe sur la recherche vectorielle seule sans erreur.
-    """
-    global _bm25_index, _bm25_chunks
-    try:
-        docs     = _load_collection_chunks(COLLECTION)
-        docutech = _load_collection_chunks(DOCUMENTATION_COLLECTION)
-        _bm25_chunks = docs + docutech
-        if not _bm25_chunks:
-            # Corpus vide (avant la première indexation) : pas d'index, pas d'erreur.
-            logger.info("[BM25] Aucun chunk dans Qdrant : index vide, "
-                        "recherche vectorielle seule jusqu'à la première indexation.")
-            _bm25_index = None
-            return
-        tokenized = [c["text"].lower().split() for c in _bm25_chunks]
-        _bm25_index = BM25Okapi(tokenized)
-        logger.info(
-            "[BM25] Index construit : %d chunks '%s' + %d chunks '%s'",
-            len(docs), COLLECTION, len(docutech), DOCUMENTATION_COLLECTION
-        )
-    except Exception as e:
-        logger.warning(f"[BM25] Impossible de construire l'index : {e}")
-        _bm25_index = None
-        _bm25_chunks = []
+                "score":       p.score,
+                "text":        texte,
+                "source":      payload.get("source", "inconnu"),
+                "source_id":   payload.get("source_id", ""),
+                "web_url":     payload.get("web_url", ""),
+                "collection":  collection,
+                "chunk_index": payload.get("chunk_index", None),
+                "autorises":   payload.get("autorises", []),
+                "interdits":   payload.get("interdits", []),
+                **champs_purview(payload),
+            })
+    candidats.sort(key=lambda c: (c["rang"], -c["score"]))
+    return candidats
 
 
 def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list[dict]:
@@ -760,12 +871,13 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
     Relit dans Qdrant le payload ACTUEL de chaque candidat BM25 et réapplique
     les droits (ALLOW, DENY) sur ce payload (2.21.3, point 10).
 
-    L'index BM25 est un instantané : texte, droits et étiquette Purview datent de
-    sa dernière construction (démarrage ou fin de synchronisation). Entre deux
-    constructions, un droit retiré dans Qdrant (synchronisation en cours,
-    acl_resolver.py lancé à la main) restait valable sur ce chemin. Les droits
-    de l'instantané ne servent donc plus qu'à présélectionner les candidats ;
-    l'autorisation se décide ici, sur l'état actuel de Qdrant.
+    Jusqu'à la 2.22, l'index BM25 était un instantané en mémoire : un droit
+    retiré dans Qdrant après sa construction restait valable sur ce chemin.
+    Depuis la 2.23.0, les candidats viennent d'une requête Qdrant filtrée par
+    les droits (recherche_mots_cles) : ils sont déjà à jour. La relecture est
+    gardée comme seconde barrière, pour un coût d'une lecture par question :
+    l'autorisation se décide ici, sur l'état actuel de Qdrant, quelle que soit
+    l'origine des candidats.
 
     Refus par défaut : point disparu, identifiant absent, erreur de lecture de
     Qdrant, droit retiré ou refus ajouté → candidat écarté. Sans groupes
@@ -806,7 +918,7 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
         texte = payload.get("text", "")
         resultat.append({
             **c,
-            "chunk_key":   hashlib.md5(texte.encode()).hexdigest(),
+            "chunk_key":   cle_extrait(texte),
             "text":        texte,
             "source":      payload.get("source", "inconnu"),
             "source_id":   payload.get("source_id", ""),
@@ -818,15 +930,16 @@ def revalider_bm25(candidats: list[dict], user_groups: list[str] | None) -> list
         })
     if disparus or refuses:
         logger.info(f"[BM25] Relecture : {disparus} candidat(s) disparu(s) ou illisible(s), "
-                    f"{refuses} refusé(s) par les droits actuels (index antérieur à la modification)")
+                    f"{refuses} refusé(s) par les droits actuels (modifiés pendant la question)")
     return resultat
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Recharge les documents retirés de la recherche, puis construit l'index BM25."""
+    """Recharge les documents retirés de la recherche, puis met en place l'index
+    plein texte de Qdrant (créé au premier démarrage en 2.23.0)."""
     charger_bloques()
-    build_bm25_index()
+    preparer_index_texte()
 
 # ─────────────────────────────────────────
 # Modèles de données
@@ -885,7 +998,8 @@ RÈGLES ABSOLUES :
 # ─────────────────────────────────────────
 
 async def get_embedding(text: str) -> list[float]:
-    """Génère un embedding via le service d'embedding."""
+    """Génère l'embedding d'une question, précédée de EMBED_PREFIXE_QUESTION (2.23.0)."""
+    text = EMBED_PREFIXE_QUESTION + text
     async with httpx.AsyncClient(timeout=60) as client:
         if EMBED_API == "openai":
             r = await client.post(
@@ -915,16 +1029,24 @@ async def reclasser(query: str, chunks: list[dict]) -> list[dict]:
     if not RERANKER_URL or len(chunks) < 2:
         return chunks
     lot = chunks[:RERANK_MAX]
+    textes = [c.get("text", "")[:3000] for c in lot]
+    if RERANKER_API == "llamacpp":
+        corps = {"query": query, "documents": textes, "top_n": len(textes)}
+    else:
+        corps = {"query": query, "texts": textes, "truncate": True}
+    entetes = {"Authorization": f"Bearer {RERANKER_API_KEY}"} if RERANKER_API_KEY else {}
     t0 = time.time()
     try:
         async with httpx.AsyncClient(timeout=RERANK_TIMEOUT) as client:
-            r = await client.post(f"{RERANKER_URL}/rerank", json={
-                "query": query,
-                "texts": [c.get("text", "")[:3000] for c in lot],
-                "truncate": True,
-            })
+            r = await client.post(f"{RERANKER_URL}/rerank", json=corps, headers=entetes)
             r.raise_for_status()
-            scores = {item["index"]: item["score"] for item in r.json()}
+            donnees = r.json()
+            # TEI : liste [{index, score}] ; llama-server : {results: [{index, relevance_score}]}
+            items = donnees.get("results", []) if isinstance(donnees, dict) else donnees
+            scores = {item["index"]: item["score"] if "score" in item else item["relevance_score"]
+                      for item in items}
+            if len(scores) != len(lot):
+                raise ValueError(f"{len(scores)} scores reçus pour {len(lot)} extraits")
     except Exception as e:
         logger.warning(f"[RERANK] Échec, ordre de la recherche conservé : {type(e).__name__} {e}")
         return chunks
@@ -993,7 +1115,7 @@ async def etendre_complements(complements: list[dict], user_groups: list[str],
             continue
         fenetre = [
             {
-                "chunk_key":   hashlib.md5(r.payload.get("text", "").encode()).hexdigest(),
+                "chunk_key":   cle_extrait(r.payload.get("text", "")),
                 "score":       meilleur.get("score", 0.0),
                 "text":        r.payload.get("text", ""),
                 "source":      r.payload.get("source", "inconnu"),
@@ -1064,8 +1186,8 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
     d'accès ne sont jamais désactivés faute d'identité. /query et /v1 refusent
     déjà ce cas ; ce garde-fou protège une route future qui l'oublierait.
 
-    Recherche hybride : vectorielle (Qdrant, deux collections) + mots-clés (BM25),
-    fusionnée par Reciprocal Rank Fusion (RRF, k=60).
+    Recherche hybride : vectorielle + mots-clés (BM25, calculé par Qdrant depuis
+    la 2.23.0), deux collections, fusionnée par Reciprocal Rank Fusion (RRF, k=60).
 
     Clé RRF : empreinte du texte de l'extrait (chunk_key). Ce n'est PAS une
     identité unique : deux extraits au texte identique dans deux documents sont
@@ -1130,7 +1252,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
                     continue
             text = r.payload.get("text", "")
             vec_results.append({
-                "chunk_key":   hashlib.md5(text.encode()).hexdigest(),
+                "chunk_key":   cle_extrait(text),
                 "score":       r.score,
                 "text":        text,
                 "source":      r.payload.get("source", "inconnu"),
@@ -1146,28 +1268,13 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
         # Documents dont les droits n'ont pas pu être écrits : jamais renvoyés
         vec_results = [c for c in vec_results if not est_bloque(c["source"])]
 
-        # Résultats BM25 : recherche par mots-clés sur l'index en mémoire
-        bm25_results = []
-        if _bm25_index is not None and _bm25_chunks:
-            tokens = query.lower().split()
-            scores = _bm25_index.get_scores(tokens)
-            ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
-            for idx, score in ranked[:top_k * 2]:
-                if score < 0.01:
-                    break
-                c = _bm25_chunks[idx]
-                # Présélection sur les droits de l'instantané (rappel seulement) :
-                # l'autorisation est décidée par revalider_bm25, sur Qdrant.
-                if user_groups:
-                    if not any(g in c["autorises"] for g in user_groups):
-                        continue
-                    if not check_access(user_groups, c["autorises"], c["interdits"]):
-                        continue
-                bm25_results.append({"score": score, **c})
-                if len(bm25_results) >= top_k:
-                    break
-            bm25_results = revalider_bm25(bm25_results, user_groups)
-            bm25_results = [c for c in bm25_results if not est_bloque(c["source"])]
+        # Résultats BM25 : recherche par mots-clés dans Qdrant (2.23.0), même
+        # filtre d'accès (ALLOW) que la branche vectorielle, puis refus (DENY),
+        # relecture des droits actuels et documents retirés de la recherche.
+        bm25_results = [c for c in recherche_mots_cles(query, query_filter, top_k)
+                        if check_access(user_groups, c["autorises"], c["interdits"])][:top_k]
+        bm25_results = revalider_bm25(bm25_results, user_groups)
+        bm25_results = [c for c in bm25_results if not est_bloque(c["source"])]
 
         # Fusion par Reciprocal Rank Fusion (RRF, k=60)
         # Clé = empreinte du texte (voir la docstring : choix mesuré).
@@ -1182,7 +1289,14 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
             key = c["chunk_key"]
             rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
             rrf_data[key] = c
-        for rank, c in enumerate(bm25_results):
+        # Mots-clés : rang de chaque candidat dans SA collection, après les
+        # filtres (2.23.0) ; les scores BM25 de deux collections ne se comparent
+        # pas (voir recherche_mots_cles). Un extrait n'appartient qu'à une
+        # collection : il reçoit au plus une contribution BM25, comme avant.
+        rangs_bm25: dict[str, int] = {}
+        for c in bm25_results:
+            rank = rangs_bm25.get(c.get("collection", ""), 0)
+            rangs_bm25[c.get("collection", "")] = rank + 1
             key = c["chunk_key"]
             rrf_scores[key] = rrf_scores.get(key, 0) + 1 / (K + rank + 1)
             rrf_data[key] = c
@@ -1270,7 +1384,7 @@ async def search_qdrant(query: str, top_k: int = CANDIDATS, user_groups: list[st
             )
             source_chunks = [
                 {
-                    "chunk_key":   hashlib.md5(r.payload.get("text", "").encode()).hexdigest(),
+                    "chunk_key":   cle_extrait(r.payload.get("text", "")),
                     "score":       1.0,
                     "text":        r.payload.get("text", ""),
                     "source":      r.payload.get("source", "inconnu"),
@@ -1356,6 +1470,26 @@ def corriger_accents_citations(answer: str, noms: list[str]) -> str:
     return re.sub(r"\[([^\]\[:\n]{3,150}?)(\s*:[^\]\n]*)?\]", remplacer, answer)
 
 
+# Lien Markdown (ou image) dont l'adresse n'est pas absolue : « [texte](dossier/fichier) ».
+_LIEN_RELATIF = re.compile(
+    r'!?\[([^\[\]\n]+)\]\((?!https?://|mailto:)[^)\s]*(?:\s+"[^"\n]*")?\)',
+    re.IGNORECASE,
+)
+
+
+def retirer_liens_relatifs(answer: str) -> str:
+    """
+    Remplace par leur seul texte les liens Markdown recopiés d'un document dont
+    l'adresse est relative (« [a1.yml](azure/a1.yml) », « [voir](#section) »).
+    Open WebUI les résout par rapport à sa propre adresse, ce qui donne des
+    liens morts. Les adresses absolues (http, https, mailto) sont gardées, ainsi
+    que le contenu des blocs de code (2.23.0).
+    """
+    morceaux = re.split(r"(```.*?```)", answer, flags=re.DOTALL)
+    return "".join(m if m.startswith("```") else _LIEN_RELATIF.sub(r"\1", m)
+                   for m in morceaux)
+
+
 def normaliser_citations(answer: str, chunks: list[dict]) -> str:
     """
     Remet entre crochets les noms de fichiers sources que le modèle a cités sans
@@ -1364,8 +1498,10 @@ def normaliser_citations(answer: str, chunks: list[dict]) -> str:
     citations deviennent ainsi vérifiables et cliquables. Seuls les noms des
     documents réellement fournis au modèle sont concernés.
     Corrige aussi les citations dont seul un accent diffère du nom réel
-    (corriger_accents_citations).
+    (corriger_accents_citations) et retire les liens relatifs recopiés d'un
+    document (retirer_liens_relatifs, 2.23.0).
     """
+    answer = retirer_liens_relatifs(answer)
     noms = sorted({c.get("source", "").split("/")[-1] for c in chunks if c.get("source")},
                   key=len, reverse=True)
     answer = corriger_accents_citations(answer, noms)
@@ -2436,7 +2572,7 @@ async def admin_sync(
       1. indexer.py : indexe les fichiers nouveaux ou modifiés
       2. acl_resolver.py : met à jour les autorises[] dans Qdrant
       3. sp_indexer.py : bibliothèques SharePoint (si SP_SITES est renseigné)
-    L'index BM25 est ensuite reconstruit.
+    L'index plein texte de Qdrant est ensuite créé dans une collection nouvelle.
     """
     if credentials.credentials != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="Token admin invalide")
@@ -2491,6 +2627,7 @@ async def admin_sync(
                         "PYTHONIOENCODING": "utf-8",
                         "OLLAMA_URL": EMBED_BASE_URL,
                         "EMBED_MODEL": EMBED_MODEL,
+                        "EMBED_PREFIXE_DOCUMENT": EMBED_PREFIXE_DOCUMENT,
                         "QDRANT_URL": QDRANT_HOST,
                         "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                         "EMBED_NUM_GPU": EMBED_NUM_GPU,
@@ -2625,6 +2762,7 @@ async def admin_sync(
                             "PYTHONPATH": "/app",
                             "OLLAMA_URL": EMBED_BASE_URL,
                             "EMBED_MODEL": EMBED_MODEL,
+                            "EMBED_PREFIXE_DOCUMENT": EMBED_PREFIXE_DOCUMENT,
                             "QDRANT_URL": QDRANT_HOST,
                             "QDRANT_API_KEY": os.environ.get("QDRANT_API_KEY", ""),
                             "EMBED_NUM_GPU": EMBED_NUM_GPU,
@@ -2729,12 +2867,13 @@ async def admin_sync(
             f"errors={len(rapport['errors'])}"
         )
 
-        # Reconstruit même après une erreur partielle : une étape peut avoir
-        # modifié Qdrant, et l'index BM25 doit toujours refléter son contenu.
+        # L'index plein texte de Qdrant suit le contenu sans reconstruction
+        # (2.23.0). Il reste à le créer dans une collection apparue pendant
+        # cette synchronisation (première indexation), même après une erreur.
         try:
-            build_bm25_index()
+            preparer_index_texte()
         except Exception as e:
-            logger.error(f"[SYNC] Reconstruction BM25 échouée : {e}")
+            logger.error(f"[SYNC] Index plein texte : {e}")
 
         # Contrôle de cloisonnement sur l'index qui vient d'être mis à jour
         try:

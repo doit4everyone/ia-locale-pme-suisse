@@ -10,7 +10,9 @@ incohérent refusé) et est_refus_standard (seule la phrase de refus exacte
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py
 
-Attendu : « 20 tests OK », code de sortie 0.
+Attendu : « 28 tests OK », code de sortie 0.
+
+2.23.0 : retrait des liens relatifs recopiés d'un document (retirer_liens_relatifs).
 """
 
 import sys
@@ -116,6 +118,37 @@ resultats += [
           "Le forfait est de CHF 9 999 [21_Contrat.docx]. Le reste ne figure pas dans les documents disponibles.", False),
     # 13. Autre formulation de refus : passe par le juge
     refus("refus : autre formulation", "Aucun document fourni ne contient d'information pertinente sur les clients.", False),
+]
+
+
+def lien(nom, reponse, attendu):
+    obtenu = main.normaliser_citations(reponse, CHUNKS)
+    ok = obtenu == attendu
+    print(f"{'OK    ' if ok else 'ECHEC '} {nom}")
+    if not ok:
+        print(f"       obtenu  : {obtenu}")
+        print(f"       attendu : {attendu}")
+    return ok
+
+
+resultats += [
+    # 2.23.0 : liens relatifs recopiés d'un document, morts dans Open WebUI
+    lien("lien relatif : texte seul",
+         "* [a1-azure-storage-keys-listed.yml](azure/a1-azure-storage-keys-listed.yml) : T1552.005",
+         "* a1-azure-storage-keys-listed.yml : T1552.005"),
+    lien("lien vers une ancre : texte seul", "Voir [la procédure](#procedure-d-import).",
+         "Voir la procédure."),
+    lien("lien relatif avec titre", 'Voir [le chapitre](../docs/11.html "Chapitre 11").',
+         "Voir le chapitre."),
+    lien("image relative : texte seul", "![schéma](images/schema.png)", "schéma"),
+    lien("lien https gardé", "Voir [la documentation](https://docs.utmstack.com).",
+         "Voir [la documentation](https://docs.utmstack.com)."),
+    lien("lien mailto gardé", "Écrire à [l'équipe](mailto:it@exemple.ch).",
+         "Écrire à [l'équipe](mailto:it@exemple.ch)."),
+    lien("bloc de code inchangé", "```\n[x](azure/x.yml)\n```", "```\n[x](azure/x.yml)\n```"),
+    lien("citation avec lien relatif : citation gardée",
+         "Durée de 24 mois [21_Contrat_Maintenance_Baumont_Industries.docx](CLIENTS/21.docx).",
+         "Durée de 24 mois [21_Contrat_Maintenance_Baumont_Industries.docx]."),
 ]
 if all(resultats):
     print(f"{len(resultats)} tests OK")

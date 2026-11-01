@@ -18,8 +18,10 @@ description: "Guides décisionnels et plan d'apprentissage, en PDF et en Word."
 
 | Guide | PDF | Word |
 |---|---|---|
-| IA locale pour PME suisse : guide décisionnel et technique | [PDF](gpu-ia-pme-suisse-2026.pdf) | [DOCX](gpu-ia-pme-suisse-2026.docx) |
-| Plan d'apprentissage RAG local, 17 phases, octobre 2026 | [PDF](plan-apprentissage-rag-2026.pdf) | [DOCX](plan-apprentissage-rag-2026.docx) |
+| IA locale pour PME suisse : guide décisionnel et technique, état au 31 août 2026 | [PDF](gpu-ia-pme-suisse-2026.pdf) | [DOCX](gpu-ia-pme-suisse-2026.docx) |
+| Plan d'apprentissage RAG local, 17 phases, état au 11 octobre 2026 | [PDF](plan-apprentissage-rag-2026.pdf) | [DOCX](plan-apprentissage-rag-2026.docx) |
+
+> **Documents datés.** Ces guides photographient le projet à leur date. Le guide décisionnel donne des prix et des configurations indicatifs. Le plan d'apprentissage précède la 2.22 et la 2.23 : il utilise `nomic-embed-text` (le modèle recommandé est désormais `bge-m3`), l'index BM25 en mémoire (la recherche par mots-clés se fait désormais dans Qdrant) et les groupes par leur nom (les droits sont comparés en SID). Pour une installation, le [guide en ligne](../docs/stack-ia-locale/index.md) fait foi.
 
 ---
 

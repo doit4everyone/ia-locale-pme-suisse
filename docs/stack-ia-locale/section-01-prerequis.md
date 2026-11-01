@@ -124,7 +124,7 @@ usermod -aG docker $USER
 docker --version && docker compose version
 ```
 
-Les commandes se lancent en root (`sudo -i`). Versions validées : **Docker 29.7.2** et **Compose 5.5.0** sur la première installation du lab, puis **Docker 29.9.0** et **Compose 5.6.0** sur une VM neuve, où le dépôt de Docker pour Ubuntu 26.04 (`resolute`) a fourni les versions les plus récentes sans autre manipulation.
+Les commandes se lancent en root (`sudo -i`). Versions validées : **Docker 29.7.2** et **Compose 5.5.0** sur la première installation du lab, puis **Docker 29.9.0** et **Compose 5.6.0** sur une VM neuve, et **Docker 29.9.2** et **Compose 5.6.1** au rejeu du 1er novembre 2026, sur une VM neuve où le dépôt de Docker pour Ubuntu 26.04 (`resolute`) a fourni les versions les plus récentes sans autre manipulation.
 
 ---
 

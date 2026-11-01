@@ -386,7 +386,7 @@ for user, count in users.most_common():
 
 La nLPD exige une durée de rétention proportionnelle à la finalité du traitement. Pour un audit d'accès documentaire en entreprise, 1 an est la pratique standard.
 
-Créer la configuration logrotate :
+Depuis la 2.23.0, `deploy.sh` crée cette configuration si elle n'existe pas. Sur une installation antérieure, la créer à la main :
 
 ```bash
 sudo tee /etc/logrotate.d/rag-nlpd << 'EOF'
@@ -618,6 +618,8 @@ Quand un fichier est supprimé ou déplacé sur le file server, ses chunks reste
 Mécanisme : comparaison entre la liste des `source_name` dans Qdrant et la liste des fichiers présents sur le partage. Les chunks dont la source est absente du partage sont supprimés.
 
 Fenêtre d'exposition maximale : 1 heure (cadence du Schedule n8n).
+
+**Inventaire incomplet (2.23.0).** Si un dossier du partage n'a pas pu être parcouru, aucun orphelin n'est supprimé : un document absent de la liste peut se trouver dans ce dossier. Les orphelins présumés sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec (code 2, alerte) ; détail au §5.4.2b.
 
 ### §9.7.1b Garde-fou : abandon si panne globale
 

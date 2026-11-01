@@ -9,6 +9,6 @@
   <ItemGroup>
     <!-- Paquet Linux du SDK MIP : le paquet générique ne contient pas les bibliothèques natives Linux -->
     <PackageReference Include="Microsoft.InformationProtection.File.Ubuntu2404" Version="1.18.148" />
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.*" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.91.1" />
   </ItemGroup>
 </Project>

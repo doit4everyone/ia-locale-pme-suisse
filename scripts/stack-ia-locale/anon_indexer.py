@@ -121,13 +121,17 @@ except ImportError:
 
 OLLAMA_URL    = os.getenv("OLLAMA_URL",        "http://<IP-HOTE-OLLAMA>:11434")
 EMBED_NUM_GPU = os.getenv("EMBED_NUM_GPU", "")   # « 0 » : embedding sur le CPU (§10)
-EMBED_MODEL   = os.getenv("EMBED_MODEL",       "nomic-embed-text")
+EMBED_MODEL   = os.getenv("EMBED_MODEL",       "bge-m3")
 # « ollama » (défaut) ou « openai » (vLLM : /v1/embeddings, §2). OLLAMA_URL
 # désigne dans les deux cas le serveur d'embedding.
 EMBED_API     = os.getenv("EMBED_API", "").strip().lower() or "ollama"
 if EMBED_API not in ("ollama", "openai"):
     sys.exit(f"EMBED_API={EMBED_API!r} : valeurs acceptées « ollama » ou « openai »")
 VLLM_API_KEY  = os.getenv("VLLM_API_KEY", "")
+# Préfixe ajouté au texte de chaque extrait avant l'embedding (2.23.0). Certains
+# modèles l'attendent (nomic-embed-text : « search_document: ») ; vide par défaut.
+# « \n » dans le .env donne un retour à la ligne. Le changer réindexe tout.
+EMBED_PREFIXE_DOCUMENT = os.getenv("EMBED_PREFIXE_DOCUMENT", "").replace("\\n", "\n")
 QDRANT_URL    = os.getenv("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None   # clé d'API de Qdrant, vide = aucune
 
@@ -152,7 +156,35 @@ MIN_CHUNK_WORDS = _env_nombre("MIN_CHUNK_WORDS", "8")
 # Version de l'algorithme de découpage. À incrémenter à chaque modification
 # de chunk_blocks() : les fichiers indexés avec une autre version sont
 # réindexés automatiquement au passage suivant.
-CHUNKER_VERSION = 2
+CHUNKER_VERSION = 3  # 3 (2.23.0) : en-tête du document en tête de chaque extrait
+
+# En-tête ajouté à chaque extrait (2.23.0). Sans lui, l'extrait qui contient le
+# tableau des délais d'un contrat ne porte pas le nom du client : la recherche
+# confondait les contrats de même structure (constaté sur le corpus enrichi :
+# délai de l'Étude Rochat donné pour l'Hôtel Lac-Azur). L'en-tête entre dans
+# l'embedding et dans la recherche par mots-clés. main.py le retire pour
+# calculer l'empreinte de l'extrait (détection des copies, §8.9).
+EN_TETE_DEBUT = "Extrait de « "
+
+
+def en_tete_extrait(source_name: str, blocks: list[str]) -> str:
+    """« Extrait de « fichier », dossier D : titre. » ; titre = premier bloc, 120 caractères au plus."""
+    dossier, _, fichier = source_name.rpartition("/")
+    titre = ""
+    for b in blocks:
+        t = b.strip().lstrip("#").strip()
+        if t and not t.startswith("---"):
+            titre = t.splitlines()[0][:120]
+            break
+    morceaux = [f"{EN_TETE_DEBUT}{fichier} »"]
+    if dossier:
+        morceaux.append(f"dossier {dossier}")
+    return ", ".join(morceaux) + (f" : {titre}" if titre else "") + "."
+
+
+def extraits_avec_en_tete(source_name: str, blocks: list[str], chunks: list[str]) -> list[str]:
+    en_tete = en_tete_extrait(source_name, blocks)
+    return [f"{en_tete}\n{c}" for c in chunks]
 
 # Extensions indexées. acl_resolver.py doit utiliser EXACTEMENT la même liste,
 # sinon ses chunks sont considérés comme orphelins et supprimés.
@@ -602,7 +634,7 @@ def get_embedding(text: str) -> list[float]:
     import re as _re
     # Nettoyer les suites de points répétitifs (tables des matières PDF)
     # qui font planter nomic-embed-text avec une erreur 500.
-    text = _re.sub(r'[. ]{10,}', ' ', text).strip()
+    text = EMBED_PREFIXE_DOCUMENT + _re.sub(r'[. ]{10,}', ' ', text).strip()
     if EMBED_API == "openai":
         return _embedding_openai(text)
     r = http_client().post(
@@ -724,7 +756,7 @@ def lire_etat_existant(qdrant: QdrantClient, source_name: str, collection_name: 
         limit=1,
         with_payload=[
             "content_hash", "embed_model", "chunk_size", "chunk_overlap",
-            "min_chunk_words", "chunker_version", "org_name",
+            "min_chunk_words", "chunker_version", "org_name", "embed_prefixe_document",
             *ACL_FIELDS,
         ],
         with_vectors=False,
@@ -749,6 +781,7 @@ def est_inchange(existant: dict | None, content_hash: str, org_arg: str) -> bool
         and existant.get("chunk_overlap") == CHUNK_OVERLAP
         and existant.get("min_chunk_words") == MIN_CHUNK_WORDS
         and existant.get("chunker_version") == CHUNKER_VERSION
+        and (existant.get("embed_prefixe_document") or "") == EMBED_PREFIXE_DOCUMENT
     )
 
 
@@ -839,7 +872,7 @@ def index_file(
             )
         }
 
-    chunks = chunk_blocks(blocks)
+    chunks = extraits_avec_en_tete(source_name, blocks, chunk_blocks(blocks))
     print(f"  Chunks générés : {len(chunks)}")
     if not chunks:
         supprimer_chunks(qdrant, source_name, [COLLECTION, DOCUMENTATION_COLLECTION])
@@ -872,6 +905,7 @@ def index_file(
                 "chunk_overlap": CHUNK_OVERLAP,
                 "min_chunk_words": MIN_CHUNK_WORDS,
                 "chunker_version": CHUNKER_VERSION,
+                "embed_prefixe_document": EMBED_PREFIXE_DOCUMENT,
                 "chunk_index": i,
                 "filepath": filepath,
                 "indexed_at": indexed_at,
@@ -951,6 +985,19 @@ def index_corpus(
 
     valider_configuration()
 
+    # Parcours du corpus AVANT toute écriture dans Qdrant (2.23.0) : avec --reset,
+    # init_collection efface les collections ; si un dossier est illisible ou le
+    # partage vide, la réindexation ne reconstruirait qu'une partie du corpus et
+    # les autres documents seraient perdus (revue externe du 31 octobre 2026).
+    all_files, skipped_noise, walk_errors = lister_fichiers(corpus_dir)
+    if reset and (walk_errors or not all_files):
+        print("Erreur : --reset refusé, le corpus n'a pas pu être parcouru en entier "
+              f"({len(walk_errors)} dossier(s) illisible(s), {len(all_files)} fichier(s) trouvé(s)). "
+              "Les collections n'ont pas été touchées.")
+        for err in walk_errors:
+            print(f"  {err}")
+        sys.exit(1)
+
     print(f"Connexion Qdrant : {QDRANT_URL}")
     qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     init_collection(qdrant_client, reset=reset)
@@ -983,7 +1030,6 @@ def index_corpus(
           f"minimum {MIN_CHUNK_WORDS}, chunker v{CHUNKER_VERSION}")
     print(f"Mode                      : {'réindexation forcée' if force else 'incrémental'}")
 
-    all_files, skipped_noise, walk_errors = lister_fichiers(corpus_dir)
     if skipped_noise:
         print(f"Fichiers bruit exclus : {len(skipped_noise)} "
               f"({', '.join(skipped_noise[:5])}{'...' if len(skipped_noise) > 5 else ''})")
@@ -1102,7 +1148,9 @@ def index_corpus(
         }, f, ensure_ascii=False, indent=2)
     print(f"\nRapport sauvegardé : {rapport_path}")
 
-    return 2 if erreurs else 0
+    # Un parcours incomplet (dossier illisible) est un échec (2.23.0) : sinon une
+    # indexation partielle se disait réussie (revue externe du 31 octobre 2026).
+    return 2 if (erreurs or walk_errors) else 0
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ Pour des réponses reproductibles, fixer LLM_SEED dans le .env avant la campagne
 import argparse
 import json
 import os
+import re
 import statistics
 import sys
 import time
@@ -62,8 +63,12 @@ AVERTISSEMENT = "le contrôle automatique n'a pas pu rattacher"
 
 
 def normaliser(texte: str) -> str:
-    """Minuscules, sans accents, sans espaces ni apostrophes (4 200 = 4'200 = 4200)."""
-    t = unicodedata.normalize("NFKD", texte.lower())
+    """Minuscules, sans accents, sans espaces ni apostrophes (4 200 = 4'200 = 4200).
+    Virgule, point-virgule et deux-points suivis d'une espace sont ignorés (2.23.0) :
+    « 1 an, à compter » contient l'élément interdit « 1 an à compter ». Une virgule
+    décimale (1,5) n'est pas suivie d'une espace : elle est gardée."""
+    t = re.sub(r"[,;:](?=[\s  ])", "", texte)
+    t = unicodedata.normalize("NFKD", t.lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
     for c in (" ", "\u00a0", "\u202f", "'", "\u2019"):
         t = t.replace(c, "")

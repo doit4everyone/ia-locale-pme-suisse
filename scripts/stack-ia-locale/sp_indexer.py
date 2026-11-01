@@ -413,7 +413,7 @@ def etat_existant(qdrant: QdrantClient, source: str) -> dict | None:
     points, _ = qdrant.scroll(
         collection_name=idx.COLLECTION, scroll_filter=filtre_source(source), limit=1,
         with_payload=["sp_ctag", "embed_model", "chunk_size", "chunk_overlap",
-                      "min_chunk_words", "chunker_version", "autorises"],
+                      "min_chunk_words", "chunker_version", "embed_prefixe_document", "autorises"],
         with_vectors=False,
     )
     return points[0].payload if points else None
@@ -424,7 +424,8 @@ def parametres_identiques(e: dict) -> bool:
             and e.get("chunk_size") == idx.CHUNK_SIZE
             and e.get("chunk_overlap") == idx.CHUNK_OVERLAP
             and e.get("min_chunk_words") == idx.MIN_CHUNK_WORDS
-            and e.get("chunker_version") == idx.CHUNKER_VERSION)
+            and e.get("chunker_version") == idx.CHUNKER_VERSION
+            and (e.get("embed_prefixe_document") or "") == idx.EMBED_PREFIXE_DOCUMENT)
 
 
 def sources_indexees(qdrant: QdrantClient, site_url: str) -> set[str]:
@@ -476,6 +477,17 @@ def lister_fichiers(c: httpx.Client, drive_id: str) -> list[tuple[str, dict]]:
 def libelle_site(url: str) -> str:
     chemin = urlparse(url).path.rstrip("/")
     return chemin.split("/")[-1] if chemin else "racine"
+
+
+def libelles_en_double(sites: list[str]) -> dict[str, list[str]]:
+    """Sites dont le libellé (dernier segment de l'URL) est le même, sans tenir
+    compte de la casse : /sites/RH et /teams/RH donneraient la même source
+    « SharePoint/RH/… », donc les mêmes identifiants de points et des
+    suppressions croisées (revue externe du 31 octobre 2026). Refusé (2.23.0)."""
+    par_libelle: dict[str, list[str]] = {}
+    for s in sites:
+        par_libelle.setdefault(libelle_site(s).lower(), []).append(s)
+    return {k: v for k, v in par_libelle.items() if len(v) > 1}
 
 
 def indexer_site(site_url: str, jetons: Jetons, annuaire: Annuaire, qdrant: QdrantClient,
@@ -649,7 +661,7 @@ def traiter_fichier(c, qdrant, annuaire, groupes, groupes_prop, site_url, drive,
             qdrant.delete(collection_name=idx.COLLECTION, points_selector=filtre_source(source))
         return entree
 
-    chunks = idx.chunk_blocks(blocs)
+    chunks = idx.extraits_avec_en_tete(source, blocs, idx.chunk_blocks(blocs))  # en-tête (2.23.0)
     entree["chunks"] = len(chunks)
     if not autorises:
         entree.setdefault("notes", []).append("aucun accès traduit : invisible pour tous (refus par défaut)")
@@ -676,6 +688,7 @@ def traiter_fichier(c, qdrant, annuaire, groupes, groupes_prop, site_url, drive,
             "chunk_overlap": idx.CHUNK_OVERLAP,
             "min_chunk_words": idx.MIN_CHUNK_WORDS,
             "chunker_version": idx.CHUNKER_VERSION,
+            "embed_prefixe_document": idx.EMBED_PREFIXE_DOCUMENT,
             "chunk_index": i,
             "filepath": e.get("webUrl", ""),
             "indexed_at": maintenant,
@@ -721,6 +734,13 @@ def main() -> int:
                                 ("SP_CERT_THUMBPRINT", args.thumbprint), ("SP_SITES", sites)) if not v]
     if manquants:
         print("Configuration incomplète : " + ", ".join(manquants))
+        return 1
+    doubles = libelles_en_double(sites)
+    if doubles:
+        for libelle, urls in doubles.items():
+            print(f"Configuration refusée : sites de même libellé « {libelle} » : {', '.join(urls)}")
+        print("Deux sites dont l'URL finit par le même nom donneraient les mêmes sources dans Qdrant "
+              "(§13.6). Aucun site n'est indexé.")
         return 1
 
     idx.valider_configuration()

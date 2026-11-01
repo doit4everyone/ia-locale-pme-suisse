@@ -38,7 +38,7 @@ n8n (toutes les heures) → POST /admin/sync (rag-api)
         ├→ groupes SharePoint du site       (API REST SharePoint, même application)
         ├→ UPN, groupes, propriétaires      (Graph, RAG-Identity-Resolver, §11)
         └→ chunks avec autorises[]          (Qdrant, collection documents)
-   → reconstruction de l'index BM25
+   → index plein texte vérifié (créé pour une nouvelle collection, 2.23.0)
 ```
 
 ### §13.1.2 Deux applications, deux rôles
@@ -242,6 +242,15 @@ En plus des champs d'`indexer.py` :
 - **Contenu inchangé** (même `cTag`, mêmes paramètres de découpage) : le fichier n'est pas retéléchargé. Seules ses permissions sont recalculées, et mises à jour si elles ont changé.
 - **Fichier supprimé** de SharePoint : ses chunks sont supprimés, **uniquement si le parcours du site s'est terminé sans erreur**. Un incident réseau ne peut pas provoquer d'effacement.
 - **Erreur sur un fichier** : les autres fichiers sont traités, seul le nettoyage des orphelins du site est suspendu.
+- **Site retiré de `SP_SITES`** : ses chunks **restent** dans Qdrant. Le nettoyage des orphelins ne parcourt que les sites listés, et un `SP_SITES` vide n'appelle plus `sp_indexer.py` du tout. Constaté dans le lab le 27 octobre 2026 : avec `SP_SITES` vide, les 182 extraits SharePoint restaient dans l'index, avec leurs permissions enregistrées, et ont été supprimés à la main. La purge se fait par la procédure ci-dessous (revue externe du 31 octobre 2026).
+
+**Retirer un site de l'index.** D'abord retirer le site de `SP_SITES` dans le `.env` et recréer la RAG API (`docker compose up -d rag-api`), pour qu'aucune synchronisation ne le réindexe. Puis compter ses extraits, en remplaçant l'URL par celle du site, exactement comme dans `SP_SITES` :
+
+```bash
+docker exec rag-api python3 -c "import os; from qdrant_client import QdrantClient as Q, models as m; q=Q(url=os.environ['QDRANT_HOST'], api_key=os.environ['QDRANT_API_KEY']); f=m.Filter(must=[m.FieldCondition(key='source_type', match=m.MatchValue(value='sharepoint')), m.FieldCondition(key='sp_site', match=m.MatchValue(value='https://<tenant>.sharepoint.com/sites/RH'))]); print(q.count(os.environ['QDRANT_COLLECTION'], count_filter=f, exact=True).count)"
+```
+
+Relancer la même commande en remplaçant `print(q.count(os.environ['QDRANT_COLLECTION'], count_filter=f, exact=True).count)` par `q.delete(os.environ['QDRANT_COLLECTION'], points_selector=f, wait=True)`, puis compter de nouveau. **Attendu :** un nombre d'extraits, puis `0`. Pour retirer tout SharePoint, le même filtre sans la condition `sp_site`.
 
 ### §13.6.4 Citations
 
@@ -269,7 +278,7 @@ LLM_NUM_CTX=16384
 JUDGE_NUM_CTX=8192
 ```
 
-`SP_SITES` doit contenir exactement les sites accordés en §13.3.2. Un site listé mais non accordé est signalé en erreur dans le rapport ; un site accordé mais non listé n'est pas indexé.
+`SP_SITES` doit contenir exactement les sites accordés en §13.3.2. Un site listé mais non accordé est signalé en erreur dans le rapport ; un site accordé mais non listé n'est pas indexé. **Deux sites ne peuvent pas finir par le même nom** (`/sites/RH` et `/teams/RH`, casse ignorée) : leurs fichiers auraient la même source dans Qdrant (`SharePoint/RH/…`), donc les mêmes identifiants d'extraits, et le nettoyage d'un site pourrait effacer ceux de l'autre. Depuis la 2.23.0, `sp_indexer.py` refuse cette configuration et n'indexe aucun site ; la synchronisation le traite comme une configuration incomplète. De même, aucun dossier de premier niveau du partage de fichiers ne doit s'appeler `SharePoint`.
 
 ### §13.6.6 Déploiement
 
@@ -302,9 +311,9 @@ docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/sp_indexer.
 
 Le rapport (`/var/log/rag/rapport_sharepoint_*.json`) donne, pour chaque fichier, son statut et ses `autorises[]` traduits : c'est le moment de les comparer à la matrice de test, avant toute écriture.
 
-### §13.6.7 Index BM25
+### §13.6.7 Index de la recherche par mots-clés
 
-`/admin/sync` reconstruit maintenant l'index BM25 **après chaque synchronisation, même partiellement en échec** : une étape peut avoir modifié Qdrant avant l'échec d'une autre, et l'index doit refléter son contenu. Une indexation lancée à la main, en dehors de `/admin/sync`, ne le reconstruit pas : redémarrer `rag-api` ou lancer une synchronisation.
+Depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (§8.6) : l'index plein texte est tenu à jour par Qdrant à chaque écriture, y compris celles de `sp_indexer.py`, et une indexation lancée à la main est prise en compte sans autre action. `/admin/sync` vérifie seulement, en fin de synchronisation, que chaque collection a son index. Jusqu'à la 2.22, `/admin/sync` reconstruisait l'index BM25 en mémoire après chaque synchronisation, et une indexation manuelle demandait de redémarrer `rag-api`.
 
 ---
 
@@ -398,7 +407,7 @@ Le point commun : **un outil d'IA rend trouvable ce qui n'était que caché dans
 | Sonde après accord | `sonde_sharepoint.py` | Fichiers, permissions, groupes du site lisibles |
 | Simulation | `sp_indexer.py --dry-run` | `autorises[]` conformes à la matrice, chiffrés détectés |
 | Incrémental | Second passage | Tous les fichiers « inchangés » |
-| Synchronisation | `/admin/sync` | Étape `sharepoint` en succès, BM25 reconstruit |
+| Synchronisation | `/admin/sync` | Étape `sharepoint` en succès |
 | Cloisonnement | Matrice avec trois comptes | Toutes les réponses conformes |
 | Citations | Question sur un document SharePoint | Lien cliquable vers le document |
 | Fenêtres de contexte | `ollama ps` | Modèle principal et juge aux valeurs demandées |

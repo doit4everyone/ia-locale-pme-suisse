@@ -327,7 +327,7 @@ Tests unitaires, sans Qdrant ni modèle, quelques secondes :
 docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 ```
 
-**Attendu :** `14 tests OK`.
+**Attendu :** `27 tests OK`.
 
 Échecs d'écriture des droits (§16.5.2), Qdrant simulé :
 
@@ -335,7 +335,7 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py
 docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 ```
 
-**Attendu :** `46 tests OK`.
+**Attendu :** `51 tests OK`.
 
 Droits par SID (§16.5.3) : lecture de `smbcacls --numeric` sur des sorties réelles, `tokenGroups`, décision d'accès, refus à « Tout le monde » et aux groupes intégrés ou locaux :
 

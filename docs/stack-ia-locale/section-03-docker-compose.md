@@ -59,9 +59,9 @@ LLM_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
 EMBED_BASE_URL=http://<IP-SERVEUR-MODELES>:11434
 LLM_MODEL=qwen3:14b
 JUDGE_MODEL=qwen3:4b-instruct
-EMBED_MODEL=nomic-embed-text
+EMBED_MODEL=bge-m3
 # Le modèle d'embedding doit rester celui qui a servi à indexer :
-# en cas de changement de modèle, réindexer avec indexer.py --reset
+# en cas de changement de modèle, réindexer (§10.7)
 
 # Qdrant
 QDRANT_HOST=http://qdrant:6333
@@ -159,8 +159,7 @@ Depuis la 2.21.0, le fichier fixe **toutes** les dépendances à la version exac
 ```
 # Dépendances directes :
 #   fastapi, uvicorn[standard], python-dotenv, httpx  : API
-#   qdrant-client                                      : index vectoriel
-#   rank-bm25                                          : recherche par mots-clés
+#   qdrant-client                                      : index vectoriel et recherche par mots-clés (2.23.0)
 #   ldap3                                              : groupes Active Directory (auth.py)
 #   msal                                               : Entra ID, Partie 3 (auth.py, teams.py)
 #   python-docx, pdfplumber, python-pptx               : extraction de texte (indexer.py)
@@ -172,9 +171,7 @@ fastapi==0.143.2
 ...
 ```
 
-L'index BM25 tient en mémoire : environ 1 Mo pour 1 000 chunks, 200 Mo pour 50 000 chunks. Au-delà de 200 000 chunks, migrer vers Qdrant BM42 (sparse vectors, voir §10).
-
-`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. `rank-bm25` est requis par `main.py` pour le retrieval hybride BM25 : un index de recherche par mots-clés est construit en mémoire au démarrage du conteneur et fusionné avec la recherche vectorielle par Reciprocal Rank Fusion (RRF). L'index BM25 inclut le champ `chunk_index` pour que l'extension de contexte fonctionne même quand un chunk BM25 gagne le classement RRF.
+`ldap3` est requis par `auth.py` pour la résolution des groupes Active Directory. `python-docx`, `pdfplumber` et `python-pptx` sont requis par `indexer.py`, qui tourne dans ce même conteneur via `/admin/sync` et qui indexe les fichiers `.docx`, `.pdf`, `.pptx`, `.txt` et `.md`. Depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (1.20 au minimum), sur un index plein texte du champ `text`, avec le score BM25 : `rank-bm25` n'est plus utilisé. L'index est toujours à jour, ne prend plus de mémoire dans la RAG API, et le filtre des droits s'applique pendant la recherche, comme pour la recherche vectorielle. La RAG API le crée au démarrage s'il manque (une installation existante migre sans réindexer) ; accents, majuscules, ponctuation et mots vides français sont ignorés, la racinisation est réglable (`BM25_RACINISATION`, désactivée). Les deux classements sont fusionnés par Reciprocal Rank Fusion (RRF), les mots-clés étant classés par rang dans chaque collection : leurs scores ne se comparent pas d'une collection à l'autre.
 
 **api/Dockerfile**
 
@@ -220,8 +217,8 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
 | Service | Image | Empreinte validée |
 |---|---|---|
-| Qdrant | `qdrant/qdrant:v1.19.2` (2.22.5) | `sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad` |
-| n8n | `n8nio/n8n:2.36.9` | `sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d` |
+| Qdrant | `qdrant/qdrant:v1.20.0` (2.23.0) | `sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2` |
+| n8n | `n8nio/n8n:2.45.6` (2.23.0) | `sha256:45edf89655fd66dd55ea9336c1791ad14777599fdbf6c5aec6db583ede99a40b` |
 | Open WebUI | `ghcr.io/open-webui/open-webui:v0.11.3` | `sha256:41daa0cf2561a5d4c8d1ff31ee2a98d93ab4d3ac2605cac69366ff6a3374a933` |
 | Nginx | `nginx:1.30.6-alpine` | `sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5` |
 
@@ -231,13 +228,14 @@ Depuis la 2.21.0, le Compose du dépôt désigne chaque image du déploiement st
 
 ```yaml
 services:
-  # Reranker (§10.8), OPTIONNEL : désactivé dans la configuration recommandée.
+  # Reranker sur le processeur de la VM (§10.8), OPTIONNEL : trop lent pour un usage
+  # en service. Le reranker recommandé tourne sur la carte du serveur de modèles.
   # Démarrage : docker compose --profile reranker up -d reranker, puis RERANKER_URL=http://reranker:80
   reranker:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
     container_name: reranker
     profiles: ["reranker"]
-    command: ["--model-id", "Alibaba-NLP/gte-multilingual-reranker-base", "--auto-truncate", "--max-batch-tokens", "4096", "--max-concurrent-requests", "64"]
+    command: ["--model-id", "${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}", "--auto-truncate", "--max-batch-tokens", "4096", "--max-concurrent-requests", "64"]
     mem_limit: 4g
     environment:
       - HF_HUB_OFFLINE=${RERANKER_OFFLINE:-0}
@@ -247,7 +245,7 @@ services:
 
 
   qdrant:
-    image: qdrant/qdrant:v1.19.2
+    image: qdrant/qdrant:v1.20.0@sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2
     container_name: qdrant
     ports:
       # Publié sur la boucle locale uniquement. Docker bypass UFW via iptables :
@@ -264,7 +262,8 @@ services:
     restart: unless-stopped
 
   n8n:
-    image: n8nio/n8n:2.36.9@sha256:a9e2e3c8006ed453238266669ea1274be7136f515abe290a2f75a0ab9044c93d
+    # 2.45.6 (2.23.0) : avis de sécurité GHSA-9p7v-45m2-wxgj, GHSA-gx3v-3x3v-f8r5, GHSA-prmc-fg87-r4gh et suivants
+    image: n8nio/n8n:2.45.6@sha256:45edf89655fd66dd55ea9336c1791ad14777599fdbf6c5aec6db583ede99a40b
     container_name: n8n
     # Aucun port publié : n8n est joint par Nginx, https://<RAG_FQDN>:5678 (§9.8)
     environment:
@@ -284,6 +283,14 @@ services:
       # Fuseau des déclencheurs planifiés (défaut de n8n : America/New_York)
       - GENERIC_TIMEZONE=Europe/Zurich
       - TZ=Europe/Zurich
+      # Aucune connexion aux serveurs de n8n (2.23.0) : télémétrie, recherche de
+      # nouvelles versions, modèles en ligne. Réglages de la page « Isolate n8n ».
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
+      - N8N_DIAGNOSTICS_CONFIG_FRONTEND=
+      - N8N_DIAGNOSTICS_CONFIG_BACKEND=
+      - EXTERNAL_FRONTEND_HOOKS_URLS=
     volumes:
       - ./n8n_data:/home/node/.n8n
     restart: unless-stopped
@@ -377,7 +384,7 @@ services:
       - /mnt/corpus-root:/mnt/corpus-root:ro
       # Certificat CA du contrôleur de domaine pour la validation TLS LDAP
       - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
-      # Logs nLPD persistants sur l'hôte (audit, rétention 90 jours)
+      # Logs nLPD persistants sur l'hôte (audit, rétention 365 jours, §9.4.4)
       - /var/log/rag:/var/log/rag
     depends_on:
       - qdrant
@@ -561,7 +568,7 @@ ls -la /var/log/rag/
 
 ## §3.7 Sauvegarde et restauration Qdrant
 
-**Statut :** validé en lab le 17 octobre 2026 sur une VM Ubuntu 26.04 neuve, déployée par `deploy.sh` (disque de données chiffré, §1.5) : snapshot des deux collections, copie hors du dossier de Qdrant, suppression complète des données, restauration. Les deux collections ont été retrouvées à l'identique (76 et 1 616 extraits), la synchronisation des droits a réussi et le test de cloisonnement a donné les mêmes verdicts qu'avant.
+**Statut :** validé en lab le 17 octobre 2026 sur une VM Ubuntu 26.04 neuve, déployée par `deploy.sh` (disque de données chiffré, §1.5) : snapshot des deux collections, copie hors du dossier de Qdrant, suppression complète des données, restauration. Les deux collections ont été retrouvées à l'identique (76 et 1 616 extraits), la synchronisation des droits a réussi et le test de cloisonnement a donné les mêmes verdicts qu'avant. Rejoué le 1er novembre 2026 sur Qdrant 1.20.0 (2.23.0), copie sur le volume chiffré hors de `qdrant_data` : 277 et 1 339 extraits retrouvés, **index plein texte de la recherche par mots-clés restauré avec le snapshot** (la RAG API le trouve conforme et ne le recrée pas), synchronisation réussie, cloisonnement 207 OK.
 
 Qdrant stocke les vecteurs et les métadonnées (droits d'accès, empreintes, `org_name`) dans `./qdrant_data/`. Perdre ce dossier sans snapshot oblige à réindexer tout le partage et à resynchroniser les droits. Prendre un snapshot avant toute opération risquée : mise à jour, modification du corpus, changement de modèle d'embedding.
 

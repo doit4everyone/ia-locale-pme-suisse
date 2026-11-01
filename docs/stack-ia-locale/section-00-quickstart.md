@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). L'essai avec vLLM sur une VM neuve reste à refaire.
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). La version 2.23.0 a été rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 51 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. L'essai avec vLLM sur une VM neuve reste à refaire.
 
 ---
 
@@ -25,7 +25,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 Un assistant comparable à ChatGPT, mais **installé chez vous**. Vos collaborateurs lui posent des questions dans leur navigateur ; il répond **à partir des documents de l'entreprise** (le serveur de fichiers, et en option SharePoint), cite ses sources, et **ne montre à chacun que les documents qu'il a déjà le droit d'ouvrir** sur le serveur de fichiers. Les questions et les réponses sont traitées sur vos machines : aucun service d'IA externe n'est appelé.
 
-Ce guide mène d'une installation vierge à un assistant en service. Comptez une journée pour un premier déploiement : deux à trois heures pour la stack elle-même, plus l'installation du serveur de modèles (une demi-heure avec Ollama, une à deux heures avec vLLM) et le téléchargement des modèles (environ 12 Go). Microsoft 365, en option, vient ensuite.
+Ce guide mène d'une installation vierge à un assistant en service. Comptez une journée pour un premier déploiement : deux à trois heures pour la stack elle-même, plus l'installation du serveur de modèles (une demi-heure avec Ollama, une à deux heures avec vLLM) et le téléchargement des modèles (environ 13 Go). Microsoft 365, en option, vient ensuite.
 
 ---
 
@@ -198,7 +198,7 @@ Puis quitter Ollama depuis la zone de notification et le relancer : les réglage
 ```powershell
 ollama pull qwen3:14b
 ollama pull qwen3:4b-instruct
-ollama pull nomic-embed-text
+ollama pull bge-m3
 ollama list
 ```
 
@@ -257,7 +257,7 @@ source /opt/vllm/.venv/bin/activate
 sudo mkdir -p /opt/hf /etc/vllm && sudo chown $USER /opt/hf
 export HF_HOME=/opt/hf
 hf download Qwen/Qwen3-14B-AWQ
-hf download nomic-ai/nomic-embed-text-v1.5
+hf download BAAI/bge-m3 --exclude "onnx/*" --exclude "imgs/*"
 echo "VLLM_API_KEY=$(openssl rand -hex 32)" | sudo tee /etc/vllm/vllm.env > /dev/null
 sudo chown root:$USER /etc/vllm/vllm.env && sudo chmod 640 /etc/vllm/vllm.env
 ```
@@ -284,8 +284,8 @@ Attendre `Application startup complete` (une à trois minutes), puis :
 cd /opt/vllm && source .venv/bin/activate
 set -a; source /etc/vllm/vllm.env; set +a
 export HF_HOME=/opt/hf
-vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code \
-  --served-model-name nomic-embed-text --max-model-len 2048 --gpu-memory-utilization 0.06 \
+vllm serve BAAI/bge-m3 --runner pooling \
+  --served-model-name bge-m3 --max-model-len 2048 --gpu-memory-utilization 0.11 --enforce-eager \
   --host 0.0.0.0 --port 8001 --api-key "$VLLM_API_KEY"
 ```
 
@@ -300,10 +300,10 @@ vllm serve nomic-ai/nomic-embed-text-v1.5 --runner pooling --trust-remote-code \
 Ouvrir une session root (`sudo -i`). Docker doit déjà être installé (§1.4), et le volume chiffré monté (§1.5) : les deux prérequis se sautent facilement, et le rejeu du 23 octobre 2026 en a oublié un. Contrôle :
 
 ```bash
-docker compose version && systemctl show docker -p DropInPaths && findmnt /srv/rag-donnees
+docker compose version && systemctl show docker -p DropInPaths && findmnt /srv/rag-donnees && ls -la /root/rag-stack /var/log/rag /etc/rag-certs /etc/rag-tls | grep -- '->'
 ```
 
-**Attendu :** la version de Compose, le fichier `rag-donnees.conf` de §15.3.3, et `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees`. Puis :
+**Attendu :** la version de Compose, le fichier `rag-donnees.conf` de §15.3.3, `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees`, puis les liens du §1.5 (point 2) : `qdrant_data`, `openwebui_data`, `n8n_data`, `.env`, `/var/log/rag`, `/etc/rag-certs` et `/etc/rag-tls` vers `/srv/rag-donnees`. Sans eux, l'étape 5 échoue : le dossier des identifiants n'existe pas (oubli constaté au rejeu du 1er novembre 2026). Puis :
 
 ```bash
 apt update && apt install -y \
@@ -446,7 +446,7 @@ ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 
 **Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `test_citations.py`, `test_sid.py` et `diag_sid.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué quatre fois sur une VM neuve, en dernier lieu en version 2.22.2 le 24 octobre 2026, avec un certificat fourni par l'autorité interne ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
 
 ---
 
@@ -551,17 +551,17 @@ chmod 600 rag.key
 curl -s http://<IP-SERVEUR-MODELES>:11434/api/tags | python3 -m json.tool | grep '"name"'
 ```
 
-**Attendu :** `qwen3:14b`, `qwen3:4b-instruct` et `nomic-embed-text`. Sans réponse : le réglage `OLLAMA_HOST` (étape 3A) ou le pare-feu Windows (§2.3).
+**Attendu :** `qwen3:14b`, `qwen3:4b-instruct` et `bge-m3:latest`. Sans réponse : le réglage `OLLAMA_HOST` (étape 3A) ou le pare-feu Windows (§2.3).
 
 **Avec vLLM :**
 
 ```bash
-set -a; source /root/rag-stack/.env; set +a
-curl -s -H "Authorization: Bearer $VLLM_API_KEY" http://<IP-SERVEUR-MODELES>:8000/v1/models | python3 -m json.tool | grep '"id"'
-curl -s -H "Authorization: Bearer $VLLM_API_KEY" http://<IP-SERVEUR-MODELES>:8001/v1/models | python3 -m json.tool | grep '"id"'
+VK=$(grep -oP '^VLLM_API_KEY=\K.*' /root/rag-stack/.env)
+curl -s -H "Authorization: Bearer $VK" http://<IP-SERVEUR-MODELES>:8000/v1/models | python3 -m json.tool | grep '"id"'
+curl -s -H "Authorization: Bearer $VK" http://<IP-SERVEUR-MODELES>:8001/v1/models | python3 -m json.tool | grep '"id"'
 ```
 
-**Attendu :** `qwen3:14b`, puis `nomic-embed-text`. Si `curl` reste bloqué : la règle de pare-feu de l'étape 3B. Si la réponse est vide : la clé du `.env` ne correspond pas à celle du serveur.
+**Attendu :** `qwen3:14b`, puis `bge-m3`. Si `curl` reste bloqué : la règle de pare-feu de l'étape 3B. Si la réponse est vide : la clé du `.env` ne correspond pas à celle du serveur.
 
 ---
 
@@ -613,10 +613,10 @@ cd /root/rag-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --retries 10 --timeout 60 qdrant-client python-docx pdfplumber python-pptx httpx \
-    ldap3 impacket rank-bm25 smbprotocol
+    ldap3 impacket smbprotocol
 ```
 
-Les neuf paquets sont tous nécessaires : sans `smbprotocol` ou `rank-bm25`, par exemple, la synchronisation ou l'indexation échoue au premier import.
+Les huit paquets sont tous nécessaires : sans `smbprotocol`, par exemple, la synchronisation échoue au premier import. `rank-bm25` n'en fait plus partie depuis la 2.23.0 : la recherche par mots-clés se fait dans Qdrant.
 
 Tester ensuite les deux accès de `svc-rag`, à l'annuaire et au partage :
 
@@ -644,7 +644,7 @@ python indexer.py --corpus /mnt/corpus-root --rapport /var/log/rag/rapport_index
 echo "Code de sortie : $?"
 ```
 
-**Attendu :** au début, `Vérification du serveur d'embedding (ollama)`, ou `(openai)` avec vLLM, puis `Modèle d'embedding : nomic-embed-text ✓` ; à la fin, le code de sortie `0`. Compter les extraits indexés :
+**Attendu :** au début, `Vérification du serveur d'embedding (ollama)`, ou `(openai)` avec vLLM, puis `Modèle d'embedding : bge-m3 ✓` ; à la fin, le code de sortie `0`. Compter les extraits indexés :
 
 ```bash
 for c in documents documentation; do
@@ -652,6 +652,8 @@ for c in documents documentation; do
         python3 -c "import sys,json; print('$c :', json.load(sys.stdin)['result']['points_count'])"
 done
 ```
+
+> **Les variables du `.env` restent chargées dans ce shell.** Si le `.env` est modifié ensuite, `docker compose` prend les valeurs du shell, pas celles du fichier : le changement semble sans effet (constaté en lab). Ouvrir une nouvelle session avant tout `docker compose` qui doit lire un `.env` modifié.
 
 > **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable est mis en quarantaine et n'est pas indexé ; il apparaît dans le rapport avec le statut `quarantaine`. Un PDF scanné sans texte ou un fichier corrompu ne produit aucun extrait (statut `vide`).
 
@@ -679,6 +681,14 @@ curl -s -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
 
 **Attendu :** un champ `autorises` non vide.
 
+**Activer la recherche par mots-clés** (2.23.0). La RAG API crée l'index plein texte de chaque collection à son démarrage et après chaque synchronisation par `/admin/sync`. Elle a démarré avant cette première indexation, quand les collections n'existaient pas : la redémarrer, sinon la recherche par mots-clés reste inactive jusqu'à la première synchronisation n8n, sans message (constaté au rejeu du 1er novembre 2026). `deploy.sh` le fait lui-même après l'indexation qu'il propose.
+
+```bash
+cd /root/rag-stack && docker compose restart rag-api && sleep 15 && docker logs rag-api 2>&1 | grep "\[BM25\]" | tail -3
+```
+
+**Attendu :** `Index plein texte créé` pour chaque collection, puis `Recherche par mots-clés dans Qdrant : documentation, documents`.
+
 ---
 
 ## Étape 14 : configurer Open WebUI
@@ -703,7 +713,7 @@ Ouvrir `https://<RAG_FQDN>` (par exemple `https://rag.votre-domaine.ch`) depuis 
 | Application DN | DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
 | Application DN Password | Mot de passe DN de l'application | Le mot de passe de `svc-rag` |
 | Search Base | Base de recherche | `DC=votre-domaine,DC=ch` |
-| Search Filters | Filtres de recherche | `(objectClass=user)` |
+| Search Filters | Filtres de recherche | `(objectClass=user)`, **avec les parenthèses** : sans elles, la connexion échoue (constaté au rejeu du 1er novembre 2026) |
 | Certificate Path | Chemin du certificat | `/etc/ssl/certs/ad-chain.pem` |
 | Validate Certificate | Validate Certificate (non traduit) | Activé : la chaîne de l'étape 4 permet la validation (le §5.6.2 décrit le cas d'un lab sans certificat) |
 | Ciphers | Chiffres | Valeur par défaut |
@@ -809,10 +819,10 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Refus par adresse IP | `curl -sk https://<IP-VM>/; echo $?` | `35` |
 | Identité signée | Contrôle d'usurpation (§16.6) | `HTTP Error 403` |
 | Ports exposés | `docker compose ps` | `nginx` : 80, 443, 5678 ; `qdrant` : `127.0.0.1:6333` seulement |
-| Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `20 tests OK` |
+| Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `28 tests OK` |
 | Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `32 tests OK` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
-| Recherche par mots-clés chargée | `docker logs rag-api \| grep BM25` | Un nombre d'extraits |
+| Recherche par mots-clés | `docker logs rag-api \| grep BM25` | `Recherche par mots-clés dans Qdrant : documentation, documents` (après la première synchronisation) |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
 | Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |
 | Test de cloisonnement | Étape 16 | Aucune `FUITE` |
@@ -947,7 +957,7 @@ Puis refaire le contrôle de l'étape 10.
 
 **Les questions échouent avec une erreur 503, journal : « Échec de la recherche documentaire »**
 
-Le serveur d'embedding ne répond pas : sans vecteur de la question, pas de recherche. Avec vLLM, le serveur du port 8001 est arrêté (son terminal a été fermé, par exemple) ; avec Ollama, le modèle `nomic-embed-text` manque.
+Le serveur d'embedding ne répond pas : sans vecteur de la question, pas de recherche. Avec vLLM, le serveur du port 8001 est arrêté (son terminal a été fermé, par exemple) ; avec Ollama, le modèle `bge-m3` manque (`ollama pull bge-m3`).
 
 **vLLM refuse de démarrer**
 
@@ -996,7 +1006,7 @@ Vérifier le mot de passe dans `/etc/smbcredentials/svc-rag` (rotation non repor
 
 **La recherche par mots-clés est vide au démarrage (BM25)**
 
-Avant la première indexation, l'index est vide : le journal dit « Aucun chunk dans Qdrant : index vide », ce qui est normal. Il se remplit à la première synchronisation (`/admin/sync`). Si l'index reste vide alors que Qdrant contient des extraits, Qdrant a démarré après la RAG API. Attendre 30 secondes, puis :
+Avant la première indexation, les collections n'existent pas : aucune ligne `Recherche par mots-clés dans Qdrant`, ce qui est normal. L'index plein texte de chaque collection est créé à la fin de la première synchronisation (`/admin/sync`). Si la ligne manque alors que Qdrant contient des extraits, ou si le journal signale une version de Qdrant antérieure à la 1.20 ou un index indisponible, la recherche se fait en vectoriel seul. Vérifier la version de Qdrant (§3.4), attendre 30 secondes, puis :
 
 ```bash
 docker compose restart rag-api

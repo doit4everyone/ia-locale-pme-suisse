@@ -102,6 +102,14 @@ Recommandations :
 
 > **Illustré en lab.** Le corpus contenait deux contrats de maintenance pour le même client, l'un de 24 mois, l'autre d'un an, sur deux emplacements différents. Après un réglage de la recherche (§8.9), la même question a cité l'un puis l'autre : deux réponses ancrées, mais contradictoires.
 
+> **Mesuré en lab (2.23.0).** Le corpus de démonstration contient à dessein deux versions d'un contrat : la version signée, de 24 mois, et un projet annulé, d'un an, resté sur le partage. Sans reranker, à la question « quelle est la durée du contrat de maintenance » de ce client, la réponse mêle la durée du projet annulé aux trois passages ; avec le reranker (§10.8), à aucun. Mais à une question large (« résume ce que tu sais de ce client »), le modèle mêle encore l'année du projet à sa synthèse. La recherche peut réduire le risque, seule la politique de corpus le supprime.
+
+- **un seul emplacement pour un même contenu** : pendant une migration du serveur de fichiers vers SharePoint, indexer l'un ou l'autre, pas les deux. Les anciennes versions restées d'un côté portent souvent les mêmes noms que les documents à jour de l'autre.
+
+> **Mesuré en lab (2.23.0).** Avec SharePoint indexé en plus du partage, 17 noms de fichiers existaient aux deux endroits, dont 15 au contenu différent : d'anciennes versions des documents réécrits sur le partage. Le jeu de questions est tombé à 67 réponses conformes sur 111 (37 questions), contre 80 sur 105 (35 questions) sans SharePoint. Une règle de la RAG API qui traitait comme copies les seuls textes identiques, plutôt que les noms identiques, a été essayée : 63 sur 111 et un élément interdit. Elle a été abandonnée : la recherche ne peut pas deviner quelle version fait foi.
+
+- **les permissions décident, pas les licences** : la stack applique les permissions des documents (NTFS, SharePoint), elle ne connaît pas les licences Microsoft 365. Un compte sans licence ne peut pas ouvrir SharePoint, mais s'il est membre d'un groupe autorisé sur un site indexé, la RAG lui sert les extraits de ce site. C'est une conséquence du fonctionnement, non testée dans le lab : accorder les permissions des sites indexés en connaissance de cause.
+
 > **Illustré en lab.** Le serveur de fichiers de démonstration contenait un fichier nommé comme une clé TLS et des copies en clair de documents par ailleurs chiffrés. Ni l'un ni l'autre n'avait à être indexé. C'est le genre de résidu qu'un serveur ayant servi à des essais accumule, et qu'une politique de corpus écrite permet d'écarter avant qu'une IA ne le rende trouvable.
 
 ## §17.5 Droit d'accès et droit à l'effacement
@@ -116,8 +124,8 @@ La nLPD donne à toute personne le droit de savoir quelles données la concernan
 document supprimé à la source
         ↓ (synchronisation suivante)
 chunks retirés de Qdrant
-        ↓ (reconstruction en fin de synchronisation)
-index BM25 régénéré sans le document
+        ↓ (même écriture, depuis la 2.23.0)
+index de la recherche par mots-clés à jour, sans le document
         ↓
 sauvegardes : le document disparaît des sauvegardes postérieures,
               reste dans les sauvegardes antérieures jusqu'à leur péremption

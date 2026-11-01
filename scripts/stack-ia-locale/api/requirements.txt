@@ -5,8 +5,7 @@
 #
 # Dépendances directes :
 #   fastapi, uvicorn[standard], python-dotenv, httpx  : API
-#   qdrant-client                                      : index vectoriel
-#   rank-bm25                                          : recherche par mots-clés
+#   qdrant-client                                      : index vectoriel et recherche par mots-clés (2.23.0)
 #   ldap3                                              : groupes Active Directory (auth.py)
 #   msal                                               : Entra ID, Partie 3 (auth.py, teams.py)
 #   python-docx, pdfplumber, python-pptx               : extraction de texte (indexer.py)
@@ -52,8 +51,7 @@ python-docx==1.2.0
 python-dotenv==1.2.4
 python-pptx==1.0.2
 PyYAML==6.0.3
-qdrant-client==1.19.1
-rank-bm25==0.2.2
+qdrant-client==1.20.0
 requests==2.34.2
 starlette==1.8.0
 typing-inspection==0.4.4

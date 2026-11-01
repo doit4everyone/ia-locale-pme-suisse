@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 46 tests OK », code de sortie 0.
+Attendu : « 51 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -138,11 +138,15 @@ def tests_resolveur():
              and sorted(r["echecs"]) == ["DIRECTION/Plan.docx", "RH/Salaires.xlsx"], f"statuts {statuts}")
 
 
-def passage_complet(q, fichiers):
+def passage_complet(q, fichiers, erreurs_parcours=()):
     """resoudre_acl de bout en bout, partage et ACL simulés. Renvoie (code, rapport)."""
     sauve = (ar.QdrantClient, ar.lister_fichiers_montes, ar.lire_acl_fichier, ar.socket.getaddrinfo)
     ar.QdrantClient = lambda url=None, api_key=None: q
-    ar.lister_fichiers_montes = lambda m: [(f"//srv/{f}", f"/mnt/x/{f}") for f in fichiers]
+    def lister(m, erreurs=None):
+        if erreurs is not None:
+            erreurs.extend(erreurs_parcours)
+        return [(f"//srv/{f}", f"/mnt/x/{f}") for f in fichiers]
+    ar.lister_fichiers_montes = lister
     ar.lire_acl_fichier = lambda share, chemin: ([SID_RH], [])
     ar.socket.getaddrinfo = lambda *a, **k: [None]
     chemin = tempfile.mktemp(suffix=".json")
@@ -187,6 +191,32 @@ def tests_passage():
              code == 2 and migre and r.get("documents_non_migres_sid") == ["RH/Note.docx"]
              and "RH/Note.docx" in r.get("echecs_ecriture", []),
              f"code {code}, migré {migre}, non migrés {r.get('documents_non_migres_sid')}")
+
+    # 2.23.0 : dossier illisible pendant le parcours. Ses documents ne sont pas
+    # effacés de Qdrant comme orphelins : retirés de la recherche, code 2.
+    q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", [G]), 2: p("RH/Prive/Contrat.docx", [G])}, "documentation": {}})
+    code, r = passage_complet(q, ["RH/Salaires.xlsx"], erreurs_parcours=["/mnt/x/RH/Prive : Permission denied"])
+    garde = 2 in q.points[COLL]
+    verifier("2.23.0 : dossier illisible, aucun orphelin supprimé, document retiré, code 2",
+             code == 2 and garde and r.get("echecs_suppression") == ["RH/Prive/Contrat.docx"]
+             and r.get("erreurs_parcours") == ["/mnt/x/RH/Prive : Permission denied"],
+             f"code {code}, gardé {garde}, suppressions {r.get('echecs_suppression')}")
+
+    # Un vrai dossier illisible, sur le disque : os.walk le signale
+    with tempfile.TemporaryDirectory() as racine:
+        os.makedirs(os.path.join(racine, "A", "B"))
+        open(os.path.join(racine, "A", "B", "x.docx"), "w").close()
+        open(os.path.join(racine, "y.docx"), "w").close()
+        os.chmod(os.path.join(racine, "A"), 0)
+        erreurs = []
+        try:
+            lus = ar.lister_fichiers_montes(racine, erreurs)
+        finally:
+            os.chmod(os.path.join(racine, "A"), 0o755)
+        lisible = os.geteuid() == 0  # root lit tout : l'erreur ne peut pas se produire
+        verifier("2.23.0 : os.walk, dossier illisible signalé",
+                 lisible or (len(erreurs) == 1 and [s for s, _ in lus] == ["y.docx"]),
+                 f"erreurs {erreurs}, lus {lus}")
 
 
 # ─────────────────────────────────────────
@@ -249,8 +279,7 @@ def tests_api():
     main.RERANKER_URL = ""
     q = QdrantPannes({main.COLLECTION: {i: dict(v) for i, v in points.items()}, main.DOCUMENTATION_COLLECTION: {}})
     main.qdrant = q
-    main._bm25_chunks = [tb.candidat(i, v) for i, v in points.items()]
-    main._bm25_index = tb.BM25Okapi([c["text"].lower().split() for c in main._bm25_chunks])
+    main._collections_texte = {main.COLLECTION}  # index plein texte en place (2.23.0)
     sources = set()
     for seuil in (0.01, 2.0):
         main.CONTEXT_THRESHOLD = seuil
@@ -407,14 +436,26 @@ def tests_api():
 # ─────────────────────────────────────────
 # 2.21.8 : âge maximal des droits
 # ─────────────────────────────────────────
+
+def tests_parcours_api():
+    # 2.23.0 : chaîne complète d'un parcours incomplet. Rapport réel du résolveur
+    # (dossier illisible), lu par la RAG API : le document non retrouvé est retiré.
+    remise_a_zero()
+    q = QdrantPannes({COLL: {1: p("RH/Salaires.xlsx", [G]), 2: p("RH/Prive/Contrat.docx", [G])}, "documentation": {}})
+    code, r = passage_complet(q, ["RH/Salaires.xlsx"], erreurs_parcours=["/mnt/x/RH/Prive : Permission denied"])
+    main.appliquer_resultat_droits("smb", code, ecrire_json(r))
+    verifier("2.23.0 : parcours incomplet, rapport lu par la RAG API, document non retrouvé retiré",
+             code == 2 and main.est_bloque("RH/Prive/Contrat.docx") and not main.est_bloque("RH/Salaires.xlsx"),
+             f"code {code}, retirés {main.sources_bloquees()}")
+
+
 def tests_age():
     main.FICHIER_BLOQUES = tempfile.mktemp(suffix=".json")
     points = {1: tb.payload("DIRECTION/Budget.docx", 0, "budget direction 2027 salaires", [G])}
     for i in range(20):
         points[10 + i] = tb.payload(f"DIVERS/Note_{i}.docx", 0, f"procédure archivage courrier note {i}", [G])
     main.qdrant = QdrantPannes({main.COLLECTION: points, main.DOCUMENTATION_COLLECTION: {}})
-    main._bm25_chunks = [tb.candidat(i, v) for i, v in points.items()]
-    main._bm25_index = tb.BM25Okapi([c["text"].lower().split() for c in main._bm25_chunks])
+    main._collections_texte = {main.COLLECTION}  # index plein texte en place (2.23.0)
 
     def servie():
         try:
@@ -562,6 +603,33 @@ def charger_sp():
     return sp
 
 
+def tests_reset():
+    """2.23.0 : --reset refusé si le parcours du corpus est incomplet ou vide,
+    avant toute écriture dans Qdrant (revue externe du 31 octobre 2026)."""
+    sp = charger_sp()
+    idx = sp.idx
+    appels = []
+    sauve = (idx.lister_fichiers, idx.init_collection, idx.QdrantClient, idx.valider_configuration)
+    idx.valider_configuration = lambda: None
+    idx.QdrantClient = lambda *a, **k: object()
+    idx.init_collection = lambda q, reset=False: appels.append(reset)
+    with tempfile.TemporaryDirectory() as corpus:
+        try:
+            for nom, liste in (("dossier illisible", (["/c/a.docx"], [], ["/c/Prive : Permission denied"])),
+                               ("corpus vide", ([], [], []))):
+                appels.clear()
+                idx.lister_fichiers = lambda d, liste=liste: liste
+                code = None
+                try:
+                    idx.index_corpus(corpus, reset=True)
+                except SystemExit as e:
+                    code = e.code
+                verifier(f"2.23.0 : --reset, {nom}, collections non touchées",
+                         code == 1 and appels == [], f"code {code}, init_collection {appels}")
+        finally:
+            idx.lister_fichiers, idx.init_collection, idx.QdrantClient, idx.valider_configuration = sauve
+
+
 def tests_sharepoint():
     import argparse
     sp = charger_sp()
@@ -593,8 +661,10 @@ if __name__ == "__main__":
         tests_resolveur()
         tests_passage()
         tests_api()
+        tests_parcours_api()
         tests_age()
         tests_sharepoint()
+        tests_reset()
     finally:
         main.qdrant, main.FICHIER_BLOQUES = qdrant_reel, fichier_reel
         main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME = etat_reel, incertain_reel, ferme_reel

@@ -1,6 +1,6 @@
 {
-  "version": "2026-10-06c",
-  "description": "Jeu de questions du §10, construit sur le corpus de démonstration Axonix SA. À adapter à votre corpus : documents attendus, éléments attendus et interdits. Jeu de questions du §10. Chaque question est posée avec un compte, et évaluée sur des critères vérifiables automatiquement : document attendu dans les sources, éléments attendus dans la réponse, éléments interdits (pièges), refus attendu. Critère principal_attendu : le document doit être le document principal du contexte (première source), pas seulement présent.",
+  "version": "2026-10-25",
+  "description": "Jeu de questions du §10, sur le corpus de démonstration Axonix SA (fictif, 2.23.0). Chaque question est posée avec un compte et évaluée sur des critères vérifiables : document attendu dans les sources, éléments attendus dans la réponse, éléments interdits (pièges), refus attendu. principal_attendu : le document doit être le document principal du contexte (première source). À adapter à votre corpus et à vos comptes.",
   "compte_par_defaut": "direction@votre-domaine.ch",
   "questions": [
     {
@@ -14,8 +14,8 @@
       ],
       "interdits": [],
       "refus_attendu": false,
-      "note": "Clause en fin de document : vérifie que le document principal est envoyé en entier (DOC_COMPLET_MAX).",
-      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "note": "Clause en fin de document : vérifie que le document principal est envoyé en entier (DOC_COMPLET_MAX)."
     },
     {
       "id": "P2-BAUMONT-FORFAIT",
@@ -29,8 +29,8 @@
         "3 900"
       ],
       "refus_attendu": false,
-      "note": "Piège : la réunion Teams de test parle d'un renouvellement à 3 900. La réponse doit venir du contrat.",
-      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "note": "Piège : le PV de suivi évoque un renouvellement à 3 900, non signé. La réponse doit venir du contrat."
     },
     {
       "id": "P3-BAUMONT-DELAIS",
@@ -40,9 +40,12 @@
       "attendus": [
         "1 heure"
       ],
-      "interdits": [],
+      "interdits": [
+        "30 minutes"
+      ],
       "refus_attendu": false,
-      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "note": "30 minutes est le délai de l'Étude Rochat : le donner pour Baumont est une confusion entre contrats."
     },
     {
       "id": "P4-ROCHAT-REFERENCE",
@@ -54,42 +57,21 @@
       ],
       "interdits": [],
       "refus_attendu": false,
-      "note": "La référence du contrat désigne une seule des deux versions présentes dans le corpus."
+      "note": "La référence désigne la version définitive ; le projet annulé (06_) a une autre référence."
     },
     {
       "id": "P5-ROCHAT-VERSIONS",
       "type": "piege",
       "question": "Quelle est la durée du contrat de maintenance de l'Étude Rochat ?",
-      "document_attendu": "Contrat_Maintenance_Etude_Rochat.docx",
-      "attendus": [],
-      "interdits": [],
-      "refus_attendu": false,
-      "note": "Deux versions contradictoires (03_ : 24 mois ; 06_ : 1 an). Cas de gouvernance du corpus (§17.4) : on note quelle version est citée, et si la réponse signale les deux."
-    },
-    {
-      "id": "P6-FIN-CHIF",
-      "type": "precise",
-      "question": "Quel code de vérification commence par FIN-CHIF ?",
-      "document_attendu": "Test_RAG_Finances_Chiffre.docx",
+      "document_attendu": "Contrat_Maintenance_Etude_Rochat",
       "attendus": [
-        "FIN-CHIF-5193"
+        "24 mois"
       ],
-      "interdits": [],
-      "refus_attendu": false,
-      "note": "Document protégé par Purview, lu avec le compte autorisé."
-    },
-    {
-      "id": "P7-FIN-CHIF-REFUSE",
-      "type": "cloisonnement",
-      "compte": "client@votre-domaine.ch",
-      "question": "Quel code de vérification commence par FIN-CHIF ?",
-      "document_attendu": "",
-      "attendus": [],
       "interdits": [
-        "FIN-CHIF-5193"
+        "1 an à compter"
       ],
-      "refus_attendu": true,
-      "note": "Le même code, demandé par un compte sans droit : ni le document ni le code."
+      "refus_attendu": false,
+      "note": "Piège de gouvernance, laissé volontairement : 03_ définitive (24 mois), 06_ projet annulé (1 an). Constaté le 25 octobre 2026 : réponse tirée du projet annulé. Les versions périmées se retirent du périmètre indexé (§17.4)."
     },
     {
       "id": "P8-BAUMONT-ALLEMAND",
@@ -100,11 +82,209 @@
         "4 200"
       ],
       "interdits": [
-        "3 900"
+        "3 900",
+        "3 350"
       ],
       "refus_attendu": false,
-      "note": "Question en allemand sur un document en français : mesure l'apport d'un embedding multilingue (bge-m3).",
-      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx"
+      "principal_attendu": "21_Contrat_Maintenance_Baumont_Industries.docx",
+      "note": "Question en allemand sur un document en français ; le contrat Brügger, en allemand, a un autre forfait (3 350)."
+    },
+    {
+      "id": "N1-CLINIQUE-FORFAIT",
+      "type": "precise",
+      "question": "Quel est le forfait mensuel de la Clinique dentaire du Léman ?",
+      "document_attendu": "40_Contrat_Maintenance_Clinique_Leman.docx",
+      "attendus": [
+        "2 150"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Sans principal_attendu : l'annexe de sous-traitance du même contrat peut légitimement passer en tête."
+    },
+    {
+      "id": "N2-PERRIN-INCIDENT",
+      "type": "precise",
+      "question": "Quelle caisse a été touchée par la tentative de rançongiciel chez Perrin, et quand ?",
+      "document_attendu": "51_Rapport_Incident_Rancongiciel_Perrin.docx",
+      "attendus": [
+        "caisse 3",
+        "14 février"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N3-LACAZUR-CRITIQUE",
+      "type": "precise",
+      "question": "Quel est le délai de prise en charge d'un incident critique à l'Hôtel Lac-Azur ?",
+      "document_attendu": "60_Contrat_Maintenance_Hotel_Lac-Azur.docx",
+      "attendus": [
+        "45 minutes"
+      ],
+      "interdits": [
+        "30 minutes"
+      ],
+      "refus_attendu": false,
+      "note": "Constaté le 25 octobre 2026 : 30 minutes (délai de l'Étude Rochat) attribué à l'hôtel. L'extrait du tableau des délais ne contient pas le nom du client."
+    },
+    {
+      "id": "N4-BRUEGGER-LANGUES",
+      "type": "multilingue",
+      "question": "Dans quelles langues le helpdesk est-il assuré pour Brügger Präzisionsteile ?",
+      "document_attendu": "80_Wartungsvertrag_Bruegger.docx",
+      "attendus": [
+        "allemand",
+        "français"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Question en français sur un fait présent seulement dans le contrat en allemand (le forfait figure aussi dans le portefeuille clients, en français, et ne mesurait donc pas la recherche multilingue)."
+    },
+    {
+      "id": "N5-KESSLER-STATUT",
+      "type": "piege",
+      "question": "Le contrat avec l'atelier Kessler & Morand a-t-il été signé ?",
+      "document_attendu": "Kessler_Morand",
+      "attendus": [],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Offre non signée, puis expirée : la réponse ne doit pas présenter Kessler & Morand comme client sous contrat."
+    },
+    {
+      "id": "N6-FACTURE-BAUMONT",
+      "type": "croise",
+      "question": "Quel est le montant total TTC de la facture FA-2026-031 ?",
+      "document_attendu": "FA-2026-031_Baumont_Mars.docx",
+      "attendus": [
+        "8 648"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Forfait (4 200) et installation de l'avenant (3 800) : le total n'est pas le forfait."
+    },
+    {
+      "id": "N7-CA-INVESTISSEMENT",
+      "type": "precise",
+      "question": "Quel investissement le conseil d'administration a-t-il approuvé le 20 juin 2026 ?",
+      "document_attendu": "04_PV_CA_Juin_2026.docx",
+      "attendus": [
+        "68 000"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N8-NEUCHATEL",
+      "type": "precise",
+      "question": "Quand et où le bureau de Neuchâtel a-t-il ouvert ?",
+      "document_attendu": "",
+      "attendus": [
+        "septembre 2026",
+        "faubourg du Lac"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N9-MFA-QUI",
+      "type": "precise",
+      "question": "Qui peut réinitialiser la MFA d'un collaborateur d'Axonix ?",
+      "document_attendu": "34_Procedure_Reinitialisation_MFA.docx",
+      "attendus": [
+        "Müller",
+        "Ferrara"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N10-FERMETURE",
+      "type": "precise",
+      "question": "Quand les bureaux sont-ils fermés en fin d'année 2026 ?",
+      "document_attendu": "62_Calendrier_Fermetures_2026.docx",
+      "attendus": [
+        "24 décembre",
+        "4 janvier"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N11-ZBINDEN-CERTIFICATION",
+      "type": "precise",
+      "question": "Quelle certification Claude Zbinden doit-il obtenir en 2026 ?",
+      "document_attendu": "",
+      "attendus": [
+        "MD-102"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Deux documents la mentionnent : plan de formation et évaluation."
+    },
+    {
+      "id": "N12-RUCHONNET-REGLEMENT",
+      "type": "precise",
+      "question": "Comment le litige avec Transports Ruchonnet a-t-il été réglé ?",
+      "document_attendu": "",
+      "attendus": [
+        "3 500"
+      ],
+      "interdits": [],
+      "refus_attendu": false
+    },
+    {
+      "id": "N13-CROISE-30MIN",
+      "type": "croise",
+      "question": "Quel client a un délai de prise en charge de 30 minutes pour un incident critique ?",
+      "document_attendu": "Contrat_Maintenance_Etude_Rochat",
+      "attendus": [
+        "Rochat"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Le délai de 30 minutes figure dans les deux versions du contrat Rochat."
+    },
+    {
+      "id": "N14-CROISE-ECHEANCE",
+      "type": "croise",
+      "question": "Quel contrat de maintenance arrive à échéance en premier ?",
+      "document_attendu": "",
+      "attendus": [
+        "Baumont"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Le portefeuille clients 2026 donne les échéances."
+    },
+    {
+      "id": "I3-CLIENTS-CONTRAT",
+      "type": "inventaire",
+      "question": "Donne-moi la liste des clients sous contrat de maintenance.",
+      "document_attendu": "",
+      "attendus": [
+        "Baumont",
+        "Rochat",
+        "Perrin",
+        "Léman",
+        "Lac-Azur",
+        "Brügger"
+      ],
+      "interdits": [],
+      "refus_attendu": false,
+      "note": "Six contrats actifs (portefeuille). Kessler & Morand (offre) et Ruchonnet (résilié) n'en font pas partie."
+    },
+    {
+      "id": "I4-SUPPORT-PROCEDURES",
+      "type": "inventaire",
+      "question": "Quelles procédures le support informatique a-t-il documentées ?",
+      "document_attendu": "",
+      "attendus": [
+        "VPN",
+        "MFA",
+        "imprimante"
+      ],
+      "interdits": [],
+      "refus_attendu": false
     },
     {
       "id": "L1-CLIENTS-AXONIX",
@@ -117,8 +297,7 @@
         "Sarrasin"
       ],
       "interdits": [],
-      "refus_attendu": false,
-      "note": "Référence de septembre : trois clients, chacun cité."
+      "refus_attendu": false
     },
     {
       "id": "L2-CLIENTS-COURT",
@@ -130,8 +309,7 @@
         "Baumont"
       ],
       "interdits": [],
-      "refus_attendu": false,
-      "note": "Même demande sans le nom de l'entreprise : refusée sur CPU (sensibilité à la formulation)."
+      "refus_attendu": false
     },
     {
       "id": "L3-HELPDESK",
@@ -158,8 +336,8 @@
         "Avertir-Donnees-Sensibles-Interne"
       ],
       "refus_attendu": false,
-      "note": "Piège : une règle Purview (DLP) a déjà été présentée à tort comme une règle YAML d'UTMStack.",
-      "principal_attendu": "11-correlations-yaml.md"
+      "principal_attendu": "11-correlations-yaml.md",
+      "note": "Piège : une règle Purview (DLP) a déjà été présentée à tort comme une règle YAML d'UTMStack."
     },
     {
       "id": "I1-LISTE-YAML",
@@ -171,8 +349,35 @@
         "Avertir-Donnees-Sensibles-Interne"
       ],
       "refus_attendu": false,
-      "note": "Limite connue des RAG : liste forcément partielle. On vérifie que la réponse le dit, et qu'aucune règle Purview n'y figure.",
-      "principal_attendu": "11-correlations-yaml.md"
+      "principal_attendu": "11-correlations-yaml.md",
+      "note": "Limite connue des RAG : liste forcément partielle."
+    },
+    {
+      "id": "I2-YAML-DOCUMENTATION",
+      "type": "inventaire",
+      "question": "liste moi les règles yaml personalisées que tu connais depuis la documentation utmstack",
+      "document_attendu": "11-correlations-yaml.md",
+      "attendus": [],
+      "interdits": [
+        "Suricata",
+        "OLLAMA_HOST",
+        "Avertir-Donnees-Sensibles-Interne"
+      ],
+      "refus_attendu": false
+    },
+    {
+      "id": "L5-PURVIEW-MVC",
+      "type": "large",
+      "question": "fais-moi un résumé des points clés de la procédure : Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "document_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "attendus": [],
+      "interdits": [
+        "Système d'Information de Travail",
+        "le document ne précise pas",
+        "le document ne contient pas"
+      ],
+      "refus_attendu": false,
+      "principal_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf"
     },
     {
       "id": "R1-CAPITALE",
@@ -195,36 +400,57 @@
         "CHF"
       ],
       "refus_attendu": true,
-      "note": "Client inexistant, contrats proches présents : aucun montant ne doit apparaître."
+      "note": "Client inexistant (Pierre Dupont est un collaborateur) : aucun montant ne doit apparaître."
     },
     {
-      "id": "L5-PURVIEW-MVC",
-      "type": "large",
-      "question": "fais-moi un résumé des points clés de la procédure : Procédure_Purview_MVC_PME_Suisse_v1.pdf",
-      "document_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf",
-      "principal_attendu": "Procédure_Purview_MVC_PME_Suisse_v1.pdf",
+      "id": "R3-SALAIRE-DG",
+      "type": "refus",
+      "question": "Quel est le salaire annuel de Nadia Vaucher ?",
+      "document_attendu": "",
       "attendus": [],
-      "interdits": [
-        "Système d'Information de Travail",
-        "le document ne précise pas",
-        "le document ne contient pas"
-      ],
-      "refus_attendu": false,
-      "note": "Long document lu par fenêtre : pas de fausse absence affirmée sur le document entier, et pas d'invention du sens de SIT (Sensitive Information Type)."
+      "interdits": [],
+      "refus_attendu": true,
+      "note": "Aucun document ne le donne : ni contrat de la directrice, ni salaire individuel dans la masse salariale."
     },
     {
-      "id": "I2-YAML-DOCUMENTATION",
-      "type": "inventaire",
-      "question": "liste moi les règles yaml personalisées que tu connais depuis la documentation utmstack",
-      "document_attendu": "11-correlations-yaml.md",
+      "id": "C1-CLIENT-CONFIDENTIEL",
+      "type": "cloisonnement",
+      "compte": "client@votre-domaine.ch",
+      "question": "Comment le litige avec Transports Ruchonnet a-t-il été réglé ?",
+      "document_attendu": "",
       "attendus": [],
       "interdits": [
-        "Suricata",
-        "OLLAMA_HOST",
-        "Avertir-Donnees-Sensibles-Interne"
+        "3 500",
+        "12 600"
+      ],
+      "refus_attendu": true,
+      "note": "Dossier confidentiel à héritage coupé : test-client ne le voit pas."
+    },
+    {
+      "id": "C2-TOTO-REFUS",
+      "type": "cloisonnement",
+      "compte": "utilisateur@votre-domaine.ch",
+      "question": "Quand les bureaux sont-ils fermés en fin d'année 2026 ?",
+      "document_attendu": "",
+      "attendus": [],
+      "interdits": [
+        "24 décembre"
+      ],
+      "refus_attendu": true,
+      "note": "Refus explicite à toto sur un document ouvert à tous les utilisateurs du domaine."
+    },
+    {
+      "id": "C3-COMPTA-MASSE",
+      "type": "cloisonnement",
+      "compte": "comptabilite@votre-domaine.ch",
+      "question": "Quelle est l'enveloppe de révision salariale 2026 ?",
+      "document_attendu": "",
+      "attendus": [],
+      "interdits": [
+        "68 600"
       ],
       "refus_attendu": false,
-      "note": "Formulation réelle d'un utilisateur : pas d'extraits hors sujet recopiés, pas de règle Purview."
+      "note": "DIRECTION COMPTA réservé à la direction financière. Le budget, visible par compta01, donne la masse salariale : une réponse partielle est légitime, seul le montant de l'enveloppe est interdit."
     }
   ]
 }

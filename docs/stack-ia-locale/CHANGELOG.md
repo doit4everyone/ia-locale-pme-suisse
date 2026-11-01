@@ -4,6 +4,69 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.23.0] : Novembre 2026
+
+Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la RAG API pour l'index plein texte de Qdrant, filtré par les droits dans la requête. Le modèle d'embedding recommandé devient `bge-m3`, chaque extrait porte le nom de son document, et le reranker peut tourner sur la carte du serveur de modèles. Mesures sur un corpus de démonstration enrichi (35 questions, trois passages). Validé sur Qdrant 1.20.0 ; son premier correctif fera l'objet d'une version corrective. Rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque : `deploy.sh`, tests de sécurité, cloisonnement 207 verdicts sans fuite, mesure (76 puis 83 réponses conformes sur 105 avec le reranker, aucun élément interdit), sauvegarde et restauration de Qdrant, redémarrage ; ce rejeu a fait corriger `deploy.sh` (point 189) et quelques points du guide (point 190).
+
+### Sécurité
+
+- `docker-compose.yml` : n8n passe de la 2.36.9 à la 2.45.6 (avis de sécurité GHSA-9p7v-45m2-wxgj, GHSA-gx3v-3x3v-f8r5, GHSA-prmc-fg87-r4gh et suivants), image figée par empreinte. La télémétrie de n8n était active : n8n ne contacte plus ses serveurs (télémétrie, recherche de nouvelles versions, modèles en ligne), réglages de la page « Isolate n8n ». Les deux workflows du dépôt fonctionnent en 2.45.6 ; le rapport de migration vers n8n 3 ne signale aucun problème dans nos workflows.
+- `mip-service` : images .NET figées par empreinte, runtime 8.0.33 (CVE-2026-111497, Brotli). Le service n'utilise ni Brotli ni la décompression des requêtes : exposition minime. `Microsoft.Identity.Client` figé en 4.91.1 (`4.*` auparavant).
+- Recherche par mots-clés (points 123 et 124) : le filtre des groupes autorisés s'applique pendant la recherche dans Qdrant, et non plus après le classement sur les meilleurs extraits seulement. Les refus explicites restent appliqués après le classement, dans les deux branches (point 175) : un document refusé n'est jamais renvoyé, mais un extrait autorisé classé juste derrière des extraits refusés peut manquer.
+
+### Droits et synchronisation
+
+- `acl_resolver.py` (point 183) : un dossier illisible pendant le parcours du partage n'efface plus les extraits de ses documents ; ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec. `indexer.py` signale aussi un parcours incomplet, et refuse `--reset` dans ce cas ou sur un corpus vide, avant de toucher aux collections (point 188).
+- `deploy.sh` (point 184) : rotation du journal nLPD sur 365 jours créée au déploiement.
+- `deploy.sh` (point 189) : la RAG API est redémarrée après la première indexation, sinon la recherche par mots-clés restait inactive jusqu'à la première synchronisation (constaté au rejeu du 1er novembre 2026). Même étape ajoutée au §0 (étape 13).
+
+### SharePoint
+
+- `sp_indexer.py` (point 180) : deux sites dont l'URL finit par le même nom sont refusés ; leurs fichiers auraient eu les mêmes identifiants dans Qdrant.
+- §13.6.3 (point 181) : un site retiré de `SP_SITES` reste dans l'index ; procédure de purge.
+
+### Recherche
+
+- **Index plein texte de Qdrant 1.20** (points 30, 75, 122 à 124) : remplace l'index BM25 construit en mémoire (`rank-bm25`, retiré des dépendances). Toujours à jour, sans reconstruction au démarrage ni après la synchronisation ; accents, majuscules et ponctuation ignorés (« reglement » trouve « règlement », vérifié sur Qdrant 1.20) ; mots vides français ignorés. Racinisation française (« règlements » trouve « règlement ») avec `BM25_RACINISATION=1`, désactivée par défaut, à mesurer avant de l'activer. L'index est créé au démarrage de la RAG API : une installation existante migre sans réindexer. Qdrant antérieur à la 1.20 : recherche vectorielle seule, et le journal le dit.
+- Mots-clés classés par rang dans chaque collection : les scores BM25 de deux collections ne sont pas comparables, la documentation passait devant les documents de l'organisation.
+- **En-tête du document en tête de chaque extrait** (`CHUNKER_VERSION` 3) : « Extrait de « fichier », dossier D : titre. ». Sans lui, l'extrait d'un tableau de délais ne portait pas le nom du client, et la recherche confondait des contrats de même structure. Total inchangé avec `nomic-embed-text` (73 réponses conformes sur 102 sans, 72 avec), mais la confusion entre contrats disparaît. Réindexation complète au premier passage de l'indexeur.
+- **`bge-m3`** devient le modèle d'embedding recommandé, avec Ollama et avec vLLM (§2, §10.7). Il change la taille des vecteurs : une installation sur `nomic-embed-text` réindexe (§10.7).
+- Préfixes d'embedding réglables (`EMBED_PREFIXE_QUESTION`, `EMBED_PREFIXE_DOCUMENT`), vides par défaut, pour les modèles qui les attendent.
+- **Reranker sur la carte du serveur de modèles** (§10.8) : `llama-server --reranking` (`RERANKER_API=llamacpp`), clé d'API (`RERANKER_API_KEY`), modèle du conteneur réglable (`RERANKER_MODEL`), `bge-reranker-v2-m3` par défaut au lieu de `gte-multilingual-reranker-base`. En cas d'échec ou de réponse incomplète, l'ordre de la recherche est conservé. Désactivé par défaut (`RERANKER_URL` vide).
+- Réponses : les liens relatifs recopiés d'un document (liens morts dans Open WebUI) sont retirés, hors blocs de code.
+
+### Mesures (§10)
+
+- Ollama : `LLAMA_ARG_CACHE_RAM=2048` (point 172) limite le cache des prompts de chaque modèle à 2 Gio au lieu de 8 : environ 12 Go de mémoire centrale de moins pour le modèle principal et le juge en fin de campagne, sans écart net de qualité ni de durée.
+
+- Corpus de démonstration enrichi (générateur, droits, jeu de 35 questions), dans `corpus-demo/`.
+- Modèles d'embedding : `bge-m3` 80 réponses conformes sur 105, `nomic-embed-text` 72, `qwen3-embedding` 76, `nomic-embed-text` avec ses préfixes 60 ; même nombre d'éléments interdits pour `bge-m3` et `nomic-embed-text` (3).
+- Reranker `bge-reranker-v2-m3` : de 77 à 85 réponses conformes sur 105 et de 3 éléments interdits à 0 ; sur la carte du serveur de modèles avec Ollama, 83 sur 105 et 0 élément interdit, 0,2 s par question au lieu de 11 à 17 s sur le processeur de la VM. Avec vLLM (trois serveurs sur une carte de 16 Go) : 87 sur 105, 0 élément interdit, à la limite de la mémoire de la carte.
+- `s10/mesure_s10.py` : ponctuation ignorée dans la recherche des éléments attendus et interdits. « 1 an, à compter » n'était pas reconnu : un résultat annoncé à 0 élément interdit en comptait 3 ; toutes les mesures ont été recalculées.
+- Microsoft 365 : avec SharePoint indexé en plus du partage (anciennes versions des mêmes documents, sous les mêmes noms), 67 réponses conformes sur 111. Indexer deux emplacements du même contenu relève de la gouvernance (§17.4).
+
+### Outils
+
+- `deploy.sh` (point 178) : `bge-m3` contrôlé sur le serveur de modèles (Ollama et vLLM) et écrit dans le `.env` ; valeurs par défaut de `indexer.py` et `main.py` alignées. Il copie aussi la campagne du §10 (`s10/`, `rescorer.py`).
+- Contrôles du dépôt (point 179) : deux faux positifs corrigés (lien d'exemple dans du code, tiret recherché par `verifier.py`).
+
+- `comparer_vecteurs.py` : compare les vecteurs de Qdrant à ceux du serveur vLLM (§2.5).
+- `test_reranker.py` : 6 tests (formats des deux services, clé, repli).
+- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 51 tests (dossier illisible pendant le parcours, `--reset` refusé).
+
+### Documentation
+
+- Pages qui décrivaient encore l'index BM25 en mémoire mises à jour : §0 (contrôles et dépannage), §7, §8.6, §13 (§13.1.1, §13.6.7), §15.5, §17.5, `scripts/stack-ia-locale/index.md`, `README.md` (revue externe du 31 octobre 2026).
+- **Rejeu du 1er novembre 2026** (point 190) : §0, contrôle des liens du §1.5 avant l'étape 5 et filtre LDAP d'Open WebUI avec parenthèses ; §1.4, versions de Docker ; §3.7, restauration sur Qdrant 1.20 avec l'index plein texte ; §10.8, nouvelle mesure, tâche planifiée validée, rotation de la clé, session Windows ; §15.3.3, recherche de la mise à jour du dbx (`fwupdmgr refresh`), procédure revalidée.
+- **§5.4.2b, §5.9, §9.7.1, §16.5.2** : dossier illisible pendant le parcours, distinct d'une ACL illisible ; `--reset` refusé sur un parcours incomplet.
+- **§5.2.3, §5.8, §11.1.1** : droits en SID depuis la 2.22.0 ; exemples antérieurs marqués comme historiques.
+- **Guides PDF et Word** : marqués comme photographies datées (31 août et 11 octobre 2026), le guide en ligne fait foi.
+- **§5.5 et §16.5.3** : `tokenGroups` demande un catalogue global ; le « Groupe d'accès d'autorisation Windows » est documenté pour `tokenGroupsGlobalAndUniversal`, pas pour `tokenGroups` ; coût de la lecture pour les contrôleurs de domaine.
+- **§0** : `bge-m3`, tailles des modèles mesurées, `rank-bm25` retiré, avertissement sur le `.env` chargé dans le shell, contrôle de vLLM sans charger le `.env`.
+- **§2** : `bge-m3` avec vLLM (mémoire mesurée, sans `--trust-remote-code`), téléchargement sans les fichiers inutiles, comparaison des vecteurs, copie de sécurité du basculement sur le volume chiffré.
+
+---
+
 ## [2.22.5] : Octobre 2026
 
 Qdrant passe de la 1.19.0 à la 1.19.2.

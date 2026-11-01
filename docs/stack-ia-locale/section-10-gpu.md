@@ -17,7 +17,7 @@ description: "Passage de la stack RAG sur GPU (RTX 5060 Ti 16 Go) : mise en plac
 
 [Retour au sommaire](index.md) | [Section précédente : §9 Sécurité et durcissement](section-09-securite.md) | [Section suivante : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB et LABO-G9, octobre 2026, avec une carte NVIDIA RTX 5060 Ti 16 Go. Mesures sur un jeu de 17 questions, graine de génération fixée, cloisonnement contrôlé à 40 cas sur 40 (et en mode complet sur les cas Purview, écriture seule et refus explicite) après chaque modification. Comparaison des moteurs Ollama et vLLM (§10.12) : même carte, octobre 2026, cloisonnement à 44 sur 44.
+**Statut :** validé en lab sur VM-RAG-LAB et LABO-G9, octobre 2026, avec une carte NVIDIA RTX 5060 Ti 16 Go. Mesures sur un jeu de 17 questions, graine de génération fixée, cloisonnement contrôlé à 40 cas sur 40 (et en mode complet sur les cas Purview, écriture seule et refus explicite) après chaque modification. Comparaison des moteurs Ollama et vLLM (§10.12) : même carte, octobre 2026, cloisonnement à 44 sur 44. Seconde campagne sur l'embedding et le reranker (§10.7 et §10.8, 2.23.0) : corpus de démonstration enrichi, 35 questions posées trois fois, fin octobre 2026.
 
 Jusqu'ici, toute la stack tournait sur le processeur de LABO-G9. Cette section documente le passage sur une carte graphique, puis la campagne de mesures qui a suivi : ce que la carte change, et surtout ce qu'elle ne change pas. Car le résultat principal tient en une phrase : **la carte divise les temps de réponse par cinq à dix, sans rien changer à la qualité ni à la sécurité**. La qualité, elle, s'est gagnée ailleurs : dans la construction du contexte, dans le prompt, et dans le corpus.
 
@@ -58,6 +58,7 @@ Ollama doit être à jour pour reconnaître une carte Blackwell. Les réglages s
 | `OLLAMA_NUM_PARALLEL` | `1` | Une requête à la fois : pas de cache de contexte dupliqué |
 | `OLLAMA_KEEP_ALIVE` | `1h` | Modèles gardés en mémoire une heure (5 minutes par défaut) |
 | `OLLAMA_NO_CLOUD` | `1` | Désactive les modèles hébergés sur ollama.com, appelables comme des modèles locaux : cohérent avec une stack dont rien ne doit sortir |
+| `LLAMA_ARG_CACHE_RAM` | `2048` | Limite à 2 Gio, par modèle, le cache des prompts en mémoire centrale de chaque `llama-server` lancé par Ollama (8 Gio par défaut). Variable de llama.cpp, transmise par Ollama : vérifié dans son journal (`prompt cache is enabled, size limit: 2048 MiB`) ; 2.23.0 |
 
 Deux variables d'Ollama se sont révélées ignorées dans ce lab au cours des mois précédents. **On vérifie donc le résultat, pas le réglage** : après un redémarrage d'Ollama (quitter depuis la zone de notification, puis relancer), son journal affiche la configuration lue et le moteur retenu.
 
@@ -97,6 +98,10 @@ La carte retombe à 52 °C quelques secondes après la charge. Elle commencerait
 | `qwen3:4b-instruct` | Juge d'ancrage | environ 4 Go (3,9 Go relevés avec l'étiquette `qwen3:4b`) | 16 384 (voir §10.6) |
 | `nomic-embed-text` | Embedding | 0,3 Go | 2 048 |
 | **Total**, avec l'affichage | | **environ 15,3 Go sur 16,3** | |
+
+Depuis la 2.23.0, l'embedding recommandé est `bge-m3` (1,2 Go, §10.7), et le reranker sur la carte occupe environ 0,7 Go de plus (§10.8) : la marge se gagne en libérant la carte de l'affichage (encadré ci-dessous).
+
+Relevé du 29 octobre 2026, les trois modèles d'Ollama (`qwen3:14b`, `qwen3:4b-instruct`, `bge-m3`) et le reranker chargés, l'affichage de Windows sur la carte : **15 403 Mio utilisés sur 16 311**, soit environ 0,9 Go de marge.
 
 `ollama ps` doit afficher `100% GPU` pour chaque modèle placé sur la carte. Un partage du type `20%/80% CPU/GPU` signifie que le modèle déborde : la première mesure à prendre est alors de réduire la fenêtre de contexte (`LLM_NUM_CTX=12288` couvre largement les questions, qui envoient 4 000 à 6 000 tokens).
 
@@ -287,6 +292,8 @@ La règle est simple : **la fenêtre du juge doit être au moins celle du modèl
 
 `nomic-embed-text` a été comparé à `bge-m3`, réputé meilleur en français et multilingue. Le changement d'embedding est un vrai chantier : de nouvelles collections (les vecteurs changent de taille), une réindexation complète, et la revalidation du cloisonnement, puisque les permissions sont recopiées dans chaque extrait. Les anciennes collections restent en place jusqu'à la décision : revenir en arrière tient en trois lignes du `.env`.
 
+### Première campagne : 15 questions (octobre 2026)
+
 | | `nomic-embed-text` | `bge-m3` |
 |---|---|---|
 | Score sur le jeu de questions | 12 sur 15 | 12 sur 15 |
@@ -295,11 +302,59 @@ La règle est simple : **la fenêtre du juge doit être au moins celle du modèl
 | Réindexation complète sur CPU | | Plus de 10 minutes : coupée par la limite de durée des indexeurs, terminée en deux passages |
 | Cloisonnement après réindexation | 40 sur 40 | 40 sur 40 |
 
-Match nul. `bge-m3` comprend mieux la documentation technique, mais il a confondu deux contrats de maintenance au contenu très semblable. Son atout, le multilinguisme, ne se voit pas sur un corpus entièrement francophone : même la question posée en allemand réussit avec `nomic-embed-text`.
+Match nul. `bge-m3` comprenait mieux la documentation technique, mais il confondait deux contrats de maintenance au contenu très semblable. Le multilinguisme ne se voyait pas sur un corpus entièrement francophone. `nomic-embed-text` était resté le modèle recommandé, en attendant un corpus plus riche : 15 questions ne départagent pas deux modèles proches.
 
-**`nomic-embed-text` reste le modèle recommandé** pour un corpus francophone. `bge-m3` se justifierait pour un corpus réellement multilingue (documents en allemand et en italien), ce qui serait à mesurer sur un tel corpus.
+### Seconde campagne : corpus enrichi (2.23.0)
 
-> **Une réindexation complète peut dépasser la limite des indexeurs.** La RAG API interrompt un indexeur après 10 minutes par défaut (`SYNC_TIMEOUT_INDEXER`, en secondes), ce qui suffit aux synchronisations horaires, pas à une réindexation complète avec un modèle d'embedding plus lourd sur CPU. Augmenter cette limite le temps de la réindexation, ou relancer la synchronisation, qui est incrémentale ; mais un fichier interrompu en cours d'indexation peut rester incomplet. Comparer, document par document, le nombre d'extraits de l'ancienne et de la nouvelle collection permet de le détecter : le découpage ne dépend pas du modèle d'embedding.
+Le corpus du lab a été complété par un corpus de démonstration généré (`corpus-demo/` du dépôt) : une entreprise fictive, Axonix SA, 104 documents dans sept dossiers (clients, RH, comptabilité, direction, service informatique, production, commun), avec leurs droits. Il contient volontairement les pièges d'un vrai partage : des contrats de même structure pour plusieurs clients, deux versions d'un même contrat, un projet annulé, des documents à usage interne. Le jeu de questions passe à 35 questions (12 précises, 5 larges, 4 d'inventaire, 3 pièges, 3 croisées, 3 refus, 3 de cloisonnement, 2 multilingues), posées trois fois chacune, soit 105 réponses par configuration.
+
+Deux corrections ont précédé la mesure :
+
+- **l'en-tête du document en tête de chaque extrait** (« Extrait de « fichier », dossier D : titre. », `CHUNKER_VERSION` 3). L'extrait qui contient le tableau des délais d'un contrat ne portait pas le nom du client : la recherche donnait le délai de l'Étude Rochat pour l'Hôtel Lac-Azur. L'en-tête entre dans l'embedding et dans la recherche par mots-clés. Mesuré avec `nomic-embed-text` sur les 34 questions communes aux deux campagnes, le total ne bouge pas (73 réponses conformes sur 102 sans l'en-tête, 72 avec) : l'en-tête supprime la confusion entre contrats (trois éléments interdits de moins) et gagne la liste des clients sous contrat, mais deux questions précises sur d'autres clients (langues du helpdesk d'un client, signature d'un contrat) échouent désormais, et une question de cloisonnement passe d'une réponse conforme sur trois à aucune, sans fuite : le montant interdit n'apparaît dans aucune réponse. Il est conservé pour la confusion entre clients qu'il supprime : une réponse fausse et sûre d'elle est plus grave qu'une réponse manquée ;
+- **la ponctuation ignorée par le script de mesure** dans la recherche des éléments attendus et interdits. « 1 an, à compter » n'était pas reconnu comme l'élément interdit « 1 an à compter » : un résultat d'abord annoncé sans aucun élément interdit en comptait 3. Toutes les mesures ci-dessous ont été recalculées.
+
+Avec Ollama, `qwen3:14b`, sans reranker, graine fixée (`LLM_SEED=42`) :
+
+| Modèle d'embedding | Réponses conformes | Éléments interdits |
+|---|---|---|
+| `nomic-embed-text` | 72 sur 105 | 3 (projet annulé) |
+| `nomic-embed-text` avec ses préfixes (`search_query:`, `search_document:`) | 60 sur 105 | 4 |
+| `qwen3-embedding` | 76 sur 105 | 6 |
+| **`bge-m3`** | **80 sur 105** | **3 (projet annulé)** |
+
+**`bge-m3` devient le modèle recommandé** : huit réponses conformes de plus que `nomic-embed-text`, à éléments interdits égaux. `qwen3-embedding` gagne aussi en réponses conformes, mais double les éléments interdits. Les préfixes que `nomic-embed-text` est censé attendre font baisser le score : ils restent réglables (`EMBED_PREFIXE_QUESTION`, `EMBED_PREFIXE_DOCUMENT`), vides par défaut. Les trois éléments interdits restants viennent tous de la même question, sur un contrat dont une version annulée existe encore sur le partage : le §10.8 et le §17.4 y reviennent.
+
+Avec vLLM, la même configuration (modèle principal et embedding servis par vLLM) donne 77 réponses conformes sur 105 et 6 éléments interdits (projet annulé trois fois, confusion de contrats trois fois). Les vecteurs de `bge-m3` sont pourtant les mêmes avec les deux moteurs (similarité minimale 0,99994, §2.5) : l'écart ne vient pas des vecteurs, mais du moteur qui rédige la réponse, ou de la variation d'un passage à l'autre ; il n'a pas été analysé plus loin.
+
+### Passer à `bge-m3` sur une installation existante
+
+`bge-m3` produit des vecteurs de 1 024 dimensions, `nomic-embed-text` de 768 : une collection existante ne peut pas les recevoir, et l'indexeur refuse de mélanger les deux (il signale l'écart et propose `--reset`). Le passage à la 2.23.0 réindexe de toute façon tous les documents (nouvel en-tête des extraits) : c'est le moment de changer de modèle.
+
+La méthode du lab garde les anciennes collections, pour pouvoir revenir en arrière :
+
+1. Prendre un snapshot de la VM.
+2. Sur le serveur de modèles : `ollama pull bge-m3` (ou le service `vllm-embed` du §2 avec `bge-m3`).
+3. Dans le `.env`, trois lignes changent, et la limite de durée des indexeurs augmente le temps de la réindexation :
+
+```bash
+sed -i --follow-symlinks -e 's/^EMBED_MODEL=.*/EMBED_MODEL=bge-m3/' -e 's/^QDRANT_COLLECTION=.*/QDRANT_COLLECTION=documents_bgem3/' -e 's/^DOCUMENTATION_COLLECTION=.*/DOCUMENTATION_COLLECTION=documentation_bgem3/' /root/rag-stack/.env
+```
+
+`SYNC_TIMEOUT_INDEXER` (600 secondes par défaut) se règle de la même façon, par exemple à 3600, et revient à sa valeur après la réindexation.
+
+4. Recréer la RAG API pour qu'elle lise le `.env` : `cd /root/rag-stack && docker compose up -d rag-api`.
+5. Lancer une synchronisation (§5.9, ou le workflow n8n) : l'indexeur crée les nouvelles collections et les remplit, puis la RAG API crée leur index plein texte. Attendre `[SYNC] Terminé : success=True`.
+6. Comparer le nombre d'extraits des anciennes et des nouvelles collections : le découpage ne dépend pas du modèle d'embedding, les nombres doivent être égaux.
+
+```bash
+docker exec rag-api python3 -c "import os; from qdrant_client import QdrantClient as Q; q=Q(url=os.environ['QDRANT_HOST'], api_key=os.environ['QDRANT_API_KEY']); [print(c, q.count(c).count) for c in ('documents','documents_bgem3','documentation','documentation_bgem3') if q.collection_exists(c)]"
+```
+
+7. Rejouer le test de non-divulgation (§16) et, si possible, le jeu de questions.
+8. Revenir en arrière, si besoin : les trois lignes reprennent leur ancienne valeur, puis l'étape 4.
+9. La décision prise, supprimer les anciennes collections.
+
+> **Une réindexation complète peut dépasser la limite des indexeurs.** La RAG API interrompt un indexeur après 10 minutes par défaut (`SYNC_TIMEOUT_INDEXER`, en secondes), ce qui suffit aux synchronisations horaires, pas à une réindexation complète avec un modèle d'embedding plus lourd sur CPU. Augmenter cette limite le temps de la réindexation, ou relancer la synchronisation, qui est incrémentale ; mais un fichier interrompu en cours d'indexation peut rester incomplet. La comparaison de l'étape 6, document par document au besoin, permet de le détecter.
 
 ---
 
@@ -341,9 +396,131 @@ Sur 20 candidats, avec `nomic-embed-text` :
 
 En remplaçant l'ordre de la recherche, le reranker gagne les questions larges (les trois clients enfin trouvés) et la liste des règles YAML, mais il en perd d'autres : il **ignore les noms propres**. Pour lui, le tableau des délais d'un contrat Rochat répond aussi bien à « délais du contrat Baumont » que celui du contrat Baumont, puisque les deux tableaux disent la même chose. La recherche par mots-clés, elle, tenait compte du nom. La fusion des deux classements retrouve les noms propres, mais perd les gains.
 
-**Le reranker est désactivé dans ce lab.** Sur CPU, avec un corpus de cette taille, il n'apporte aucun gain mesurable et coûte 5 à 6 secondes par question. Le code reste en place, inactif tant que `RERANKER_URL` est vide, et le service est fourni dans le Compose comme option. Il deviendrait intéressant avec une carte dédiée, un corpus de milliers de documents, ou une recherche initiale plus faible.
+**Le reranker avait été désactivé à l'issue de cette première campagne.** Sur CPU, avec ce corpus et `nomic-embed-text`, il n'apportait aucun gain mesurable et coûtait 5 à 6 secondes par question. Le code était resté en place, inactif tant que `RERANKER_URL` est vide.
 
 > **Ce que le reranker a révélé sur le corpus.** Pour la question du forfait d'un contrat, il a classé en tête la section du guide sur la fiabilité, indexée dans la collection documentation : elle cite justement ce contrat, ses montants et les cas de test. Le reranker n'avait pas tort sur le texte, mais c'est le mauvais document. Voir §10.10.
+
+### Seconde campagne : corpus enrichi et `bge-m3` (2.23.0)
+
+Le corpus enrichi du §10.7 change la donne : 35 questions posées trois fois, des contrats de même structure pour plusieurs clients, deux versions d'un même contrat. Avec `bge-m3`, Ollama et `qwen3:14b` :
+
+| Configuration | Réponses conformes | Éléments interdits | Durée de la campagne | Coût du reclassement |
+|---|---|---|---|---|
+| Sans reranker (référence du jour) | 77 sur 105 | 3 | 14,8 min | |
+| `gte-multilingual-reranker-base`, processeur de la VM | 76 sur 105 | 3 | 30,9 min | environ 9 s par question (estimé) |
+| `bge-reranker-v2-m3`, processeur de la VM | 85 sur 105 | **0** | 45,9 min | 11 à 17 s par question (mesuré) |
+| **`bge-reranker-v2-m3` sur la carte du serveur de modèles** (llama-server, Q8) | **83 sur 105** | **0** | **20,1 min** | **0,2 s** (médiane), 0,3 s au plus |
+| Stack sous vLLM, reranker sur la carte (trois serveurs vLLM) | 87 sur 105 | 0 | 21,3 min | 0,2 s, 98 reclassements sans échec |
+
+Les campagnes du reranker ont tourné **sans graine fixée** : la référence sans reranker y donne 77 réponses conformes, contre 80 avec la graine 42 au §10.7, même configuration par ailleurs. C'est l'ordre de grandeur de la variation d'un tirage à l'autre, et la raison pour laquelle seuls des écarts nets sont retenus : les huit réponses gagnées par `bge-reranker-v2-m3` et la disparition des éléments interdits le sont, les écarts de deux ou trois réponses ne le sont pas.
+
+Rejoué le 1er novembre 2026 sur une VM neuve (2.23.0), sans graine fixée : 76 réponses conformes sur 105 sans reranker (3 éléments interdits), 83 avec le reranker sur la carte (aucun élément interdit, 106 reclassements sans échec, 15,4 min). Mêmes questions gagnées qu'à la première campagne : confusions entre clients et piège de la version annulée.
+
+Question par question, `bge-reranker-v2-m3` corrige les confusions entre clients (délais d'un contrat attribués à un autre, facture d'un client donnée pour un autre) et la question piège du contrat dont une version annulée existe encore : ses trois éléments interdits disparaissent. Il conserve les questions de référence et d'inventaire qui réussissaient sans lui. `gte-multilingual-reranker-base`, au contraire, fait échouer trois questions que la recherche réussissait seule : il n'est plus recommandé.
+
+Le défaut constaté à la première campagne, les noms propres ignorés, ne s'est pas reproduit. Explication probable, non vérifiée séparément : chaque extrait porte désormais le nom de son document (§10.7), et le reranker le lit avec le texte.
+
+**Le reranker est conservé.** `bge-reranker-v2-m3` est recommandé avec Ollama dès que la carte garde 0,7 Go libres, et s'active à la main (`RERANKER_URL` reste vide par défaut). Sur le processeur de la VM, il double la durée d'une question et triple celle d'une campagne : le conteneur du Compose reste fourni, mais n'est pas utilisable en service.
+
+### Le reranker sur la carte du serveur de modèles
+
+Ollama ne propose pas de reclassement. `llama-server`, le serveur de llama.cpp sur lequel Ollama repose, le fait (`--reranking`) et répond au format attendu par la RAG API avec `RERANKER_API=llamacpp`.
+
+| Élément | Choix du lab |
+|---|---|
+| Serveur | `llama-server` de la version officielle de llama.cpp, b11934, pour CUDA 13.4 (`llama-b11934-bin-win-cuda-13.4-x64.zip` et `cudart-llama-bin-win-cuda-13.4-x64.zip`, empreintes SHA-256 vérifiées), dans `C:\IA\llama.cpp` |
+| Modèle | `bge-reranker-v2-m3` converti dans le lab au format GGUF, quantifié en Q8 (636 Mo), depuis le dépôt officiel `BAAI/bge-reranker-v2-m3` à une révision figée : l'origine du fichier est connue. Empreinte SHA-256 relevée et contrôlée sur le serveur de modèles |
+| Mémoire de la carte | environ 0,7 Go ; les modèles d'Ollama restent à `100% GPU` |
+| Port | 8091, ouvert dans le pare-feu de Windows à la seule adresse sous laquelle le serveur voit la VM de la stack (dans le lab, celle du routeur qui traduit les adresses, §16.7) |
+| Clé d'API | lue dans un fichier réservé au compte qui lance le service et passée par la variable `LLAMA_API_KEY` : elle n'apparaît pas dans la ligne de commande du processus, visible par tout administrateur du poste. La même clé va dans `RERANKER_API_KEY` du `.env` |
+| Démarrage | tâche planifiée à l'ouverture de session, comme Ollama, sans fenêtre (`conhost.exe --headless`) |
+
+**La conversion du modèle**, faite une fois, dans Ubuntu (WSL2 dans le lab), avec le convertisseur de llama.cpp à un commit figé (`9ff0d7e90`, celui de la version d'Ollama du lab) et un environnement Python à part :
+
+```bash
+sudo mkdir -p /opt/llama.cpp-conv && sudo chown $USER /opt/llama.cpp-conv && git clone -q https://github.com/ggml-org/llama.cpp /opt/llama.cpp-conv/src && cd /opt/llama.cpp-conv/src && git checkout -q 9ff0d7e90 && uv venv -q --python 3.12 --seed /opt/llama.cpp-conv/.venv && uv pip install -q --python /opt/llama.cpp-conv/.venv/bin/python -r requirements/requirements-convert_hf_to_gguf.txt
+```
+
+Puis, depuis `/opt/llama.cpp-conv/src`, le téléchargement du modèle (sans sa version ONNX, inutile), la conversion directe en Q8 et la copie vers Windows :
+
+```bash
+HF_HOME=/opt/hf /opt/vllm/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && mkdir -p /mnt/c/IA/reranker && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
+```
+
+**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. `hf` est l'outil de Hugging Face installé avec vLLM (§2) ; sans vLLM, il s'installe avec le paquet `huggingface_hub`.
+
+**La clé et la règle de pare-feu**, dans PowerShell en administrateur. La clé (64 caractères aléatoires) est écrite dans un fichier dont l'héritage des droits est coupé, lisible par le seul compte qui lance le service :
+
+```powershell
+$k = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'); Set-Content -Path C:\IA\reranker\cle.txt -Value $k -NoNewline; icacls C:\IA\reranker\cle.txt /inheritance:r /grant:r "$($env:USERNAME):R" | Out-Null
+New-NetFirewallRule -DisplayName 'Reranker llama-server (lab)' -Direction Inbound -Protocol TCP -LocalPort 8091 -RemoteAddress <IP-VM-STACK> -Action Allow
+```
+
+La clé se relit, pour le `.env` de la stack, par `Get-Content C:\IA\reranker\cle.txt`, depuis le même compte. `<IP-VM-STACK>` est l'adresse de la VM **telle que le serveur de modèles la voit** : derrière un routeur qui traduit les adresses, c'est celle du routeur (§16.7).
+
+**La tâche planifiée**, dans la même console. Réglages de la tâche du lab, relevés par `Export-ScheduledTask` : déclencheur à l'ouverture de session du compte, exécution dans sa session (comme Ollama), durée illimitée, une seule instance, démarrage autorisé sur batterie, action `conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\IA\reranker\demarrer-reranker.ps1`. La commande qui la crée avec ces réglages :
+
+```powershell
+$a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\IA\reranker\demarrer-reranker.ps1'; $t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$env:USERNAME"; $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries; Register-ScheduledTask -TaskName 'Reranker llama-server (lab)' -Description 'bge-reranker-v2-m3 sur la carte, port 8091 (§10.8)' -Action $a -Trigger $t -Settings $s
+```
+
+Validée le 1er novembre 2026 : tâche supprimée puis recréée par cette commande, exports identiques (`Compare-Object` sans différence).
+
+**Changer la clé.** Le fichier n'accorde que la lecture, même à un administrateur : se redonner d'abord le contrôle total, comme propriétaire, puis recréer la clé et redémarrer le serveur. Mettre ensuite la nouvelle clé dans `RERANKER_API_KEY` et recréer la RAG API.
+
+```powershell
+icacls C:\IA\reranker\cle.txt /grant:r "$($env:USERNAME):F" | Out-Null; Remove-Item C:\IA\reranker\cle.txt -Force; $k = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'); Set-Content -Path C:\IA\reranker\cle.txt -Value $k -NoNewline; icacls C:\IA\reranker\cle.txt /inheritance:r /grant:r "$($env:USERNAME):R" | Out-Null; Remove-Variable k
+```
+
+**Attendu :** la tâche à l'état `Ready` ; après `Start-ScheduledTask`, `llama-server.exe` dans `nvidia-smi` et la ligne `listening on http://0.0.0.0:8091` dans `C:\IA\reranker\reranker.log`.
+
+Le script lancé par la tâche, `demarrer-reranker.ps1`, fourni dans le dépôt (`scripts/stack-ia-locale/reranker/`) et à copier dans `C:\IA\reranker` :
+
+```powershell
+$env:LLAMA_API_KEY = (Get-Content 'C:\IA\reranker\cle.txt' -Raw).Trim()
+Start-Process -FilePath 'C:\IA\llama.cpp\llama-server.exe' -WindowStyle Hidden -Wait `
+    -RedirectStandardError 'C:\IA\reranker\reranker.log' `
+    -RedirectStandardOutput 'C:\IA\reranker\reranker-sortie.log' `
+    -ArgumentList '-m C:\IA\reranker\bge-reranker-v2-m3-q8_0.gguf --reranking --host 0.0.0.0 --port 8091 -ngl 99 -c 8192 -np 4 -b 2048 -ub 2048 --cache-ram 0'
+```
+
+`--cache-ram 0` désactive le cache des prompts en mémoire centrale (8 Gio par défaut, inutile pour un reclassement). Deux pièges de Windows PowerShell 5.1 :
+
+- le journal de `llama-server` sort sur la sortie d'erreur : redirigée par `2>` ou `*>`, chaque ligne devient une erreur et arrête le script. `Start-Process` écrit les deux sorties dans des fichiers ;
+- lancé directement par la tâche planifiée, PowerShell ouvre une fenêtre qui reste à l'écran : `conhost.exe --headless powershell.exe …` la supprime.
+
+Le serveur reste chargé tant que la session est ouverte, sans se recharger à chaque question. Comme Ollama (§10.1), il s'arrête quand la session Windows est **fermée** (fermer la fenêtre RDP ne la ferme pas), et repart seul à la réouverture : vérifié le 1er novembre 2026, à l'écoute 2,5 s après l'ouverture de session. Dans le lab, la fermeture de session suspend aussi les VM de VMware Workstation, qui tourne dans la même session. Pour libérer la carte (autre usage du GPU), arrêter la tâche **et** le processus : `Stop-ScheduledTask` seul laisse `llama-server` en mémoire.
+
+```powershell
+Stop-ScheduledTask -TaskName 'Reranker llama-server (lab)'; Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" | Where-Object CommandLine -like '*--reranking*' | ForEach-Object { Stop-Process -Id $_.ProcessId }
+Start-ScheduledTask -TaskName 'Reranker llama-server (lab)'
+```
+
+Côté stack, dans le `.env` :
+
+```
+RERANKER_URL=http://<IP-SERVEUR-MODELES>:8091
+RERANKER_API=llamacpp
+RERANKER_API_KEY=<clé>
+```
+
+puis `docker compose up -d rag-api`. Le journal de la RAG API affiche une ligne `[RERANK]` par question, avec le nombre d'extraits reclassés et la durée. Si le reranker ne répond pas, ou renvoie moins de scores que d'extraits, l'ordre de la recherche est conservé et la question est servie.
+
+Les mesures ont été faites avec les réglages par défaut du Compose : les **20** meilleurs candidats reclassés (`RERANK_CANDIDATS`, 10 si la variable manque, hors Compose), et le classement du reranker **fusionné** avec celui de la recherche (`RERANK_MODE=fusion`), ce qui garde du poids au nom d'un client trouvé par les mots-clés.
+
+### Avec vLLM : un troisième serveur sur la carte
+
+Avec vLLM, le reranker est un troisième serveur à côté du modèle principal et de l'embedding (port 8002, ajouté à la règle d'entrée du §2). Pour lui faire de la place, la part de mémoire du modèle principal passe de 0,87 à 0,82 : il garde sa fenêtre de 16 384 tokens, avec un cache de 20 912 tokens (26 128 à 0,87).
+
+Commande du lab, lancée à la main dans le même environnement que les deux autres serveurs (§2), sans service systemd :
+
+```bash
+cd /opt/vllm && source .venv/bin/activate && set -a && source /etc/vllm/vllm.env && set +a && HF_HOME=/opt/hf vllm serve BAAI/bge-reranker-v2-m3 --runner pooling --served-model-name bge-reranker-v2-m3 --max-model-len 2048 --gpu-memory-utilization 0.15 --enforce-eager --host 0.0.0.0 --port 8002 --api-key "$VLLM_API_KEY" 2>&1 | tee /tmp/rr-vllm.log
+```
+
+Ordre de démarrage du lab : le modèle principal (0,82), l'embedding (0,11), puis le reranker (0,15). Le service de reclassement de vLLM (`/rerank`) répond au même format que `llama-server` : dans le `.env`, `RERANKER_URL=http://<IP-SERVEUR-MODELES>:8002`, `RERANKER_API=llamacpp` et la clé de vLLM (`VLLM_API_KEY`) dans `RERANKER_API_KEY`.
+
+**Validé en lab, à la limite d'une carte de 16 Go** : 37 Mio libres pendant la mesure. C'est la meilleure mesure de la campagne (87 sur 105, aucun élément interdit), mais sans marge : un affichage branché sur la carte, ou une fenêtre de contexte plus grande, ne passerait pas. En service avec vLLM et le reranker, prévoir une carte plus grande.
 
 ---
 
@@ -408,6 +585,19 @@ Une cinquième limite relève d'un traitement à venir : **résumer un long docu
 
 > **À ce stade, la qualité d'un RAG se gagne dans les documents, plus dans les réglages.** Le GPU a apporté la vitesse ; la construction du contexte et le prompt ont apporté la fiabilité. Ce qui reste demande un corpus tenu : une version par document, des pages de synthèse là où les utilisateurs posent des questions de synthèse, et rien d'indexé qui parle du corpus lui-même.
 
+### Bien poser ses questions
+
+Les mêmes limites se voient du côté des utilisateurs, et quelques habitudes les contournent. Chaque conseil ci-dessous s'appuie sur une question du jeu de la seconde campagne (§10.7), dans la configuration recommandée : `bge-m3` et le reranker sur la carte. Ils ont leur place dans la formation des utilisateurs, au moment de l'ouverture du service.
+
+| Conseil | Ce que le jeu de questions montre |
+|---|---|
+| **Un sujet précis plutôt que « tout ce que tu sais »** | « Fais-moi un résumé de tout ce que tu sais sur les clients » échoue aux trois passages dans les six campagnes examinées, avec ou sans reranker : la réponse détaille un client (l'Étude Rochat) et oublie les autres. Demander client par client, ou s'appuyer sur une page « Clients » du corpus (tableau ci-dessus) |
+| **Nommer le document ou sa référence** | La durée du contrat demandée par sa référence (« AX-2026-MAINT-007 ») est juste dans les six campagnes examinées (seul le reranker `gte`, écarté, l'a fait échouer). Demandée par le nom du client, elle mêlait, sans reranker, la durée du projet annulé aux trois passages |
+| **Ne pas attendre une liste complète** | Les questions « liste les règles » ou « donne-moi la liste des clients sous contrat » donnent des listes partielles, plus ou moins selon la configuration : un RAG choisit des extraits, il ne parcourt pas tout le corpus. Pour un inventaire, un document d'index fait foi |
+| **Poser la question dans la langue des documents** | Posée en allemand, la question du forfait d'un contrat rédigé en français obtient le bon montant, cité dans le bon document, mais la recherche place en tête le contrat d'un autre client, rédigé en allemand, et la réponse mêle le français et l'allemand. Le résultat est juste, la marge est mince |
+| **Ne pas demander le résumé d'un long document** | Le RAG choisit des extraits : un document de 40 pages n'est pas lu du début à la fin (limite ci-dessus) |
+| **Ouvrir la source citée** | Chaque réponse cite son document et son dossier. Pour une décision (un délai, un montant, une clause), la source se vérifie : c'est elle qui fait foi, pas la réponse |
+
 ---
 
 ## §10.11 Configuration recommandée
@@ -419,9 +609,9 @@ Une cinquième limite relève d'un traitement à venir : **résumer un long docu
 | Modèle principal | `qwen3:14b`, sur la carte | `LLM_MODEL=qwen3:14b`, `LLM_NUM_CTX=16384` |
 | Moteur | Ollama pour un à deux utilisateurs simultanés, vLLM au-delà | §2 et §10.12 |
 | Juge | `qwen3:4b-instruct`, sur la carte ; avec vLLM, le modèle principal | `JUDGE_NUM_GPU` vide ; avec vLLM, `JUDGE_MODEL=qwen3:14b` |
-| Embedding | `nomic-embed-text`, sur la carte | `EMBED_NUM_GPU` vide |
+| Embedding | `bge-m3`, sur la carte (2.23.0, §10.7) | `EMBED_MODEL=bge-m3`, `EMBED_NUM_GPU` vide |
 | Synthèse Teams | Le modèle principal | `SUMMARY_MODEL` vide |
-| Reranker | Désactivé | `RERANKER_URL` vide ; le service reste disponible en option |
+| Reranker | `bge-reranker-v2-m3` sur la carte du serveur de modèles, si elle garde 0,7 Go libres (2.23.0, §10.8) ; sinon désactivé | `RERANKER_URL`, `RERANKER_API=llamacpp`, `RERANKER_API_KEY` ; vide par défaut |
 | Contexte | Diversité des sources, document court en entier, extraits consécutifs pour les compléments | `CANDIDATS=30`, `PRINCIPAL_MAX=9`, `CONTEXT_OTHER_DOCS=6`, `EXTRAITS_PAR_COMPLEMENT=4`, `COMPLEMENT_VOISINS=1`, `DOC_COMPLET_MAX=15` |
 | Fenêtres de contexte | Le juge couvre le modèle principal | `LLM_NUM_CTX=16384`, `JUDGE_NUM_CTX=16384` |
 | Prompt | Règles complémentaires | `PROMPT_REGLES_V2=1` |
@@ -435,6 +625,7 @@ Le GPU ne porte que les modèles. Tout le reste tourne en mémoire système, et 
 | Composant | Mémoire mesurée dans le lab |
 |---|---|
 | VM RAG complète, sans reranker | 2 à 3 Go utilisés ; la VM tourne avec 8 Go |
+| Ollama sur le serveur de modèles, en fin de campagne de mesure (2.23.0) | Cache des prompts par défaut (8 Gio par modèle) : `qwen3:14b` 19 Go de mémoire privée, `qwen3:4b-instruct` 12,9 Go. Avec `LLAMA_ARG_CACHE_RAM=2048` : 12,8 et 6,3 Go, environ 12 Go de moins pour les deux, sans écart net de qualité (80 réponses conformes sur 105 contre 83, sans graine fixée, 0 élément interdit) et durée comparable (18,5 min contre 20,1) |
 | Reranker `bge-reranker-v2-m3`, réglages par défaut | **9 Go**, préchauffage compris |
 | Reranker bridé (`--max-batch-tokens 4096`) | 1,2 à 1,9 Go |
 | Qdrant | Proportionnel aux collections chargées, y compris celles qui ne servent plus : supprimer les collections abandonnées |
