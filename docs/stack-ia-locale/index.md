@@ -113,9 +113,9 @@ Les numéros de section sont attribués à la publication.
 
 ## Ce qui vient ensuite
 
-La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance. Le déploiement sur une VM neuve, disque chiffré compris, a été rejoué de bout en bout le 19 octobre 2026 (version 2.21.1). Il reste à venir :
+La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synthèse des réunions Teams, indexation de SharePoint Online avec ses permissions, documents protégés par Purview, sécurité des données, contrôle du cloisonnement, gouvernance. Le déploiement sur une VM neuve, disque chiffré compris, a été rejoué de bout en bout le 1er novembre 2026 (version 2.23.0, VM à un seul disque, cloisonnement sur 207 verdicts sans fuite). Il reste à venir :
 
-- **un test de charge avec vLLM** (quatre puis huit questions simultanées) et l'essai de `deploy.sh` avec vLLM sur une VM neuve ;
+- **l'essai de `deploy.sh` avec vLLM** sur une VM neuve (le test de charge de vLLM, de une à huit questions simultanées, est fait : §10.12) ;
 - **des mesures de l'index** sur un corpus de 20 000 à 100 000 extraits, pour savoir quand changer d'approche (point 75 du suivi) ;
 - **une procédure de mise à jour** d'une installation existante, validée sur la VM connectée à Microsoft 365 ;
 - **le résumé d'un document entier** (lecture par morceaux puis synthèse), que le RAG ne sait pas faire en choisissant des extraits (§10.10) ;

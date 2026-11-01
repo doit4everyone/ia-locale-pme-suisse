@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 55 tests OK », code de sortie 0.
+Attendu : « 56 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -678,6 +678,19 @@ def tests_extraction():
             verifier("2.23.0 : fichier réellement vide, anciens extraits supprimés",
                      entree.get("statut") == "vide" and supprimes == ["COMMUN/Vide.txt"],
                      f"statut {entree.get('statut')}, supprimés {supprimes}")
+            # PDF sans aucun texte extractible : sans contenu indexable, extraits supprimés
+            if getattr(idx, "PDF_AVAILABLE", False):
+                pdf = os.path.join(d, "Scan.pdf")
+                with open(pdf, "wb") as f:
+                    f.write(b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+                            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+                            b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n"
+                            b"trailer<</Root 1 0 R>>\n%%EOF\n")
+                supprimes.clear()
+                nb, entree = idx.index_file(None, pdf, d, "CLIENTS/Scan.pdf")
+                verifier("2.23.0 : PDF sans texte extractible, sans contenu indexable, extraits supprimés",
+                         entree.get("statut") == "vide" and supprimes == ["CLIENTS/Scan.pdf"],
+                         f"statut {entree.get('statut')}, supprimés {supprimes}")
             # Fichier texte « ANSI » (Windows-1252) : lu en entier, accents compris
             ansi = os.path.join(d, "Note.txt")
             with open(ansi, "wb") as f:

@@ -363,11 +363,11 @@ Depuis la 2.20.4, deux cas s'arrêtent avant même ce seuil, toujours sans modif
 | ACL d'un fichier illisible | Fichier verrouillé, droit de lecture des ACL retiré | Compté pour le garde-fou ; au-delà de 20 %, abandon sans modifier Qdrant (code 1) |
 | Dossier illisible pendant le parcours | Droit retiré à `svc-rag` sur un sous-dossier, incident SMB | Droits des fichiers lus mis à jour ; **aucun orphelin supprimé** ; documents non retrouvés retirés de la recherche jusqu'à un parcours complet ; dossiers listés dans `erreurs_parcours` du rapport ; code 2 et alerte |
 
-`indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, si le corpus est vide, ou si le serveur d'embedding ne calcule pas un premier vecteur, avant de toucher aux collections (§5.9).
+`indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, si le corpus est vide, ou si le serveur d'embedding ne calcule pas un premier vecteur, avant de toucher aux collections (§5.9). **`--reset` reste destructif** : une fois les collections effacées, un fichier illisible n'est pas réindexé, et son ancien contenu est perdu jusqu'à ce qu'il redevienne lisible. Le rapport le liste en erreur (code 2). Avant un `--reset`, un passage sans cette option montre les fichiers illisibles ; pour garder l'ancien index jusqu'à la fin, préférer de nouvelles collections (§10.7).
 
 **Fichier illisible (2.23.0).** Un fichier dont la lecture ou l'extraction échoue (fichier abîmé, verrouillé, bibliothèque absente) n'est plus traité comme un document vide : ses anciens extraits restent en place, avec leurs droits relus par `acl_resolver.py`, il est compté en erreur et l'indexation rend le code 2. Seul un document réellement vide (aucun texte extractible) voit ses extraits supprimés. Deux cas précis :
 
-- **un PDF sans texte extractible** (document scanné, sans reconnaissance de caractères) est traité comme un document sans contenu indexable : le journal de l'indexeur le signale (« PDF vide ou scanné »), et ses éventuels anciens extraits sont supprimés. C'est voulu : s'il en avait, le fichier a été remplacé, et l'ancien texte ne correspond plus au document. Le RAG ne lit pas les images ; les PDF scannés sont à passer en reconnaissance de caractères avant indexation, ou à écarter ;
+- **un PDF sans texte extractible** est traité comme un document sans contenu indexable : le journal de l'indexeur le signale (« PDF sans texte extractible »). C'est tout ce que l'extracteur constate : il ne distingue pas un document scanné, sans reconnaissance de caractères, d'une couche texte présente mais illisible pour lui. Ses éventuels anciens extraits sont supprimés. C'est voulu : s'il en avait, le fichier a été remplacé, et l'ancien texte ne correspond plus au document. Le RAG ne lit pas les images ; les PDF scannés sont à passer en reconnaissance de caractères avant indexation, ou à écarter ;
 - **un fichier `.txt` ou `.md`** est lu en UTF-8, sinon en Windows-1252, l'encodage des fichiers « ANSI » créés sous Windows. Jusqu'à la 2.22, les caractères non UTF-8 étaient retirés sans le dire, accents compris.
 
 Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API reprend dans le rapport de synchronisation et donc dans le courriel d'alerte.
@@ -726,7 +726,7 @@ docker compose build --no-cache rag-api && docker compose up -d rag-api
 cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 # --reset efface les collections : refusé (2.23.0) si un dossier est illisible, le corpus vide
-# ou le serveur d'embedding hors service
+# ou le serveur d'embedding hors service. Un fichier illisible ensuite n'est pas réindexé (§5.4.2b)
 python indexer.py --corpus /mnt/corpus-root --reset
 # Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
 # --post-data est obligatoire : /admin/sync n'accepte que POST (sinon réponse 405).

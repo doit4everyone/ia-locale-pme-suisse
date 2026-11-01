@@ -52,7 +52,7 @@ Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la R
 
 - `comparer_vecteurs.py` : compare les vecteurs de Qdrant à ceux du serveur vLLM (§2.5).
 - `test_reranker.py` : 6 tests (formats des deux services, clé, repli).
-- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 55 tests (dossier illisible pendant le parcours, `--reset` refusé, fichier illisible, texte Windows-1252).
+- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 56 tests (dossier illisible pendant le parcours, `--reset` refusé, fichier illisible, PDF sans texte, texte Windows-1252).
 
 ### Documentation
 

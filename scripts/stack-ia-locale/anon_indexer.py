@@ -336,7 +336,9 @@ def extract_docx_fallback(path: str) -> list[str]:
     try:
         with zipfile.ZipFile(path, 'r') as z:
             with z.open('word/document.xml') as f:
-                xml = f.read().decode('utf-8', errors='ignore')
+                # Décodage strict (2.23.0) : un XML Word illisible ne doit pas
+                # devenir un texte amputé (revue externe du 1er novembre 2026).
+                xml = f.read().decode('utf-8')
         text = re.sub(r'<[^>]+>', ' ', xml)
         text = re.sub(r'\s+', ' ', text).strip()
         return [text] if text else []
@@ -356,7 +358,7 @@ def extract_pdf(path: str) -> list[str]:
                 if text and text.strip():
                     blocks.append(text.strip())
         if not blocks:
-            print(f"  PDF vide ou scanné (aucun texte extractible) : {path}")
+            print(f"  PDF sans texte extractible (scanné, ou couche texte illisible) : {path}")
         return blocks
     except Exception as e:
         raise ErreurExtraction(f"lecture PDF impossible : {e}") from e
