@@ -54,7 +54,11 @@ jobs:
           import glob, os, re, sys
           casses = []
           for f in glob.glob("**/*.md", recursive=True):
-              for m in re.finditer(r"\]\(([^)\s]+)\)", open(f, encoding="utf-8").read()):
+              texte = open(f, encoding="utf-8").read()
+              # Blocs et passages de code ignorés : un exemple comme [texte](chemin) n'est pas un lien
+              texte = re.sub(r"```.*?```", "", texte, flags=re.S)
+              texte = re.sub(r"`[^`\n]*`", "", texte)
+              for m in re.finditer(r"\]\(([^)\s]+)\)", texte):
                   u = m.group(1).split("#")[0]
                   if not u or u.startswith(("http", "mailto:")):
                       continue
