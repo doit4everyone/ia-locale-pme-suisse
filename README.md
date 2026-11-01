@@ -23,7 +23,7 @@ Procédures pas à pas pour déployer un pipeline RAG local opérationnel sur VM
 - Les utilisateurs s'authentifient via leur compte Active Directory dans Open WebUI.
 - Chaque utilisateur ne voit que les documents auxquels ses groupes AD donnent accès sur le file server Windows, grâce à la propagation des ACL NTFS jusqu'aux chunks Qdrant.
 - Les réponses du LLM sont évaluées par un juge LLM secondaire : une réponse non ancrée est bloquée sur `/query`, et signalée par un avertissement sur l'interface compatible OpenAI utilisée par Open WebUI (§8.3).
-- Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD.
+- Chaque requête est journalisée avec l'identité de l'utilisateur et les sources consultées, pour l'audit nLPD. Un échec d'écriture du journal est signalé dans le journal de la RAG API, sans interrompre le service : la question est servie quand même (point ouvert 186).
 - La synchronisation du corpus et la résolution des permissions sont automatisées via n8n.
 
 Stack : Open WebUI + RAG API FastAPI + Qdrant (deux collections : corpus entreprise + documentation) + n8n + Nginx, déployés via Docker Compose sur VM Ubuntu Server 26.04 LTS, et un serveur de modèles au choix : Ollama pour un à deux utilisateurs simultanés, vLLM pour plusieurs (§2). Retrieval hybride mots-clés (BM25 calculé par Qdrant depuis la 2.23.0) et vectoriel (RRF), embedding `bge-m3`, reranker optionnel sur la carte du serveur de modèles, indexation incrémentale. Validé en lab sur CPU (i7-14700, 64 Go DDR5), puis sur GPU (NVIDIA RTX 5060 Ti 16 Go, §10), avec les deux moteurs.

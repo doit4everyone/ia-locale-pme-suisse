@@ -363,7 +363,9 @@ Depuis la 2.20.4, deux cas s'arrêtent avant même ce seuil, toujours sans modif
 | ACL d'un fichier illisible | Fichier verrouillé, droit de lecture des ACL retiré | Compté pour le garde-fou ; au-delà de 20 %, abandon sans modifier Qdrant (code 1) |
 | Dossier illisible pendant le parcours | Droit retiré à `svc-rag` sur un sous-dossier, incident SMB | Droits des fichiers lus mis à jour ; **aucun orphelin supprimé** ; documents non retrouvés retirés de la recherche jusqu'à un parcours complet ; dossiers listés dans `erreurs_parcours` du rapport ; code 2 et alerte |
 
-`indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, ou si le corpus est vide, avant de toucher aux collections (§5.9).
+`indexer.py` rend lui aussi le code 2 sur un parcours incomplet, et refuse `--reset` dans ce cas, si le corpus est vide, ou si le serveur d'embedding ne calcule pas un premier vecteur, avant de toucher aux collections (§5.9).
+
+**Fichier illisible (2.23.0).** Un fichier dont la lecture ou l'extraction échoue (fichier abîmé, verrouillé, bibliothèque absente) n'est plus traité comme un document vide : ses anciens extraits restent en place, avec leurs droits relus par `acl_resolver.py`, il est compté en erreur et l'indexation rend le code 2. Seul un document réellement vide (aucun texte extractible) voit ses extraits supprimés.
 
 Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API reprend dans le rapport de synchronisation et donc dans le courriel d'alerte.
 
@@ -720,7 +722,8 @@ Seul un administrateur peut créer des dossiers à la racine du partage.
 docker compose build --no-cache rag-api && docker compose up -d rag-api
 cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
-# --reset efface les collections : refusé (2.23.0) si un dossier est illisible ou le corpus vide
+# --reset efface les collections : refusé (2.23.0) si un dossier est illisible, le corpus vide
+# ou le serveur d'embedding hors service
 python indexer.py --corpus /mnt/corpus-root --reset
 # Le port 8080 n'est pas publié. Tester depuis le réseau Compose :
 # --post-data est obligatoire : /admin/sync n'accepte que POST (sinon réponse 405).

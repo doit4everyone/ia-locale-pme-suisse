@@ -278,6 +278,14 @@ def valider_configuration() -> None:
 # Extraction de texte
 # ─────────────────────────────────────────
 
+class ErreurExtraction(Exception):
+    """Lecture ou extraction impossible (2.23.0). À distinguer d'un document
+    réellement vide : un vide supprime les anciens extraits, une erreur les
+    laisse en place, compte comme échec (code 2) et part dans le rapport
+    (revue externe du 1er novembre 2026). Les droits du document restent
+    relus par acl_resolver.py, son ancien contenu reste donc cloisonné."""
+
+
 def extract_docx_structured(path: str) -> list[str]:
     if not DOCX_AVAILABLE:
         return extract_docx_fallback(path)
@@ -333,15 +341,13 @@ def extract_docx_fallback(path: str) -> list[str]:
         text = re.sub(r'\s+', ' ', text).strip()
         return [text] if text else []
     except Exception as e:
-        print(f"  Erreur lecture {path} : {e}")
-        return []
+        raise ErreurExtraction(f"lecture DOCX impossible : {e}") from e
 
 
 def extract_pdf(path: str) -> list[str]:
     """Extrait le texte d'un PDF page par page via pdfplumber."""
     if not PDF_AVAILABLE:
-        print("  pdfplumber absent : PDF ignoré")
-        return []
+        raise ErreurExtraction("pdfplumber absent : PDF non lu")
     blocks = []
     try:
         with pdfplumber.open(path) as pdf:
@@ -353,15 +359,13 @@ def extract_pdf(path: str) -> list[str]:
             print(f"  PDF vide ou scanné (aucun texte extractible) : {path}")
         return blocks
     except Exception as e:
-        print(f"  Erreur PDF {path} : {e}")
-        return []
+        raise ErreurExtraction(f"lecture PDF impossible : {e}") from e
 
 
 def extract_pptx(path: str) -> list[str]:
     """Extrait le texte d'un PowerPoint, une slide par bloc."""
     if not PPTX_AVAILABLE:
-        print("  python-pptx absent : PPTX ignoré")
-        return []
+        raise ErreurExtraction("python-pptx absent : PPTX non lu")
     blocks = []
     try:
         prs = Presentation(path)
@@ -379,8 +383,7 @@ def extract_pptx(path: str) -> list[str]:
             print(f"  PPTX vide (aucun texte extractible) : {path}")
         return blocks
     except Exception as e:
-        print(f"  Erreur PPTX {path} : {e}")
-        return []
+        raise ErreurExtraction(f"lecture PPTX impossible : {e}") from e
 
 
 def extract_txt(path: str) -> list[str]:
@@ -389,8 +392,7 @@ def extract_txt(path: str) -> list[str]:
             content = f.read()
         return [p.strip() for p in content.split('\n\n') if p.strip()]
     except Exception as e:
-        print(f"  Erreur lecture {path} : {e}")
-        return []
+        raise ErreurExtraction(f"lecture du texte impossible : {e}") from e
 
 
 def extract_blocks(path: str) -> list[str]:
@@ -834,10 +836,12 @@ def index_file(
     """
     target_collection = get_collection_for_path(source_name)
 
+    # Une lecture impossible lève ErreurExtraction (2.23.0) : l'appelant la
+    # compte comme erreur et l'ancienne version reste en place.
     blocks = extract_blocks(filepath)
     if not blocks:
-        # Fichier vidé ou devenu illisible : l'ancien contenu ne doit pas
-        # rester interrogeable.
+        # Fichier réellement vide (aucun texte extractible) : l'ancien contenu
+        # ne doit pas rester interrogeable.
         supprimer_chunks(qdrant, source_name, [COLLECTION, DOCUMENTATION_COLLECTION])
         return 0, {"fichier": source_name, "statut": "vide"}
 
@@ -998,10 +1002,6 @@ def index_corpus(
             print(f"  {err}")
         sys.exit(1)
 
-    print(f"Connexion Qdrant : {QDRANT_URL}")
-    qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    init_collection(qdrant_client, reset=reset)
-
     print(f"Vérification du serveur d'embedding ({EMBED_API}) : {OLLAMA_URL}")
     try:
         if EMBED_API == "openai":
@@ -1014,10 +1014,18 @@ def index_corpus(
         if not any(EMBED_MODEL.split(':')[0] in m for m in models):
             print(f"Erreur : modèle d'embedding '{EMBED_MODEL}' non trouvé.")
             sys.exit(1)
-        print(f"Modèle d'embedding : {EMBED_MODEL} ✓")
+        # Un vrai calcul, avant toute écriture (2.23.0) : la liste des modèles
+        # ne prouve pas que le serveur calcule, et --reset efface les
+        # collections avant la réindexation (revue externe du 1er novembre 2026).
+        get_embedding("Vérification du serveur d'embedding")
+        print(f"Modèle d'embedding : {EMBED_MODEL} ✓ (calcul vérifié)")
     except Exception as e:
         print(f"Erreur connexion au serveur d'embedding : {e}")
         sys.exit(1)
+
+    print(f"Connexion Qdrant : {QDRANT_URL}")
+    qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    init_collection(qdrant_client, reset=reset)
 
     if org_arg:
         print(f"Organisation forcée (niveau 1) : '{org_arg}'")

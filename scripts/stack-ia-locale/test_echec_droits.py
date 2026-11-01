@@ -24,7 +24,7 @@ Vérifie, avec un Qdrant simulé, sans partage SMB ni modèle :
 Lancement, depuis la VM, dans le conteneur de la RAG API :
   docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py
 
-Attendu : « 51 tests OK », code de sortie 0.
+Attendu : « 54 tests OK », code de sortie 0.
 """
 
 import asyncio
@@ -626,8 +626,60 @@ def tests_reset():
                     code = e.code
                 verifier(f"2.23.0 : --reset, {nom}, collections non touchées",
                          code == 1 and appels == [], f"code {code}, init_collection {appels}")
+            # Serveur d'embedding qui ne calcule pas : refusé avant toute écriture
+            appels.clear()
+            idx.lister_fichiers = lambda d: (["/c/a.docx"], [], [])
+            sauve_http = idx.http_client
+
+            class Panne:
+                def get(self, *a, **k):
+                    raise ConnectionError("serveur d'embedding injoignable (simulé)")
+
+                def post(self, *a, **k):
+                    raise ConnectionError("serveur d'embedding injoignable (simulé)")
+            idx.http_client = lambda: Panne()
+            code = None
+            try:
+                idx.index_corpus(corpus, reset=True)
+            except SystemExit as e:
+                code = e.code
+            finally:
+                idx.http_client = sauve_http
+            verifier("2.23.0 : --reset, serveur d'embedding injoignable, collections non touchées",
+                     code == 1 and appels == [], f"code {code}, init_collection {appels}")
         finally:
             idx.lister_fichiers, idx.init_collection, idx.QdrantClient, idx.valider_configuration = sauve
+
+
+def tests_extraction():
+    """2.23.0 : une lecture impossible n'est pas un document vide. L'erreur
+    remonte, les anciens extraits restent ; un vrai vide les supprime."""
+    sp = charger_sp()
+    idx = sp.idx
+    supprimes = []
+    sauve = idx.supprimer_chunks
+    idx.supprimer_chunks = lambda q, source, cols: supprimes.append(source)
+    with tempfile.TemporaryDirectory() as d:
+        abime = os.path.join(d, "Contrat.docx")
+        with open(abime, "wb") as f:
+            f.write(b"ceci n'est pas un fichier Word")
+        vide = os.path.join(d, "Vide.txt")
+        open(vide, "w").close()
+        try:
+            leve = False
+            try:
+                idx.index_file(None, abime, d, "CLIENTS/Contrat.docx")
+            except idx.ErreurExtraction:
+                leve = True
+            verifier("2.23.0 : fichier illisible, erreur levée, anciens extraits gardés",
+                     leve and supprimes == [], f"levée {leve}, supprimés {supprimes}")
+            supprimes.clear()
+            nb, entree = idx.index_file(None, vide, d, "COMMUN/Vide.txt")
+            verifier("2.23.0 : fichier réellement vide, anciens extraits supprimés",
+                     entree.get("statut") == "vide" and supprimes == ["COMMUN/Vide.txt"],
+                     f"statut {entree.get('statut')}, supprimés {supprimes}")
+        finally:
+            idx.supprimer_chunks = sauve
 
 
 def tests_sharepoint():
@@ -665,6 +717,7 @@ if __name__ == "__main__":
         tests_age()
         tests_sharepoint()
         tests_reset()
+        tests_extraction()
     finally:
         main.qdrant, main.FICHIER_BLOQUES = qdrant_reel, fichier_reel
         main._etat, main._registre_incertain, main.ACL_INCERTAIN_FERME = etat_reel, incertain_reel, ferme_reel

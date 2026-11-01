@@ -16,7 +16,7 @@ Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la R
 
 ### Droits et synchronisation
 
-- `acl_resolver.py` (point 183) : un dossier illisible pendant le parcours du partage n'efface plus les extraits de ses documents ; ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec. `indexer.py` signale aussi un parcours incomplet, et refuse `--reset` dans ce cas ou sur un corpus vide, avant de toucher aux collections (point 188).
+- `acl_resolver.py` (point 183) : un dossier illisible pendant le parcours du partage n'efface plus les extraits de ses documents ; ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec. `indexer.py` signale aussi un parcours incomplet, et refuse `--reset` dans ce cas, sur un corpus vide ou si le serveur d'embedding ne calcule pas, avant de toucher aux collections (points 188 et 191). Un fichier illisible n'est plus traité comme vide : ses anciens extraits restent, l'erreur est comptée (point 191).
 - `deploy.sh` (point 184) : rotation du journal nLPD sur 365 jours créée au déploiement.
 - `deploy.sh` (point 189) : la RAG API est redémarrée après la première indexation, sinon la recherche par mots-clés restait inactive jusqu'à la première synchronisation (constaté au rejeu du 1er novembre 2026). Même étape ajoutée au §0 (étape 13).
 
@@ -52,12 +52,13 @@ Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la R
 
 - `comparer_vecteurs.py` : compare les vecteurs de Qdrant à ceux du serveur vLLM (§2.5).
 - `test_reranker.py` : 6 tests (formats des deux services, clé, repli).
-- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 51 tests (dossier illisible pendant le parcours, `--reset` refusé).
+- `test_citations.py` : 28 tests (liens relatifs) ; `test_revalidation_bm25.py` : 27 tests (index plein texte, rang par collection, empreinte sans en-tête). `test_echec_droits.py` : 54 tests (dossier illisible pendant le parcours, `--reset` refusé, fichier illisible).
 
 ### Documentation
 
 - Pages qui décrivaient encore l'index BM25 en mémoire mises à jour : §0 (contrôles et dépannage), §7, §8.6, §13 (§13.1.1, §13.6.7), §15.5, §17.5, `scripts/stack-ia-locale/index.md`, `README.md` (revue externe du 31 octobre 2026).
 - **Rejeu du 1er novembre 2026** (point 190) : §0, contrôle des liens du §1.5 avant l'étape 5 et filtre LDAP d'Open WebUI avec parenthèses ; §1.4, versions de Docker ; §3.7, restauration sur Qdrant 1.20 avec l'index plein texte ; §10.8, nouvelle mesure, tâche planifiée validée, rotation de la clé, session Windows ; §15.3.3, recherche de la mise à jour du dbx (`fwupdmgr refresh`), procédure revalidée.
+- **Page d'accueil, README, §16** : validation du 1er novembre 2026, journal nLPD décrit tel qu'il fonctionne (un échec d'écriture n'interrompt pas le service, point 186).
 - **§5.4.2b, §5.9, §9.7.1, §16.5.2** : dossier illisible pendant le parcours, distinct d'une ACL illisible ; `--reset` refusé sur un parcours incomplet.
 - **§5.2.3, §5.8, §11.1.1** : droits en SID depuis la 2.22.0 ; exemples antérieurs marqués comme historiques.
 - **Guides PDF et Word** : marqués comme photographies datées (31 août et 11 octobre 2026), le guide en ligne fait foi.

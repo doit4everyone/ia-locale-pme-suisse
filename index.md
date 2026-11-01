@@ -58,10 +58,10 @@ Un assistant qui répond à partir des documents de l'entreprise, sans service d
 - **Contrôlé automatiquement :** un test de non-divulgation est rejoué après chaque synchronisation, avec une alerte par courriel en cas de fuite.
 - **Réponses vérifiées :** chaque réponse cite ses sources, et un second modèle contrôle qu'elle s'appuie bien sur elles.
 - **Accès sécurisé :** connexion par le compte Active Directory, en HTTPS derrière un frontal Nginx, avec une identité signée entre l'interface et le moteur de recherche.
-- **Traçabilité nLPD :** chaque question est journalisée avec l'utilisateur et les sources consultées ; les données sont chiffrées au repos.
-- **Rejouable :** `deploy.sh` installe la stack sur une VM neuve ; la procédure complète a été rejouée de bout en bout le 19 octobre 2026.
+- **Traçabilité nLPD :** chaque question est journalisée avec l'utilisateur et les sources consultées ; un échec d'écriture du journal est signalé mais n'interrompt pas le service (point ouvert 186) ; les données sont chiffrées au repos.
+- **Rejouable :** `deploy.sh` installe la stack sur une VM neuve ; la procédure complète a été rejouée de bout en bout le 1er novembre 2026, en version 2.23.0 : cloisonnement contrôlé sur 207 verdicts sans aucune fuite, qualité des réponses mesurée, sauvegarde et restauration, redémarrage.
 
-**Stack technique :** Open WebUI, RAG API FastAPI, Qdrant, Ollama ou vLLM (qwen3:14b), n8n et Nginx, déployés par Docker Compose sur Ubuntu Server 26.04 LTS. Recherche hybride par mots-clés et par vecteurs, indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
+**Stack technique :** Open WebUI, RAG API FastAPI, Qdrant, Ollama ou vLLM (qwen3:14b), n8n et Nginx, déployés par Docker Compose sur Ubuntu Server 26.04 LTS. Recherche hybride par mots-clés (dans Qdrant 1.20) et par vecteurs (`bge-m3`), reranker optionnel sur la carte graphique, indexation incrémentale. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`.
 
 ---
 
@@ -69,8 +69,8 @@ Un assistant qui répond à partir des documents de l'entreprise, sans service d
 
 Les trois parties du guide sont publiées : le serveur de fichiers Windows (§0 à §10), Microsoft 365 (§11 à §14), puis la sécurité, le contrôle du cloisonnement et la gouvernance (§15 à §17). Prochaines étapes :
 
-- un test de charge avec vLLM, à quatre puis huit questions simultanées, et des mesures de l'index sur un corpus plus grand ;
-- une procédure de mise à jour d'une installation existante ;
+- des mesures de l'index sur un corpus plus grand, et le passage de l'interface en compte non privilégié ;
+- une procédure de mise à jour d'une installation existante, rejouée de bout en bout ;
 - une section « Du lab à la production » ;
 - le RAG visuel, pour les PDF complexes (tableaux, schémas).
 

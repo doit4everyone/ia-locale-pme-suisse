@@ -17,7 +17,7 @@ description: "Test de non-divulgation automatisé, contrôle du cloisonnement ap
 
 [Retour au sommaire](index.md) | [Section précédente : §15 Sécurité des données](section-15-securite-donnees.md) | [Section suivante : §17 Gouvernance](section-17-gouvernance.md)
 
-**Statut (2.22.2, 22 octobre 2026) :** sur la VM de test, test de non-divulgation à 81 verdicts (79 OK, 2 INFO, aucune fuite), rejoué après chaque synchronisation. Droits comparés par SID depuis la 2.22.0, refus étendus aux identités du jeton Windows en 2.22.1, validés sur un vrai refus du partage (§16.5.3). Historique : faille du masque des droits NTFS reproduite puis corrigée sur VM-RAG-LAB (40 cas, octobre 2026) ; compléments de la 2.21.0 (secrets d'exemple refusés, identité signée, versions figées, supervision externe) ; droits périmés de la recherche par mots-clés corrigés en 2.21.3 (§16.5.1) ; échecs d'écriture des droits et âge des droits en 2.21.4 à 2.21.11 (§16.5.2). Les failles corrigées depuis la 2.21.3 ont été signalées par des revues externes du code.
+**Statut (2.23.0, 1er novembre 2026) :** sur une VM neuve, corpus de démonstration Axonix, test de non-divulgation à 207 verdicts (23 cas, 9 comptes), tous OK, aucune fuite, rejoué après chaque synchronisation et après une restauration de Qdrant. Avant : 81 verdicts (79 OK, 2 INFO) en 2.22.2, le 22 octobre 2026. Droits comparés par SID depuis la 2.22.0, refus étendus aux identités du jeton Windows en 2.22.1, validés sur un vrai refus du partage (§16.5.3). Historique : faille du masque des droits NTFS reproduite puis corrigée sur VM-RAG-LAB (40 cas, octobre 2026) ; compléments de la 2.21.0 (secrets d'exemple refusés, identité signée, versions figées, supervision externe) ; droits périmés de la recherche par mots-clés corrigés en 2.21.3 (§16.5.1) ; échecs d'écriture des droits et âge des droits en 2.21.4 à 2.21.11 (§16.5.2). Les failles corrigées depuis la 2.21.3 ont été signalées par des revues externes du code.
 
 ---
 
@@ -234,6 +234,8 @@ cd /root/rag-stack && cp docker-compose.yml docker-compose.yml.avant-2.21.8 && c
 > **Validé sur la VM de test, 20 octobre 2026 :** `test_echec_droits.py` 12 tests OK et `test_revalidation_bm25.py` 14 tests OK, dans le conteneur ; synchronisation réelle avec le nouveau `acl_resolver.py` : `success=True`, aucun document retiré ; test du droit retiré sur le vrai Qdrant : `Bilan : OK` ; test de non-divulgation inchangé (70 OK, 2 INFO) ; une question réelle dans Open WebUI, réponse citée.
 
 > **Compléments de la 2.23.0** (revue externe du 31 octobre 2026). Deux chemins de perte de documents, pas de fuite. **Dossier illisible pendant le parcours** : `os.walk` l'ignorait sans message, ses documents passaient pour supprimés et `acl_resolver.py` effaçait leurs extraits comme orphelins ; le garde-fou de 20 % ne le voyait pas, il ne compte que les fichiers trouvés. Les erreurs de parcours sont relevées ; dans ce cas aucun orphelin n'est supprimé, ils sont retirés de la recherche jusqu'à un parcours complet, et la synchronisation est en échec (§5.4.2b). **`indexer.py --reset`** effaçait les collections avant de parcourir le corpus : un dossier illisible ou un partage vide ne laissait qu'une partie de l'index. Le parcours se fait d'abord, et `--reset` est refusé s'il est incomplet ou vide. `test_echec_droits.py` passe à 51 tests : rapport du résolveur, lecture par la RAG API et retrait de la recherche ; vrai dossier illisible (le test ne peut pas échouer en root, vérifié aussi sous un compte non privilégié) ; `--reset` refusé sans appel aux collections.
+
+> **Compléments de la 2.23.0** (revue externe du 1er novembre 2026). Deux autres chemins de perte de l'index. **Serveur d'embedding hors service avec `--reset`** : les collections étaient effacées avant de vérifier le serveur ; `indexer.py` calcule désormais un premier vecteur avant toute écriture. **Fichier illisible** : les extracteurs rendaient une liste vide, et l'indexeur supprimait les anciens extraits comme pour un document vide ; une lecture impossible est désormais une erreur, qui laisse les anciens extraits en place et rend le code 2. `test_echec_droits.py` passe à 54 tests.
 
 ### §16.5.3 Des droits par SID, plus par noms (2.22.0)
 
@@ -518,7 +520,7 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Masque NTFS | Rapport de synchronisation | `entrees_allowed_sans_lecture` affiché |
 | Droits sur les mots-clés | `test_revalidation_bm25.py` (§16.5.1) | `27 tests OK` |
 | Droit retiré, vrai Qdrant | `test_revocation_bm25.py` (§16.5.1) | `Bilan : OK`, droits restaurés |
-| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `51 tests OK` |
+| Échecs d'écriture des droits | `test_echec_droits.py` (§16.5.2) | `54 tests OK` |
 | Droits par SID | `test_sid.py` (§16.5.3) | `32 tests OK` |
 | Migration vers les SID | `rapport_acl.json`, `documents_non_migres_sid` | 0 après la première synchronisation (§16.5.3) |
 | Registre des documents retirés | `ls -l /var/log/rag/acl_bloques.json*` | Registre présent, pas de `.en_cours` hors synchronisation ; sinon, questions refusées jusqu'à une synchronisation terminée |
