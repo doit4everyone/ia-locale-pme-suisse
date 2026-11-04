@@ -102,6 +102,8 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 | 16 | VM et navigateur | Contrôles finaux |
 | 17 | Microsoft 365, facultatif | Entra ID, Teams, SharePoint |
 
+Les étapes 5 à 11 peuvent aussi être enchaînées par le script `deploy.sh` : voir « Avant l'étape 5 ».
+
 ---
 
 ## Étape 1 : créer le compte de service svc-rag (Windows)
@@ -600,6 +602,36 @@ openssl s_client -connect <NOM-DC>.votre-domaine.ch:636 -CAfile /etc/ssl/certs/a
 
 ---
 
+## Avant l'étape 5 : à la main ou avec deploy.sh
+
+Les étapes 5 à 11 se font **soit à la main**, dans l'ordre, **soit avec `deploy.sh`**, le script du dépôt, qui les enchaîne en posant des questions. Le résultat est le même ; le script évite les erreurs de recopie et contrôle davantage. Les étapes 1 à 4 restent dans tous les cas à faire à la main, chiffrement compris.
+
+**Ce que fait `deploy.sh` :**
+
+- il demande le moteur (Ollama ou vLLM), les adresses, le nom de la stack (`RAG_FQDN`), le domaine, le compte `svc-rag` et son mot de passe (saisi sans affichage), le serveur de fichiers et le partage ;
+- il vérifie que le volume chiffré de l'étape 4C est monté et que chaque chemin sensible y aboutit ; sinon, il demande confirmation avant de continuer en clair ;
+- il vérifie que les noms du contrôleur de domaine, du serveur de fichiers et de la stack se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles ;
+- il utilise le certificat placé dans `/etc/rag-tls` (autorité interne, §9.8.4) ou, à défaut, génère un certificat auto-signé (étape 7, point 5) ;
+- à la fin, il contrôle que les cinq conteneurs tournent sans redémarrage, que la RAG API répond à travers Nginx et que les tests de sécurité passent ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé » ;
+- il propose enfin la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement.
+
+**Avant de le lancer :** les étapes 1 à 4 faites, le certificat de l'autorité converti (étape 4D), et, pour un certificat de l'autorité interne, `rag.crt` et `rag.key` déjà placés dans `/etc/rag-tls`. Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message.
+
+**Le lancer**, en root, avec un journal complet :
+
+```bash
+cd /root && git clone https://github.com/doit4everyone/ia-locale-pme-suisse.git
+cd /root/ia-locale-pme-suisse/scripts/stack-ia-locale && chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log
+```
+
+L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu). Le script peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.**
+
+**Ensuite**, reprendre à l'**étape 12** si l'indexation proposée a été refusée, ou directement à l'**étape 14** si elle a réussi (le script redémarre lui-même la RAG API pour activer la recherche par mots-clés, fin de l'étape 13). Les explications des étapes 5 à 11 restent utiles pour comprendre ce que le script a fait, et pour le dépannage.
+
+**Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier.
+
+---
+
 ## Étape 5 : monter le partage de fichiers
 
 Le mot de passe de `svc-rag` va dans un fichier lisible par root seulement, jamais dans une ligne de commande, et **sur le volume chiffré** : comme le `.env`, le fichier réel est dans `/srv/rag-donnees/secrets`, avec un lien à l'emplacement habituel. Jusqu'à la 2.22.2, ce fichier était créé dans `/etc/smbcredentials`, sur le disque système, en clair (constat du rejeu du 23 octobre 2026).
@@ -682,8 +714,6 @@ ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 ```
 
 **Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `diag_sid.py`, les cinq tests (`test_citations.py`, `test_sid.py`, `test_revalidation_bm25.py`, `test_echec_droits.py`, `test_reranker.py`) et le dossier `s10` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
-
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur. **Les étapes 1 à 4 restent à faire à la main**, chiffrement compris : le script vérifie seulement que le volume chiffré est monté et que chaque chemin sensible y aboutit, et demande confirmation s'il ne l'est pas ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
 
 ---
 

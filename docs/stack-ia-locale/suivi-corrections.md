@@ -335,7 +335,7 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 
 | Section | Correction | Version |
 |---|---|---|
-| §0 | Étape 4 complète : création de la VM (4A), Docker (4B), volume chiffré, TPM, dbx et redémarrage de validation (4C), accès au domaine (4D) ; tests de sécurité copiés à l'étape 6 et contrôlés dans la checklist ; `LLAMA_ARG_CACHE_RAM` à l'étape 3A ; reranker signalé en option ; fermeture de session Windows (point 193) | v2.23.1 |
+| §0 | Étape 4 complète : création de la VM (4A), Docker (4B), volume chiffré, TPM, dbx et redémarrage de validation (4C), accès au domaine (4D) ; tests de sécurité copiés à l'étape 6 et contrôlés dans la checklist ; `LLAMA_ARG_CACHE_RAM` à l'étape 3A ; reranker signalé en option ; fermeture de session Windows (point 193) ; présentation de `deploy.sh` déplacée avant l'étape 5, avec la commande de clonage, ce qu'il faut avant de le lancer et l'étape où reprendre ensuite | v2.23.1 |
 | §1.4, §1.5 | Renvoi vers les étapes 4B et 4C du §0 | v2.23.1 |
 
 ---
