@@ -84,6 +84,8 @@ Les cas du lab reprennent les matrices de §9 (DENY nominatif), §13 (quatre mod
 
 **Rejeu sur un déploiement neuf (octobre 2026).** Le test a été rejoué, en mode accès, sur la VM déployée à partir de zéro pour valider le §0 : 70 documents indexés (1692 extraits), droits résolus, `/admin/sync`, puis 9 comptes de test sur 8 cas. Résultat : **72 verdicts, dont 70 `OK`, 2 `INFO` et 0 `FUITE`**. Les deux `INFO` sont deux cas dont l'attendu avait été laissé à « ? » faute de savoir le résultat juste : le test les a tranchés (refus pour un compte de la comptabilité sur un budget, accès pour un compte client sur un contrat). Ce rejeu ne porte pas sur le mode complet, qui interroge le modèle et dure 20 à 30 minutes.
 
+**Avec le corpus de démonstration (2.23.0).** Le corpus Axonix SA du dépôt (`corpus-demo/`, §10.7) est livré avec ses droits et son propre fichier de cas, `cas_cloisonnement_lab.json`, produit par `generer.py` : 23 cas, 9 comptes. Rejoué en mode accès sur la VM neuve du 1er novembre 2026, après chaque synchronisation et après une restauration de Qdrant : **207 verdicts, tous `OK`, aucune `FUITE`**.
+
 Le mode complet garde un intérêt : il mesure la qualité de la recherche. Ses cas « manqués » (document autorisé absent des sources) ne sont pas un sujet de sécurité, mais un indicateur pour le §10.
 
 ## §16.4 Le contrôle après chaque synchronisation
@@ -239,7 +241,7 @@ cd /root/rag-stack && cp docker-compose.yml docker-compose.yml.avant-2.21.8 && c
 
 ### §16.5.3 Des droits par SID, plus par noms (2.22.0)
 
-**Le défaut.** Jusqu'à la 2.21.11, la stack comparait des **noms** : `acl_resolver.py` enregistrait les droits tels que `smbcacls` les affiche (`BSCULIER\RH`), et `auth.py` fabriquait des noms du même format à partir des groupes de l'annuaire (`memberOf`). Windows, lui, raisonne en **SID** (identifiants de sécurité). Trois écarts en découlaient (points 14, auth.1 et auth.2 du suivi) :
+**Le défaut.** Jusqu'à la 2.21.11, la stack comparait des **noms** : `acl_resolver.py` enregistrait les droits tels que `smbcacls` les affiche (`VOTRE-DOMAINE\RH`), et `auth.py` fabriquait des noms du même format à partir des groupes de l'annuaire (`memberOf`). Windows, lui, raisonne en **SID** (identifiants de sécurité). Trois écarts en découlaient (points 14, auth.1 et auth.2 du suivi) :
 
 - **le groupe principal** (« Utilisateurs du domaine ») n'apparaît jamais dans `memberOf` : un document autorisé à ce seul groupe était invisible pour tous ;
 - **un groupe dont le nom affiché (CN) diffère du nom pré-Windows 2000**, que `smbcacls` affiche, ne correspondait pas ; et si le CN d'un groupe égalait le nom pré-2000 d'un autre, les membres du premier auraient obtenu les droits du second ;
@@ -278,7 +280,7 @@ Dans le lab, 54 documents : toute la documentation publique du dossier `DOIT4EVE
 **Un outil d'audit du partage.** Depuis que la RAG suit fidèlement les droits, cet inventaire montre ce que les réglages du partage ouvrent réellement. Dans le lab, les droits de `DOIT4EVERYONE` n'avaient pas été choisis : le dossier héritait d'un **contrôle total** accordé à « Utilisateurs du domaine » à la racine du partage, pas seulement de la lecture. Tout compte du domaine pouvait donc modifier les documents que la RAG sert à tous, et y glisser des informations fausses ou des instructions destinées au modèle. La réponse aurait paru sourcée, et le juge l'aurait validée, puisqu'elle était fidèle au document. Le cloisonnement de la RAG applique les droits de lecture ; il ne protège pas le contenu. Le droit d'**écriture** sur un document indexé est donc à vérifier comme la lecture. Correction dans le lab, sur le serveur de fichiers :
 
 ```powershell
-icacls "D:\FileService" /grant:r "BSCULIER\Utilisateurs du domaine:(OI)(CI)(RX)"
+icacls "D:\FileService" /grant:r "VOTRE-DOMAINE\Utilisateurs du domaine:(OI)(CI)(RX)"
 ```
 
 `/grant:r` remplace le droit du groupe ; les dossiers qui héritent de la racine passent en lecture seule. Pour voir lesquels héritent : `Get-ChildItem D:\FileService -Directory | ForEach-Object { "{0} : {1}" -f $_.Name, ((icacls $_.FullName) -match "Utilisateurs du domaine" -join " | ") }`. Le même contrôle a montré, sur un autre dossier non indexé, un droit **Modifier** transmis à tout son contenu.
@@ -453,7 +455,7 @@ Le guide ne prescrit pas d'outil : l'organisation utilise le sien, s'il en a un.
 
 > **Nom complet obligatoire.** Le conteneur n8n ne résout pas les noms courts du domaine : `http://supervision:3001/...` échoue (`getaddrinfo EAI_AGAIN`), `http://supervision.votre-domaine.ch:3001/...` fonctionne. Le nom doit exister dans le DNS du domaine.
 
-> **La machine de supervision, elle aussi : uniquement les DNS du domaine.** Le piège décrit au §0 (étape 4) pour la VM vaut pour elle : avec un DNS public à côté de celui du domaine, `systemd-resolved` bascule un jour sur le serveur public et n'en revient pas. La sonde échoue alors en `getaddrinfo ENOTFOUND <RAG_FQDN>`, alors que la stack fonctionne. Cas vécu le 24 octobre 2026 : la machine Docker qui porte Uptime Kuma avait `8.8.8.8` dans sa configuration netplan ; `resolvectl status` affichait `Current DNS Server: 8.8.8.8`. Retirer le serveur public de la configuration réseau a réglé la sonde dans la minute.
+> **La machine de supervision, elle aussi : uniquement les DNS du domaine.** Le piège décrit au §0 (étape 4D) pour la VM vaut pour elle : avec un DNS public à côté de celui du domaine, `systemd-resolved` bascule un jour sur le serveur public et n'en revient pas. La sonde échoue alors en `getaddrinfo ENOTFOUND <RAG_FQDN>`, alors que la stack fonctionne. Cas vécu le 24 octobre 2026 : la machine Docker qui porte Uptime Kuma avait `8.8.8.8` dans sa configuration netplan ; `resolvectl status` affichait `Current DNS Server: 8.8.8.8`. Retirer le serveur public de la configuration réseau a réglé la sonde dans la minute.
 
 > **Un seul contrôleur de domaine, c'est aussi un seul DNS.** Son arrêt coupe à la fois l'annuaire et la résolution de noms. Constaté sur la VM de test le 24 octobre 2026 : synchronisation en échec, droits devenus trop anciens, test de non-divulgation entièrement en erreur ; la RAG API refuse alors de servir des droits qu'elle ne peut plus vérifier (§16.5.2), c'est le comportement voulu. En revanche, le courriel d'alerte de n8n désigne son serveur par son nom (`smtp.office365.com`) : sans DNS, il ne peut pas partir. La sonde de supervision, qui n'utilise elle aussi que ce DNS, échoue alors sur la résolution du nom : elle alerte, mais sans indiquer la bonne cause (non vérifié dans le lab). Un second contrôleur de domaine, avec son DNS, règle ce point ; à défaut, vérifier d'abord le contrôleur de domaine quand la sonde échoue en `ENOTFOUND`.
 
@@ -536,7 +538,7 @@ L'interface s'ouvre sur `http://<machine-de-supervision>:3001` ; le premier comp
 | Open WebUI | Liste des modèles avec un compte utilisateur | `rag-api` seul |
 | Moteur d'inférence | `curl` depuis un autre poste | Pas de réponse |
 | n8n | Export d'un workflow | Aucun jeton en clair |
-| Versions figées | `grep 'image:' docker-compose.yml` | Chaque image avec `@sha256:` |
+| Versions figées | `grep 'image:' docker-compose.yml` | Chaque image avec `@sha256:`, sauf celle du reranker facultatif sur le processeur (§3.4) |
 | Supervision externe | Sondes `/sante` et Push (§16.10) | En service ; alerte reçue lors d'un essai |
 | Échéance du certificat | Sonde ou `openssl x509 -checkend` (§9.8.6) | Plus de 30 jours |
 | Après une mise à jour d'un composant | Connexions, `[AUTH] /v1`, test, synchronisation | Tout conforme avant d'utiliser la nouvelle version |

@@ -17,7 +17,7 @@ description: "Protection des données de la stack RAG : clé d'API Qdrant, chiff
 
 [Retour au sommaire](index.md) | [Section précédente : §14 Documents protégés par Purview](section-14-purview.md) | [Section suivante : §16 Contrôle du cloisonnement et durcissement](section-16-cloisonnement.md)
 
-**Statut :** clé d'API Qdrant, chiffrement des données au repos, et déplacement des secrets et des clés sur le disque chiffré validés en lab sur VM-RAG-LAB, octobre 2026, y compris un arrêt brutal de l'hôte et un redémarrage complet. Sauvegardes chiffrées : exigence documentée, **non validée en lab**.
+**Statut :** clé d'API Qdrant, chiffrement des données au repos, et déplacement des secrets et des clés sur le disque chiffré validés en lab sur VM-RAG-LAB, octobre 2026, y compris un arrêt brutal de l'hôte et un redémarrage complet ; chiffrement préparé avant le déploiement sur des VM neuves (§1.5, §0 étape 4C), en dernier lieu le 1er novembre 2026, mise à jour du dbx et réinscription du TPM comprises. Sauvegardes chiffrées : exigence documentée, **non validée en lab**.
 
 ---
 
@@ -57,7 +57,7 @@ cd /root/rag-stack
 grep -q '^QDRANT_API_KEY=' .env || echo "QDRANT_API_KEY=$(openssl rand -hex 32)" >> .env
 ```
 
-Le `docker-compose.yml` du dépôt transmet la clé aux deux services : `QDRANT__SERVICE__API_KEY` pour Qdrant, `QDRANT_API_KEY` pour `rag-api`. Les scripts (`main.py`, `indexer.py`, `acl_resolver.py`, `sp_indexer.py`) la lisent dans `QDRANT_API_KEY`, et `main.py` la transmet aux indexeurs lancés par `/admin/sync`. Une variable vide désactive la clé : les scripts restent compatibles avec une installation antérieure.
+Le `docker-compose.yml` du dépôt transmet la clé aux deux services : `QDRANT__SERVICE__API_KEY` pour Qdrant, `QDRANT_API_KEY` pour `rag-api`. Les scripts (`main.py`, `indexer.py`, `acl_resolver.py`, `sp_indexer.py`) la lisent dans `QDRANT_API_KEY`, et `main.py` la transmet aux indexeurs lancés par `/admin/sync`. Les indexeurs acceptent une variable vide, pour rester compatibles avec une installation antérieure ; la RAG API, elle, refuse de démarrer sans clé, ou avec une clé d'exemple ou trop courte, depuis la 2.21.0 (§16.6).
 
 ```bash
 docker compose up -d --build qdrant rag-api
@@ -328,6 +328,7 @@ Une sauvegarde n'est validée qu'une fois restaurée. Dans le lab :
 1. Relever les compteurs avant la sauvegarde :
 
 ```bash
+set -a && source /root/rag-stack/.env && set +a
 for c in documents documentation; do
   echo -n "$c : "
   curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/$c | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['points_count'])"
@@ -342,7 +343,7 @@ done
 
 **Attendu :** mêmes compteurs qu'avant la sauvegarde, comptes et historique d'Open WebUI présents, workflows n8n présents, réponse correcte à la question. Si les compteurs diffèrent, relancer la synchronisation (§0, étape 13) et relever les compteurs de nouveau.
 
-> **Après une restauration :** relancer `acl_resolver.py` pour vérifier que les droits sont cohérents avec les permissions actuelles du serveur de fichiers. Une sauvegarde peut dater de plusieurs heures, et des permissions modifiées entre-temps ne seraient pas reflétées (§3.6).
+> **Après une restauration :** relancer `acl_resolver.py` pour vérifier que les droits sont cohérents avec les permissions actuelles du serveur de fichiers. Une sauvegarde peut dater de plusieurs heures, et des permissions modifiées entre-temps ne seraient pas reflétées (§3.7).
 
 ---
 
@@ -355,7 +356,7 @@ done
 | Disque chiffré | `lsblk -o NAME,FSTYPE,MOUNTPOINT` | `crypto_LUKS`, `rag-donnees` monté sur `/srv/rag-donnees` |
 | Clés LUKS | `cryptsetup luksDump` | Deux emplacements (phrase, TPM), jeton `systemd-tpm2` |
 | Phrase de secours | Gestionnaire de mots de passe | Enregistrée, testée avec `rag-deverrouiller` |
-| Données migrées | `grep rag-donnees docker-compose.yml`, `findmnt /var/log/rag` | Trois volumes et les journaux sur le disque chiffré |
+| Données sur le disque chiffré | Installation neuve : `ls -l /root/rag-stack /var/log/rag` ; installation migrée (§15.3.4) : `grep rag-donnees docker-compose.yml`, `findmnt /var/log/rag` | Neuve : liens vers `/srv/rag-donnees` ; migrée : trois volumes et les journaux sur le disque chiffré |
 | Secrets et clés | `ls -l /root/rag-stack/.env /etc/rag-certs` | Liens vers le disque chiffré, `.env` en `600`, clés en `600` |
 | Démarrage | Redémarrage sans intervention | Disque monté, conteneurs démarrés |
 | Anciennes données | `ls /root/rag-stack`, `docker volume ls` | Plus de copie en clair, aucun reste de composant abandonné |

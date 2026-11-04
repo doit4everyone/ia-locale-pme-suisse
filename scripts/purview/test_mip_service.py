@@ -1,5 +1,6 @@
 """Test de mip-service depuis le conteneur rag-api (réseau Docker interne).
-Usage : docker exec -e MIP_TOKEN=... rag-api python3 /rag-pipeline/test_mip_service.py <fichier>"""
+Usage : docker exec rag-api python3 /rag-pipeline/test_mip_service.py <fichier>
+MIP_TOKEN et MIP_URL : lus dans l'environnement du conteneur (Compose)."""
 import base64, io, json, os, sys, urllib.request
 
 url = os.environ.get("MIP_URL", "http://mip-service:8080")

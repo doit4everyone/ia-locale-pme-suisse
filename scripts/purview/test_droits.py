@@ -1,5 +1,5 @@
 """Test du point d'accès /droits de mip-service, depuis le conteneur rag-api.
-Usage : docker exec -e MIP_TOKEN=... rag-api python3 /rag-pipeline/test_droits.py \
+Usage : docker exec rag-api python3 /rag-pipeline/test_droits.py \
           <etiquette_id> <proprietaire> <utilisateur1> [<utilisateur2> ...]"""
 import json, os, sys, urllib.request
 

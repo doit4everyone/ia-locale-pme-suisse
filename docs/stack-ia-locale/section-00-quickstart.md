@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). La version 2.23.0 a été rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 56 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. L'essai avec vLLM sur une VM neuve reste à refaire. **Depuis la 2.23.1**, l'étape 4 décrit elle-même la création de la VM, l'installation de Docker, le chiffrement du volume des données et l'inscription du TPM, mise à jour du dbx comprise : ce §0 suffit pour un déploiement complet. Elle reprend les commandes du §1.4, du §1.5.1 (solution A) et du §15.3, telles qu'elles ont été rejouées le 1er novembre 2026 ; sa nouvelle présentation n'a pas encore été rejouée telle quelle.
+**Statut :** validé en lab avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). **Dernier rejeu de bout en bout : version 2.23.0, le 1er novembre 2026**, sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 56 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. **Depuis la 2.23.1**, l'étape 4 décrit elle-même la création de la VM, l'installation de Docker, le chiffrement du volume des données et l'inscription du TPM, mise à jour du dbx comprise : ce §0 suffit pour un déploiement complet. Elle reprend les commandes du §1.4, du §1.5.1 (solution A) et du §15.3, telles qu'elles ont été rejouées le 1er novembre 2026 ; sa nouvelle présentation n'a pas encore été rejouée telle quelle. **Non rejoué sur une VM neuve :** le déploiement complet avec vLLM (validé dans le lab sur une installation existante, §2.4). Rejeux précédents : du 15 au 17 octobre 2026 (2.20.4), le 19 octobre 2026 avec le frontal HTTPS et l'identité signée (2.21.1, 72 verdicts de cloisonnement), les 23 et 24 octobre 2026 sur une première VM à un seul disque avec un certificat de l'autorité interne (2.22.2, 81 verdicts) ; chacun a fait corriger le script et ce guide (CHANGELOG).
 
 ---
 
@@ -35,7 +35,7 @@ Ce guide mène d'une installation vierge à un assistant en service. Comptez une
 |---|---|---|
 | **Serveur Windows existant** | L'annuaire et les documents | Active Directory, serveur de fichiers (partage réseau) |
 | **VM de la stack**, Ubuntu Server 26.04 | L'application | Open WebUI (l'interface de discussion), la RAG API (le cœur : identité, droits, recherche, contrôle des réponses), Qdrant (l'index des documents), n8n (les tâches planifiées) |
-| **Serveur de modèles**, avec une carte graphique NVIDIA | Les modèles d'IA | Le moteur, Ollama ou vLLM, et trois modèles : rédaction, vérification, recherche (§2.1) |
+| **Serveur de modèles**, avec une carte graphique NVIDIA | Les modèles d'IA | Le moteur, Ollama ou vLLM, et les modèles de trois tâches : rédaction, vérification, recherche (trois modèles avec Ollama, deux avec vLLM, §2.1) |
 
 ```
  Utilisateur (navigateur)
@@ -168,7 +168,7 @@ $racine = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -
 Export-Certificate -Cert $racine -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
 ```
 
-Copier `ad-root-ca.cer` sur la VM, dans `/tmp` (par `scp` ou par un partage). Il sera converti à l'étape 4D.
+Garder `ad-root-ca.cer` sous la main : la VM n'existe pas encore. Il sera copié sur la VM et converti à l'étape 4D.
 
 > **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter de la même façon le certificat de l'autorité intermédiaire (`C:\Temp\ad-sub-ca.cer`, magasin `Cert:\LocalMachine\CA`). Les deux seront réunis dans le même fichier à l'étape 4D. Le lab compte deux niveaux : le certificat du contrôleur de domaine y est délivré directement par la racine, et le fichier de chaîne contient la racine et l'autorité intermédiaire.
 
@@ -572,7 +572,7 @@ DNS=<IP-DC>
 Domains=votre-domaine.ch
 ```
 
-**Le certificat de l'étape 2**, converti au format attendu par Linux :
+**Le certificat de l'étape 2.** Copier d'abord `ad-root-ca.cer` (et `ad-sub-ca.cer` avec une PKI à deux niveaux) dans `/tmp` sur la VM, par `scp` depuis le poste Windows ou par un partage, par exemple `scp C:\Temp\ad-root-ca.cer <compte-admin>@<IP-VM>:/tmp/`, depuis PowerShell, avec le compte d'administration créé en 4A. Puis le convertir au format attendu par Linux :
 
 ```bash
 openssl x509 -inform DER -in /tmp/ad-root-ca.cer -out /etc/ssl/certs/ad-chain.pem
@@ -626,7 +626,7 @@ cd /root/ia-locale-pme-suisse/scripts/stack-ia-locale && chmod +x deploy.sh && .
 
 L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu). Le script peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.**
 
-**Ensuite**, reprendre à l'**étape 12** si l'indexation proposée a été refusée, ou directement à l'**étape 14** si elle a réussi (le script redémarre lui-même la RAG API pour activer la recherche par mots-clés, fin de l'étape 13). Les explications des étapes 5 à 11 restent utiles pour comprendre ce que le script a fait, et pour le dépannage.
+**Ensuite**, reprendre à l'**étape 12** si l'indexation proposée a été refusée ou a échoué, ou directement à l'**étape 14** si elle a réussi (le script redémarre lui-même la RAG API pour activer la recherche par mots-clés, fin de l'étape 13). Les explications des étapes 5 à 11 restent utiles pour comprendre ce que le script a fait, et pour le dépannage.
 
 **Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier.
 
@@ -642,12 +642,12 @@ ln -s /srv/rag-donnees/secrets/smb-svc-rag /etc/smbcredentials/svc-rag
 nano /srv/rag-donnees/secrets/smb-svc-rag
 ```
 
-Contenu :
+Contenu (`<PARTAGE>`, dans les commandes qui suivent, est le nom du partage à indexer : `FileService` dans le lab) :
 
 ```
 username=svc-rag
 password=<mot-de-passe-svc-rag>
-domain=VOTREDOMAINE
+domain=VOTRE-DOMAINE
 ```
 
 ```bash
@@ -655,7 +655,7 @@ chmod 600 /srv/rag-donnees/secrets/smb-svc-rag
 ls -l /etc/smbcredentials/svc-rag /srv/rag-donnees/secrets/smb-svc-rag
 
 mkdir -p /mnt/corpus-root
-mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
+mount -t cifs //<NOM-FILESERVER>/<PARTAGE> /mnt/corpus-root \
     -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro
 ls /mnt/corpus-root/
 ```
@@ -667,7 +667,7 @@ umount /mnt/corpus-root
 cat >> /etc/fstab << 'FSTAB'
 
 # Partage du corpus RAG (monté avec svc-rag, identifiants sur le volume chiffré)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
+//<NOM-FILESERVER>/<PARTAGE> /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
 FSTAB
 systemctl daemon-reload && mount -a && findmnt /mnt/corpus-root
 ```
@@ -682,7 +682,8 @@ Les scripts sont publiés dans ce dépôt GitHub. Ceux qui contiennent des valeu
 
 ```bash
 cd /root
-git clone https://github.com/doit4everyone/ia-locale-pme-suisse.git
+# Déjà cloné si deploy.sh a été envisagé (« Avant l'étape 5 ») : le clone n'est pas refait
+[ -d ia-locale-pme-suisse ] || git clone https://github.com/doit4everyone/ia-locale-pme-suisse.git
 cd ia-locale-pme-suisse/scripts/stack-ia-locale
 
 # Dossiers de la stack (déjà présents, sous forme de liens, depuis l'étape 4C)
@@ -745,22 +746,22 @@ Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`
 | Réglage | Valeur | Exemple |
 |---|---|---|
 | Bloc du serveur de modèles | Voir le point 3 ci-dessous | |
-| `ORG_NAME`, `ORG_OWNER` | Le nom de votre organisation, le même dans les deux | `Exemple SA` |
+| `ORG_NAME`, `ORG_OWNER` | Le nom de votre organisation, le même dans les deux, **entre apostrophes** (voir ci-dessous) | `'Exemple SA'` |
 | `LDAP_HOST` | Le nom DNS complet du contrôleur de domaine, pas son adresse IP | `dc01.votre-domaine.ch` |
 | `LDAP_BASE_DN` | Le domaine, en notation LDAP | `DC=votre-domaine,DC=ch` |
 | `LDAP_BIND_DN` | Le compte `svc-rag`, avec son OU | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
 | `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5 | |
-| `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTREDOMAINE` |
-| `SMB_SHARE` | Le partage à indexer | `//FILESERVER/FileService` |
+| `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTRE-DOMAINE` |
+| `SMB_SHARE` | Le partage à indexer, le même qu'à l'étape 5 | `//<NOM-FILESERVER>/<PARTAGE>` (lab : `FileService`) |
 | `DOCUMENTATION_PATHS` | Facultatif. Le ou les dossiers de documentation technique (guides, procédures, manuels), **à la racine** du partage, séparés par des virgules. Leur contenu va dans la collection `documentation`, tout le reste dans `documents` ; les droits NTFS s'appliquent de la même façon aux deux. **Vide** : tout le partage va dans `documents`. Changer ce réglage après l'indexation exige une réindexation complète (§5.9) | `DOCUMENTATION` (lab : `DOIT4EVERYONE`) |
 | `RAG_FQDN` | Le nom DNS de la stack, sans `https://` (§9.8.2). Il fixe aussi l'adresse de n8n, `https://<RAG_FQDN>:5678` | `rag.votre-domaine.ch` |
 
-Les valeurs qui contiennent un espace sont **entre apostrophes** dans `env.example` (par exemple `SP_EXCLUDE_DRIVES='Preservation Hold Library'`). Les conserver : sans elles, `source .env` échoue avec « command not found » sur le mot qui suit l'espace.
+Les valeurs qui contiennent un espace sont **entre apostrophes** dans `env.example` (par exemple `ORG_NAME='<Nom organisation>'` ou `SP_EXCLUDE_DRIVES='Preservation Hold Library'`). Les conserver, et en mettre à toute valeur saisie qui contient un espace : sans elles, `source .env` échoue avec « command not found » sur le mot qui suit l'espace.
 
 **3. Le bloc du serveur de modèles**, en haut du fichier. Il contient deux blocs : **A pour Ollama**, actif par défaut, et **B pour vLLM**, désactivé (chaque ligne commence par `#`). **Un seul bloc doit être actif.**
 
 - **Avec Ollama :** dans le bloc A, remplacer `<IP-SERVEUR-MODELES>` par l'adresse de la machine Ollama.
-- **Avec vLLM :** ajouter un `#` au début de chaque ligne du bloc A, retirer le `#` des lignes du bloc B, remplacer `<IP-SERVEUR-MODELES>` par l'adresse du poste ou du serveur vLLM, et `<clé-vllm>` par la clé créée à l'étape 3B. Pour la copier sans l'afficher depuis un poste Windows : §2.4.4.
+- **Avec vLLM :** ajouter un `#` au début de chaque ligne de réglage du bloc A, retirer le `#` des lignes de réglage du bloc B (de `# LLM_API=openai` à `# VLLM_API_KEY=<clé-vllm>`, pas des lignes d'explication qui les précèdent), remplacer `<IP-SERVEUR-MODELES>` par l'adresse du poste ou du serveur vLLM, et `<clé-vllm>` par la clé créée à l'étape 3B. Pour la copier sans l'afficher depuis un poste Windows : §2.4.4.
 
 Plus bas dans le fichier, `OLLAMA_URL` prend la même valeur que `EMBED_BASE_URL` : port 11434 avec Ollama, **port 8001 avec vLLM**. Malgré son nom, cette ligne désigne le serveur d'embedding, avec les deux moteurs.
 
@@ -892,7 +893,7 @@ set -a && source /root/rag-stack/.env && set +a
 
 LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem \
     ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} -D "${LDAP_BIND_DN}" -w "${LDAP_BIND_PWD}" 2>&1
-smbclient //<NOM-FILESERVER>/FileService -W "${SMB_DOMAIN}" -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
+smbclient //<NOM-FILESERVER>/<PARTAGE> -W "${SMB_DOMAIN}" -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
 ```
 
 **Attendu :** `dn:CN=svc-rag,...`, puis la liste des dossiers du partage. Sur un domaine Active Directory, `smbclient` exige `-W <DOMAINE>` : sans lui, l'erreur est `NT_STATUS_LOGON_FAILURE` alors que le mot de passe est correct.
@@ -911,7 +912,7 @@ python indexer.py --corpus /mnt/corpus-root --rapport /var/log/rag/rapport_index
 echo "Code de sortie : $?"
 ```
 
-**Attendu :** au début, `Vérification du serveur d'embedding (ollama)`, ou `(openai)` avec vLLM, puis `Modèle d'embedding : bge-m3 ✓` ; à la fin, le code de sortie `0`. Compter les extraits indexés :
+**Attendu :** au début, `Vérification du serveur d'embedding (ollama)`, ou `(openai)` avec vLLM, puis `Modèle d'embedding : bge-m3 ✓ (calcul vérifié)` ; à la fin, le code de sortie `0`. Le code `2` signale au moins un fichier en erreur, listé en fin de sortie et dans le rapport (voir ci-dessous). Compter les extraits indexés :
 
 ```bash
 for c in documents documentation; do
@@ -922,7 +923,7 @@ done
 
 > **Les variables du `.env` restent chargées dans ce shell.** Si le `.env` est modifié ensuite, `docker compose` prend les valeurs du shell, pas celles du fichier : le changement semble sans effet (constaté en lab). Ouvrir une nouvelle session avant tout `docker compose` qui doit lire un `.env` modifié.
 
-> **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable est mis en quarantaine et n'est pas indexé ; il apparaît dans le rapport avec le statut `quarantaine`. Un PDF scanné sans texte ou un fichier corrompu ne produit aucun extrait (statut `vide`).
+> **Quarantaine :** un fichier dont l'organisation propriétaire (client ou organisation interne) n'est pas identifiable est mis en quarantaine et n'est pas indexé ; il apparaît dans le rapport avec le statut `quarantaine`. Un PDF sans texte extractible (scanné, par exemple) ne produit aucun extrait (statut `vide`). Un fichier illisible ou abîmé est compté en erreur (statut `erreur`, code de sortie 2) ; s'il était déjà indexé, ses anciens extraits restent en place (§5.4.2b).
 
 ---
 
@@ -932,7 +933,7 @@ L'outil de résolution des ACL recopie, dans chaque extrait indexé, la liste de
 
 ```bash
 python acl_resolver.py \
-    --share //<NOM-FILESERVER>/FileService \
+    --share //<NOM-FILESERVER>/<PARTAGE> \
     --mount /mnt/corpus-root \
     --rapport /var/log/rag/rapport_acl_initial.json
 echo "Code de sortie : $?"
@@ -1055,7 +1056,7 @@ docker logs rag-api 2>&1 | grep "\[SYNC\]" | tail -10
 docker exec rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json
 ```
 
-**Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4). Ce test vérifie les **droits** (le filtre sur les groupes, les refus nominatifs, Purview), pas la réponse du modèle : il dure quelques secondes. Dans le lab, sur le déploiement neuf : 72 verdicts, 70 `OK`, 2 `INFO`, 0 `FUITE` (§16.3).
+**Attendu :** uniquement des `OK`, et en aucun cas une `FUITE`. Une fois ce fichier en place, la RAG API rejoue ces cas après chaque synchronisation (§16.4). Ce test vérifie les **droits** (le filtre sur les groupes, les refus nominatifs, Purview), pas la réponse du modèle : il dure quelques secondes. Dans le lab, au rejeu du 1er novembre 2026 : 207 verdicts sur 23 cas et 9 comptes, tous `OK`, aucune `FUITE` (§16.3).
 
 > **Le test du garde-fou ne doit pas verrouiller `svc-rag`.** Le contrôle « Garde-fou des droits » ci-dessous désigne un partage qui n'existe pas : le compte s'authentifie normalement, chaque lecture échoue, et le garde-fou doit abandonner sans toucher à Qdrant. Ne pas le tester avec un mot de passe faux : chaque essai compte dans le seuil de verrouillage de l'Active Directory, et un compte `svc-rag` verrouillé bloque la connexion de tous les utilisateurs (cas vécu dans le lab, avant la 2.20.4 qui arrête `acl_resolver.py` au premier refus d'authentification). Déverrouillage, sur un contrôleur de domaine : `Unlock-ADAccount -Identity svc-rag`. Validé lors du rejeu du 19 octobre 2026 : `[GARDE-FOU] 70/70 fichiers en ACL illisible, abandon sans modification`, code 1, Qdrant intact, compte non verrouillé.
 
@@ -1093,7 +1094,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Échecs d'écriture des droits, indexation | `docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py` | `56 tests OK` |
 | Reclassement (reranker) | `docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py` | `6 tests OK` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
-| Recherche par mots-clés | `docker logs rag-api \| grep BM25` | `Recherche par mots-clés dans Qdrant : documentation, documents` (après la première synchronisation) |
+| Recherche par mots-clés | `docker logs rag-api \| grep BM25` | `Recherche par mots-clés dans Qdrant : documentation, documents` (après le redémarrage de l'étape 13) |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
 | Accès refusé | Compte sans droit, question sur un document restreint | « Cette information ne figure pas... » |
 | Test de cloisonnement | Étape 16 | Aucune `FUITE` |
@@ -1265,7 +1266,7 @@ docker exec rag-api python3 -c "import urllib.request; print(urllib.request.urlo
 
 **`smbclient` : `NT_STATUS_LOGON_FAILURE` avec un mot de passe correct**
 
-Ajouter le domaine : `smbclient //<NOM-FILESERVER>/FileService -W <DOMAINE> -U "svc-rag%<mot-de-passe>"`.
+Ajouter le domaine : `smbclient //<NOM-FILESERVER>/<PARTAGE> -W <DOMAINE> -U "svc-rag%<mot-de-passe>"`.
 
 **Le montage du partage tombe après un redémarrage**
 
@@ -1277,10 +1278,10 @@ Vérifier le mot de passe dans `/etc/smbcredentials/svc-rag` (rotation non repor
 
 **La recherche par mots-clés est vide au démarrage (BM25)**
 
-Avant la première indexation, les collections n'existent pas : aucune ligne `Recherche par mots-clés dans Qdrant`, ce qui est normal. L'index plein texte de chaque collection est créé à la fin de la première synchronisation (`/admin/sync`). Si la ligne manque alors que Qdrant contient des extraits, ou si le journal signale une version de Qdrant antérieure à la 1.20 ou un index indisponible, la recherche se fait en vectoriel seul. Vérifier la version de Qdrant (§3.4), attendre 30 secondes, puis :
+Avant la première indexation, les collections n'existent pas : aucune ligne `Recherche par mots-clés dans Qdrant`, ce qui est normal. La RAG API crée l'index plein texte de chaque collection à son démarrage et après chaque synchronisation (`/admin/sync`) : après une première indexation lancée à la main, il faut donc la redémarrer (étape 13). Si la ligne manque alors que Qdrant contient des extraits, ou si le journal signale une version de Qdrant antérieure à la 1.20 ou un index indisponible, la recherche se fait en vectoriel seul. Vérifier la version de Qdrant (§3.4), attendre 30 secondes, puis :
 
 ```bash
-docker compose restart rag-api
+cd /root/rag-stack && docker compose restart rag-api
 docker logs rag-api 2>&1 | grep BM25
 ```
 

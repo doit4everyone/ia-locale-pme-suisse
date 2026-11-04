@@ -17,7 +17,7 @@ description: "Validation du backend Ollama avec Onyx CE, puis déploiement d'Ope
 
 [Retour au sommaire](index.md) | [Section précédente : §3 Docker Compose : stack complète](section-03-docker-compose.md) | [Section suivante : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. **Section en partie historique :** Onyx CE (§4.1) n'a servi qu'à valider le serveur de modèles au début du lab, avec les modèles de l'époque (`qwen2.5:14b`, `nomic-embed-text`). La configuration d'Open WebUI en service est celle du §3.4 (Compose) et du §0, étape 14 : en cas de doute, ces deux-là font foi.
 
 ---
 
@@ -96,32 +96,20 @@ docker compose down
 
 Open WebUI est l'interface retenue pour la stack finale. Elle s'authentifie via LDAP Active Directory et transmet l'identité de l'utilisateur connecté à la RAG API pour le filtrage documentaire par ACL NTFS.
 
-### §4.2.1 Ajout dans docker-compose.yml
+### §4.2.1 Le service dans docker-compose.yml
+
+Le service `open-webui` est déclaré dans le `docker-compose.yml` du dépôt (§3.4) : image figée par son numéro et son empreinte, **aucun port publié** (Open WebUI est joint par Nginx, à l'adresse `https://<RAG_FQDN>`, §9.8), tâches automatiques désactivées. Deux variables portent l'identité de l'utilisateur :
 
 ```yaml
-open-webui:
-  image: ghcr.io/open-webui/open-webui:main
-  container_name: open-webui
-  ports:
-    - "3001:8080"
-  environment:
-    - OLLAMA_BASE_URL=http://<IP-OLLAMA>:11434
-    - WEBUI_SECRET_KEY=<secret-fort>
-    - ENABLE_FORWARD_USER_INFO_HEADERS=true
-  volumes:
-    - ./openwebui_data:/app/backend/data
-    - /etc/ssl/certs/ad-chain.pem:/etc/ssl/certs/ad-chain.pem:ro
-  restart: unless-stopped
+    environment:
+      - ENABLE_FORWARD_USER_INFO_HEADERS=true
+      # Identité signée (X-OpenWebUI-User-Jwt), même secret que rag-api (§5.6.1)
+      - FORWARD_USER_INFO_HEADER_JWT_SECRET=${OWUI_JWT_SECRET}
 ```
 
-> **`ENABLE_FORWARD_USER_INFO_HEADERS=true` est indispensable.** Sans cette variable, Open WebUI ne transmet pas l'identité de l'utilisateur connecté à la RAG API. Les headers transmis sont `x-openwebui-user-name`, `x-openwebui-user-email`, `x-openwebui-user-id` et `x-openwebui-user-role`. C'est sur ces headers que repose le cloisonnement documentaire de §5.
+> **Les deux variables sont indispensables.** Sans la première, Open WebUI ne transmet pas l'identité de l'utilisateur connecté à la RAG API. Avec la seconde, Open WebUI **signe** cette identité ; la RAG API vérifie la signature et refuse (403) une identité transmise sans elle, dans de simples en-têtes (§5.6.1, §16.6). C'est sur cette identité signée que repose le cloisonnement documentaire du §5.
 
-```bash
-cd /root/rag-stack
-docker compose up -d open-webui
-```
-
-Open WebUI est accessible sur `http://<IP-VM>:3001`.
+Les premières versions de ce guide publiaient Open WebUI sur le port 3001 de la VM, en HTTP, avec l'image `main` : ce n'est plus le cas (frontal HTTPS depuis la 2.21.0, §9.8 ; versions figées, §16.8).
 
 ### §4.2.2 Connexion OpenAI compatible vers la RAG API
 
@@ -143,7 +131,7 @@ Dans **Settings → Admin → Authentication → LDAP** :
 | Hôte | `<NOM-DC>.votre-domaine.ch` | Nom DNS, pas l'IP |
 | Port | `636` | LDAPS obligatoire |
 | TLS | Activé | |
-| Validate Certificate | Désactivé | **Lab uniquement.** En production, activer avec le vrai certificat CA du DC (§9.2) |
+| Validate Certificate | Activé | Avec la chaîne de l'autorité, `/etc/ssl/certs/ad-chain.pem` (§0 étape 4D, champ *Certificate Path*). Le cas d'un lab sans certificat est au §5.6.2 |
 | DN de l'application | `CN=svc-rag,...` | |
 | Mot de passe DN | mot de passe svc-rag | |
 | Attribut email | `userPrincipalName` | `mail` souvent non renseigné dans l'AD |
@@ -159,7 +147,7 @@ Dans **Settings → Admin → Authentication → LDAP** :
 
 ### §4.2.4 Gestion des accès utilisateurs
 
-**Premier connexion d'un compte LDAP :** Open WebUI bloque le compte en attente de validation admin. L'administrateur doit activer le compte dans **Settings → Admin → Users**.
+**Première connexion d'un compte LDAP :** Open WebUI bloque le compte en attente de validation admin. L'administrateur doit activer le compte dans **Settings → Admin → Users**.
 
 En production, c'est le comportement recommandé : chaque nouvel accès est validé explicitement par un administrateur avant d'être actif. C'est cohérent avec une politique nLPD qui exige le contrôle des accès aux données.
 
@@ -182,9 +170,9 @@ Validation effectuée avec deux comptes :
 **Compte `test-client` (GRP-Clients uniquement) :**
 - Question : "Quelles sont les conditions du contrat de travail de [employé RH] ?"
 - Réponse : "Cette information ne figure pas dans les documents disponibles."
-- Questions de suivi proposées par Open WebUI : uniquement sur les documents clients accessibles
+- Questions de suivi proposées par Open WebUI : uniquement sur les documents clients accessibles (ces suggestions sont désactivées depuis, §0 étape 14)
 
-Le cloisonnement documentaire est opérationnel de bout en bout depuis l'interface Open WebUI.
+Le cloisonnement documentaire est opérationnel de bout en bout depuis l'interface Open WebUI. Il est depuis contrôlé par un test automatique (§16.3) : 207 verdicts, tous OK, au rejeu du 1er novembre 2026.
 
 ---
 
@@ -192,4 +180,4 @@ Le cloisonnement documentaire est opérationnel de bout en bout depuis l'interfa
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, AD DOMAINE.CH, Open WebUI v0.11.3, septembre 2026.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026 ; Open WebUI v0.11.3 depuis la 2.21.0.*

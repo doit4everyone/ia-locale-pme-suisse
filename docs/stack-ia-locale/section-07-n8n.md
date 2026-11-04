@@ -17,7 +17,7 @@ description: "Automatisation de la synchronisation du corpus, résolution ACL r�
 
 [Retour au sommaire](index.md) | [Section précédente : §6 Cline : agent de codage](section-06-cline.md) | [Section suivante : §8 Fiabilité : hallucinations et contrôle d'ancrage](section-08-fiabilite.md)
 
-**Statut :** §7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. Le résumé des réunions Teams (§7.4) est validé en Partie 3, voir [§12](section-12-teams.md). §7.5 (OCR factures) est documentaire : l'architecture est décrite mais non validée en lab, faute de GPU pour le modèle multimodal.
+**Statut :** §7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. Le résumé des réunions Teams (§7.4) est validé en Partie 3, voir [§12](section-12-teams.md). §7.5 (OCR factures) est documentaire : l'architecture est décrite mais non validée en lab. Workflows et identifiants revalidés au rejeu du 1er novembre 2026 (§0 étape 15).
 
 ---
 
@@ -52,7 +52,7 @@ n8n est accessible sur `https://<RAG_FQDN>:5678` (par exemple `https://rag.votre
 
 ### §7.1.2 Importer un pipeline
 
-Dans n8n : **Workflows → Import from file** → sélectionner le fichier JSON. Après import, rattacher les credentials SMTP via le nœud email, puis cliquer sur **Publish** pour activer le Schedule.
+Dans n8n : **Workflows → Import from file** → sélectionner le fichier JSON. Après import, rattacher les identifiants dans chaque nœud qui en utilise, puis cliquer sur **Publish** pour activer le Schedule. La procédure complète, pas à pas, est au §0, étape 15.
 
 Les deux workflows validés en lab sont publiés dans le dépôt :
 
@@ -61,9 +61,7 @@ Les deux workflows validés en lab sont publiés dans le dépôt :
 | Synchronisation corpus + email quarantaine | [`n8n-sync-corpus.json`](../../scripts/N8N/n8n-sync-corpus.json) |
 | Rappel mensuel rotation svc-rag | [`n8n-rappel-rotation-svc-rag.json`](../../scripts/N8N/n8n-rappel-rotation-svc-rag.json) |
 
-> **Avant import :** remplacer les placeholders `<EMAIL_EXPEDITEUR>`, `<EMAIL_DESTINATAIRE>` et `<ADMIN_TOKEN>` par les valeurs réelles de l'environnement.
-
-> **Credential SMTP obligatoire :** les deux workflows utilisent un nœud email. Créer le credential dans n8n avant d'importer : **Settings → Credentials → Add credential → SMTP**. Renseigner le serveur, le port, l'utilisateur et le mot de passe. Après import du workflow, ouvrir le nœud email et sélectionner ce credential dans le champ "Credential". Sans cette étape, le workflow s'exécute mais le nœud email échoue silencieusement.
+> **Deux identifiants à créer avant l'import** (*Credentials → Add credential*) : `RAG API - ADMIN_TOKEN`, de type **Header Auth** (*Name* : `Authorization`, *Value* : `Bearer ` suivi de `ADMIN_TOKEN`, domaine autorisé `rag-api`), et un identifiant **SMTP** pour les courriels. Le jeton n'est écrit dans aucun workflow (§16.7). Après l'import, les références `<HEADER_AUTH_CREDENTIAL_ID>` et `<SMTP_CREDENTIAL_ID>` des fichiers n'existent pas chez vous : ouvrir chaque nœud concerné et y sélectionner l'identifiant créé. Remplacer aussi `<EMAIL_EXPEDITEUR>` et `<EMAIL_DESTINATAIRE>` dans les nœuds de courriel. Sans identifiant SMTP rattaché, le workflow s'exécute mais le nœud de courriel échoue.
 
 ---
 
@@ -77,13 +75,13 @@ Ce pipeline ferme le point ouvert de §5 sur la cadence de resynchronisation des
 Schedule Trigger (toutes les heures)
     ↓
 POST http://rag-api:8080/admin/sync
-    Authorization: Bearer <ADMIN_TOKEN>
+    Authorization : identifiant Header Auth « RAG API - ADMIN_TOKEN »
     ↓
 Réponse JSON :
     {success, quarantine_count, quarantine[], errors[],
      indexer: {returncode, stdout}, acl_resolver: {returncode, stdout}}
     ↓
-IF success=false OR quarantine_count > 0
+IF success=false OR quarantine_count > 0 OR cloisonnement_alerte
     ↓ oui                          ↓ non
 Formater email              (rien, fin du pipeline)
     ↓
@@ -140,17 +138,17 @@ Résultat attendu en fonctionnement normal :
 
 ### §7.2.3 Variables requises
 
-Dans `/root/rag-stack/.env`, ajouter :
+Dans `/root/rag-stack/.env` (déjà présentes dans `env.example`, remplies au §0 étape 7) :
 
 ```bash
 # Synchronisation corpus
-ADMIN_TOKEN=<token-admin-fort>
+ADMIN_TOKEN=<généré par openssl rand -hex 32>
 SYNC_SCRIPTS_DIR=/rag-pipeline
-SMB_SHARE=//<NOM-FILESERVER>/FileService
+SMB_SHARE=//<NOM-FILESERVER>/<PARTAGE>
 SMB_MOUNT=/mnt/corpus-root
 SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe-svc-rag>
-SMB_DOMAIN=DOMAINE
+SMB_DOMAIN=VOTRE-DOMAINE
 ```
 
 > **Sécurité de l'endpoint `/admin/sync` :**
@@ -183,12 +181,13 @@ La cadence est configurable en modifiant l'expression cron dans le Schedule Trig
 
 ### §7.2.6 Nœud IF : conditions de déclenchement
 
-Le nœud IF déclenche l'email si l'une des deux conditions est vraie :
+Le nœud IF déclenche l'email si l'une des trois conditions est vraie :
 
 | Condition | Signification |
 |---|---|
-| `{{ $json.success }}` equals `false` | Un des deux scripts a retourné une erreur |
+| `{{ $json.success }}` equals `false` | Un des scripts a retourné une erreur |
 | `{{ $json.quarantine_count }}` greater than `0` | Des fichiers sont présents sur le partage mais absents de Qdrant |
+| `{{ $json.cloisonnement_alerte === true }}` equals `true` | Le test de cloisonnement rejoué après la synchronisation a signalé une fuite ou un écart (§16.4) |
 
 En fonctionnement normal, le pipeline se termine silencieusement sans envoyer d'email. Une notification signale toujours une action requise.
 
@@ -272,7 +271,7 @@ L'email contient la procédure complète en 7 étapes dans l'ordre exact à suiv
 6. Vérifier via `POST /admin/sync` : `success: true` (commande en §9.5.1)
 7. Tester l'authentification LDAP dans Open WebUI
 
-> **Pourquoi l'ordre est critique :** si l'étape 2 (AD) est faite avant l'étape 3 (fichier credentials), le montage SMB tombe immédiatement. Si l'étape 5 (restart) est oubliée, la RAG API continue d'utiliser l'ancien mot de passe pour LDAP et les requêtes tombent silencieusement sans message d'erreur visible pour l'utilisateur.
+> **Pourquoi enchaîner sans pause :** dès l'étape 2, l'ancien mot de passe est refusé. Le montage déjà établi tient jusqu'au prochain remontage, mais la RAG API et la lecture des droits échouent jusqu'aux étapes 4 et 5 ; si l'étape 5 est oubliée, les utilisateurs sont refusés (403). Détail : §9.5.1.
 
 ### §7.3.3 Expression cron
 
@@ -280,14 +279,7 @@ L'email contient la procédure complète en 7 étapes dans l'ordre exact à suiv
 0 9 1 * *
 ```
 
-Heure suisse : vérifier que le conteneur n8n est en UTC et que 09h00 CET/CEST correspond à 08h00 ou 07h00 UTC selon la saison. Adapter l'expression cron en conséquence :
-
-| Saison | Heure suisse | Expression cron (UTC) |
-|---|---|---|
-| Hiver (CET, UTC+1) | 09h00 | `0 8 1 * *` |
-| Été (CEST, UTC+2) | 09h00 | `0 7 1 * *` |
-
-Pour éviter ce problème, définir `TZ=Europe/Zurich` dans les variables d'environnement du conteneur n8n.
+Le Compose du dépôt fixe `GENERIC_TIMEZONE=Europe/Zurich` et `TZ=Europe/Zurich` pour n8n : l'expression s'entend en heure suisse, été comme hiver. Sans ces deux variables, n8n planifie selon son fuseau par défaut (`America/New_York`), et le rappel partirait à 15 h, heure suisse.
 
 ### §7.3.4 Validation en lab
 
@@ -307,7 +299,7 @@ L'architecture retenue diffère de celle esquissée dans les premières versions
 
 ## §7.5 Pipeline 4 : OCR et intégration de factures (documentaire)
 
-> **Statut documentaire :** ce pipeline nécessite Qwen2-VL 7B (modèle multimodal) et sera validé lors de l'installation du GPU RTX 5060 Ti. Il sera documenté dans §10 avec les mesures de performance réelles.
+> **Statut documentaire :** ce pipeline nécessite un modèle multimodal (Qwen2-VL 7B dans cette esquisse) et n'a pas été validé en lab, y compris depuis l'installation de la carte graphique. Il n'est pas mesuré au §10.
 
 Ce pipeline surveille un dossier de réception de factures, extrait les données structurées via le modèle multimodal et les envoie à l'ERP.
 
@@ -366,7 +358,7 @@ Les pipelines §7.2 et §7.3 utilisent le même credential SMTP. Le nœud email 
 | User | `<compte-envoi>@votre-domaine.ch` |
 | Password | Mot de passe d'application |
 
-> **Dépréciation SMTP AUTH :** Microsoft supprime progressivement SMTP AUTH et les mots de passe d'application sur Exchange Online. La date de suppression définitive n'est pas encore annoncée officiellement, mais la migration vers OAuth2 + Graph API est à planifier. Le nœud n8n "Microsoft Outlook" ou un HTTP Request vers `https://graph.microsoft.com/v1.0/me/sendMail` avec un token OAuth2 est la solution de remplacement. Cette migration sera documentée en Partie 3 avec les connecteurs Microsoft 365.
+> **Dépréciation SMTP AUTH :** Microsoft supprime progressivement SMTP AUTH et les mots de passe d'application sur Exchange Online. La date de suppression définitive n'est pas encore annoncée officiellement, mais la migration vers OAuth2 + Graph API est à planifier. Le nœud n8n "Microsoft Outlook" ou un HTTP Request vers `https://graph.microsoft.com/v1.0/me/sendMail` avec un token OAuth2 est la solution de remplacement. Cette migration n'est pas documentée dans ce guide.
 
 ---
 
@@ -374,4 +366,4 @@ Les pipelines §7.2 et §7.3 utilisent le même credential SMTP. Le nœud email 
 
 ---
 
-*§7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026. §7.4 et §7.5 sont des architectures de référence non validées en lab.*
+*§7.1, §7.2 et §7.3 validés en lab sur VM-RAG-LAB, septembre 2026, puis sur des VM neuves jusqu'au 1er novembre 2026. §7.4 est validé au §12 ; §7.5 est une architecture de référence non validée en lab.*

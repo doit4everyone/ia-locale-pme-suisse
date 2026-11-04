@@ -23,7 +23,7 @@ description: "Détecter et prévenir les hallucinations dans un pipeline RAG : c
 
 ---
 
-> **Ce que cette section documente :** un pipeline RAG peut produire des réponses incorrectes qui ressemblent à des réponses correctes. Cette section décrit comment les détecter, comment les prévenir côté utilisateur, et comment les intercepter côté technique. Les exemples sont issus de sessions de validation réelles sur le corpus Axonix SA, un corpus de documents fictifs créés pour le lab (voir §4, corpus de validation Axonix SA). Les noms de clients, montants et références de fichiers qui apparaissent dans cette section sont inventés.
+> **Ce que cette section documente :** un pipeline RAG peut produire des réponses incorrectes qui ressemblent à des réponses correctes. Cette section décrit comment les détecter, comment les prévenir côté utilisateur, et comment les intercepter côté technique. Les exemples sont issus de sessions de validation réelles sur le corpus Axonix SA, un corpus de documents fictifs créés pour le lab (sa version enrichie est publiée : `corpus-demo/` du dépôt, §10.7). Les noms de clients, montants et références de fichiers qui apparaissent dans cette section sont inventés.
 
 ---
 
@@ -102,7 +102,7 @@ RAG API (port 8080, réseau interne)
 Réponse affichée (endpoint /v1) ou bloquée avec HTTP 422 (endpoint /query)
 ```
 
-> **Comportement selon l'endpoint :** sur `/v1/chat/completions` (chemin Open WebUI), la réponse est toujours renvoyée à l'utilisateur, quel que soit le résultat du groundedness check. Le champ `ancree` est journalisé pour l'audit nLPD mais ne bloque pas l'affichage : bloquer sur `/v1` casserait la compatibilité OpenAI et afficherait une erreur dans Open WebUI. Sur `/query` (endpoint machine à machine), une réponse non ancrée retourne HTTP 422 avec la réponse dans `reponse_bloquee`. C'est un choix délibéré documenté : la supervision humaine reste la mitigation principale sur le chemin utilisateur.
+> **Comportement selon l'endpoint :** sur `/v1/chat/completions` (chemin Open WebUI), la réponse est toujours renvoyée à l'utilisateur, quel que soit le résultat du groundedness check. Depuis la 2.23.0, elle se termine alors par un **avertissement** quand elle n'est pas ancrée (« le contrôle automatique n'a pas pu rattacher toutes les affirmations de cette réponse aux documents ») ou quand le juge n'a pas pu se prononcer (« vérification automatique indisponible »). Le champ `ancree` est journalisé pour l'audit nLPD mais ne bloque pas l'affichage : bloquer sur `/v1` casserait la compatibilité OpenAI et afficherait une erreur dans Open WebUI. Sur `/query` (endpoint machine à machine), une réponse non ancrée retourne HTTP 422 avec la réponse dans `reponse_bloquee`. C'est un choix délibéré documenté : la supervision humaine reste la mitigation principale sur le chemin utilisateur.
 
 Open WebUI reçoit la réponse via l'endpoint `/v1/chat/completions` de la RAG API, compatible OpenAI. Open WebUI est l'interface utilisateur retenue depuis la v2.0 : l'indexation est assurée par `indexer.py` et les ACL par `acl_resolver.py` (voir §5).
 
@@ -167,13 +167,13 @@ Ces contrôles ont été testés sur le corpus Axonix SA en septembre 2026 :
 
 Les contrôles déterministes interceptent les cas grossiers. Pour les hallucinations subtiles (modèle qui cite un vrai document en lui faisant dire autre chose), un second appel LLM vérifie affirmation par affirmation.
 
-**Modèle juge :** `qwen3:4b`. Appel via `/api/chat` avec `"think": false` et `"format": "json"`.
+**Modèle juge :** `qwen3:4b-instruct` avec Ollama (l'étiquette `qwen3:4b` des essais de septembre désigne aujourd'hui une variante qui raisonne toujours, §2.3), `qwen3:14b` avec vLLM (§2.4). Avec Ollama, appel via `/api/chat` avec `"think": false` et `"format": "json"`.
 
 ```bash
 curl http://<IP-HOTE-OLLAMA>:11434/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3:4b",
+    "model": "qwen3:4b-instruct",
     "stream": false,
     "format": "json",
     "think": false,
@@ -184,7 +184,7 @@ curl http://<IP-HOTE-OLLAMA>:11434/api/chat \
 
 > **Paramètres critiques :** `"think": false` est requis pour Qwen3. Sans ce paramètre, la réponse JSON arrive dans le champ `thinking` au lieu de `message.content` et ne peut pas être parsée. L'endpoint `/api/chat` est requis : `/api/generate` ne supporte pas ce paramètre correctement avec Qwen3.
 
-> **`keep_alive` et déchargement du juge :** Ollama décharge un modèle de la mémoire après 5 minutes d'inactivité par défaut. Pour `qwen3:4b`, ce déchargement ajoute 30 à 90 secondes au premier groundedness check suivant une période d'inactivité. La variable `JUDGE_KEEP_ALIVE` (défaut `2h` dans `main.py`, transmise par le Compose) contrôle cette durée. `qwen3:4b` occupe environ 2,5 Go en Q4 : le cumul avec `qwen2.5:14b` (~9 Go) tient en RAM système sur LABO-G9. Passer à `-1` une fois le GPU installé pour maintenir les deux modèles en VRAM indéfiniment.
+> **`keep_alive` et déchargement du juge :** Ollama décharge un modèle de la mémoire après 5 minutes d'inactivité par défaut. Pour `qwen3:4b`, ce déchargement ajoute 30 à 90 secondes au premier groundedness check suivant une période d'inactivité. La variable `JUDGE_KEEP_ALIVE` (défaut `2h` dans `main.py`, transmise par le Compose) contrôle cette durée. Avec la carte graphique, la configuration retenue garde les modèles chargés une heure après usage (`OLLAMA_KEEP_ALIVE=1h`, §2.3) ; les trois modèles du guide tiennent ensemble sur 16 Go (§10.2).
 
 **Prompt du juge :**
 
@@ -208,20 +208,20 @@ Réponds uniquement en JSON :
 {"ancree": true ou false, "affirmations_non_sourcees": ["liste des affirmations avec des faits précis absents des sources"]}"""
 ```
 
-> **Limite du juge sur CPU :** `qwen3:4b` détecte les hallucinations grossières (chiffres, dates, noms inventés) mais rate les mauvaises attributions subtiles : si une source documente un outil construit *autour* d'un produit, le juge peut valider une réponse qui présente cet outil comme une fonctionnalité native du produit. Les deux règles d'attribution ajoutées ci-dessus réduisent ce risque, mais ne l'éliminent pas. Une validation fiable des attributions nécessite un modèle juge plus grand (`qwen2.5:14b` sur GPU, en réutilisant le modèle principal déjà chargé en VRAM).
+> **Limite du juge sur CPU :** `qwen3:4b` détecte les hallucinations grossières (chiffres, dates, noms inventés) mais rate les mauvaises attributions subtiles : si une source documente un outil construit *autour* d'un produit, le juge peut valider une réponse qui présente cet outil comme une fonctionnalité native du produit. Les deux règles d'attribution ajoutées ci-dessus réduisent ce risque, mais ne l'éliminent pas. Une validation plus fiable des attributions demande un modèle juge plus grand : c'est le cas avec vLLM, où le modèle de rédaction `qwen3:14b` sert aussi de juge (§2.4). Les juges essayés sur la carte sont comparés au §10.12.
 
-**En cas d'échec du juge**, la réponse est laissée passer pour ne pas bloquer le service. L'échec est journalisé avec le champ `verification: non_effectuee` pour l'audit nLPD. Un juge qui tombe pendant une semaine devient visible dans les logs, pas silencieux.
+**En cas d'échec du juge**, la réponse est laissée passer pour ne pas bloquer le service, avec l'avertissement « vérification automatique indisponible » sur `/v1`. L'échec est journalisé avec le champ `verification: erreur` et le détail dans `juge_error`, pour l'audit nLPD. Un juge qui tombe pendant une semaine devient visible dans les logs, pas silencieux.
 
 ### Coût en temps d'inférence
 
-| Étape | CPU LABO-G9 (i7-14700, sans GPU) | GPU RTX 5060 Ti 16 Go (estimé) |
-|---|---|---|
-| Retriever Qdrant | < 1 s | < 1 s |
-| Génération qwen2.5:14b | ~3 à 5 min | ~10 à 20 s |
-| Groundedness check qwen3:4b | 2,4 s (cas validé) à 8 s (cas complexe) | ~1 à 3 s |
-| **Total** | **~5 à 8 min** | **~15 à 25 s** |
+| Étape | CPU LABO-G9 (i7-14700, sans GPU), septembre 2026 |
+|---|---|
+| Retriever Qdrant | < 1 s |
+| Génération qwen2.5:14b | ~3 à 5 min |
+| Groundedness check qwen3:4b | 2,4 s (cas validé) à 8 s (cas complexe) |
+| **Total** | **~5 à 8 min** |
 
-Les valeurs CPU sont mesurées. Les valeurs GPU sont des estimations à mesurer après installation du GPU sur LABO-G9.
+Ces valeurs sont mesurées sur le processeur, avant l'installation de la carte. **Sur la carte RTX 5060 Ti 16 Go, les durées mesurées sont au §10.12** : de 1 à 6 s pour une question précise posée seule avec Ollama, jusqu'à une minute pour la synthèse d'un long document.
 
 ---
 
@@ -240,20 +240,20 @@ Depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (1.20 au minim
 
 ### Note sur les PDF avec tables des matières
 
-`indexer.py` nettoie les suites de points répétitifs (`......`) avant l'appel à Ollama. Ces patterns, fréquents dans les tables des matières PDF, provoquent une erreur 500 sur `nomic-embed-text`. Le nettoyage est appliqué dans `get_embedding()` et n'affecte pas la qualité des embeddings.
+`indexer.py` nettoie les suites de points répétitifs (`......`) avant l'appel à Ollama. Ces patterns, fréquents dans les tables des matières PDF, provoquaient une erreur 500 avec `nomic-embed-text`, le modèle d'embedding de l'époque. Le nettoyage est appliqué dans `get_embedding()` et n'affecte pas la qualité des embeddings.
 
 ### Paramètres validés en lab
 
 | Paramètre | Valeur | Justification |
 |---|---|---|
 | `CANDIDATS` | 30 | Candidats retenus par la recherche avant la construction du contexte (§8.9). Remplace `TOP_K`, qui tronquait la liste fusionnée à 20 et écartait des documents pertinents |
-| `CONTEXT_THRESHOLD` | 0.01 | Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes (vectorielle + BM25). 0.01 déclenche l'extension de contexte sur presque toutes les questions. |
+| `CONTEXT_THRESHOLD` | 0.01 | Seuil d'extension du contexte, comparé au score RRF du premier candidat, qui vaut au moins 0,011 avec k = 60 et 30 candidats : à 0.01, le contexte est toujours construit autour du document en tête (§8.9). La ligne doit rester dans le `.env` : la valeur par défaut du code, 0.75, supprimerait l'extension, et seuls `MAX_CONTEXT_CHUNKS` candidats partiraient au modèle |
 | `MAX_CONTEXT_CHUNKS` | 14 | Plafond d'extraits envoyés au modèle quand aucun document n'est nettement en tête |
 | `PRINCIPAL_MAX`, `CONTEXT_OTHER_DOCS`, `EXTRAITS_PAR_COMPLEMENT` | 9, 6, 4 | Répartition du contexte entre le document principal et les documents complémentaires (§8.9) ; 4 extraits consécutifs par complément depuis la v2.18.0 (§10.6) |
 
 ### Limite sur les très gros fichiers
 
-Un fichier de 100+ chunks (ex. `11-correlations-yaml.md` à 189 chunks, `09-pipeline-llm.md` à 117 chunks) est trop dilué pour que ses chunks pertinents remontent systématiquement dans le top 20. Les questions génériques sur ces fichiers peuvent échouer. Les questions précises avec les bons termes techniques réussissent.
+Un fichier de 100+ chunks (ex. `11-correlations-yaml.md` à 189 chunks, `09-pipeline-llm.md` à 117 chunks) est trop dilué pour que ses chunks pertinents remontent systématiquement parmi les candidats retenus. Les questions génériques sur ces fichiers peuvent échouer. Les questions précises avec les bons termes techniques réussissent.
 
 ### Note sur la température de génération
 
@@ -304,7 +304,7 @@ La règle générale : toujours poser une question directe sur un sujet précis.
 
 ## §8.9 Diversité des sources et réponses partielles
 
-**Statut :** validé en lab sur CPU, octobre 2026, avec `qwen2.5:14b` et `nomic-embed-text`. À remesurer au §10.
+**Statut :** validé en lab sur CPU, octobre 2026, avec `qwen2.5:14b` et `nomic-embed-text`. Remesuré depuis sur la carte, avec `bge-m3` et le reranker (§10.7, §10.8).
 
 ### Le problème : un contexte construit pour les questions précises
 
@@ -346,7 +346,7 @@ Et la question large « fais-moi un résumé sur tout ce que tu sais sur les cli
 
 ### Limites constatées
 
-- **Sensibilité à la formulation** : « …sur les clients » reste refusé, « …sur les clients axonix » fonctionne. Avec ce mot, la recherche fait remonter les contrats plutôt qu'une politique de sécurité qui emploie souvent le mot « clients ». C'est une limite du modèle d'embedding (`nomic-embed-text`, surtout anglophone) et de l'absence de reclassement : à reprendre au §10 avec `bge-m3` et un reranker ;
+- **Sensibilité à la formulation** : « …sur les clients » reste refusé, « …sur les clients axonix » fonctionne. Avec ce mot, la recherche fait remonter les contrats plutôt qu'une politique de sécurité qui emploie souvent le mot « clients ». C'est une limite du modèle d'embedding (`nomic-embed-text`, surtout anglophone) et de l'absence de reclassement : reprise au §10.7 (`bge-m3`) et au §10.8 (reranker), et règles de formulation au §10.10 ;
 - **Durée** : environ une minute et demie par question sur CPU, contexte et juge compris ;
 - **Deux versions d'un même document** : le corpus du lab contenait deux contrats Rochat contradictoires. Le léger changement de classement dû aux 30 candidats a fait passer l'autre version en tête : la réponse restait ancrée, mais citait une autre durée. Un RAG ne sait pas quelle version fait foi : c'est au corpus de n'en contenir qu'une (§17.4).
 
@@ -359,7 +359,7 @@ Et la question large « fais-moi un résumé sur tout ce que tu sais sur les cli
 | 1. Prompt strict | "Réponds uniquement à partir des documents, ignore les chunks hors sujet" | Nul | RAG API |
 | 2. Formation utilisateurs | Proscrire "fais pareil", questions directes | Nul | Toutes interfaces |
 | 3. Contrôles déterministes | Citations inventées, réponse sans source | Nul | RAG API uniquement |
-| 4. Groundedness check | Juge qwen3:4b, affirmation par affirmation | ~2 à 8 s CPU | RAG API uniquement |
+| 4. Groundedness check | Juge (`qwen3:4b-instruct` avec Ollama, `qwen3:14b` avec vLLM), affirmation par affirmation | Quelques secondes sur la carte (§10.12) | RAG API uniquement |
 
 Les couches 1 et 2 s'appliquent à toute interface sans développement spécifique. Les couches 3 et 4 nécessitent la RAG API déployée en §3.
 
@@ -369,4 +369,4 @@ Les couches 1 et 2 s'appliquent à toute interface sans développement spécifiq
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, corpus Axonix SA + DOIT4EVERYONE (45 fichiers, 970 chunks), RAG API avec qwen2.5:14b et qwen3:4b, Open WebUI, septembre 2026.*
+*Validé en lab sur VM-RAG-LAB, corpus Axonix SA + DOIT4EVERYONE (45 fichiers, 970 chunks), RAG API avec qwen2.5:14b et qwen3:4b, Open WebUI, septembre 2026. Configuration et mesures actuelles : §10.*

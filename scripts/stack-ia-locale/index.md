@@ -18,7 +18,7 @@ description: "Scripts Python du pipeline RAG local : indexation SMB avec résolu
 
 [Retour au sommaire](../../) | [Guide de déploiement](../../docs/stack-ia-locale/)
 
-**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, septembre 2026. Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée en lab (§12).
+**Statut :** validés en lab sur VM-RAG-LAB, Ubuntu Server 26.04 LTS, depuis septembre 2026 ; dernier rejeu complet sur VM neuve avec la 2.23.0 (1er novembre 2026, guide §0). Tests DENY, groupes imbriqués et synchronisation SMB réalisés avec corpus réel (Parties 1 et 2). Extension Entra ID validée en lab (§11). Synthèse des réunions Teams validée en lab (§12).
 
 > **Quelle version installer :** toujours la **dernière Release publiée**, qui contient tous les correctifs de sécurité. La Release [v2.12.0](https://github.com/doit4everyone/ia-locale-pme-suisse/tree/v2.12.0/scripts/stack-ia-locale) garde les scripts des Parties 1 et 2 tels qu'ils ont été validés avant la Partie 3 : c'est une **référence historique**, à ne pas installer. Les modifications de la Partie 3 sont compatibles : sans document SharePoint et avec `ENTRA_ENABLED=false`, la stack SMB se comporte de la même façon.
 
@@ -110,14 +110,14 @@ RAG API FastAPI. Endpoints :
 Fonctionnalités :
 
 - Retrieval Qdrant avec filtre ACL (`autorises[]` et `interdits[]`)
-- Extension de contexte par `chunk_index ± radius` sur le document le mieux classé : les chunks voisins sont récupérés dans l'ordre du document, le chunk pertinent reste dans le contexte. Contrôle ACL appliqué après le scroll
+- Extension de contexte sur le document le mieux classé, quand son score atteint `CONTEXT_THRESHOLD` : document court envoyé en entier (`DOC_COMPLET_MAX`), sinon fenêtre de `PRINCIPAL_MAX` extraits autour du meilleur, dans l'ordre du document, puis documents complémentaires (§8.9). Droits appliqués dans la requête Qdrant (`autorises[]`), puis vérifiés extrait par extrait (`interdits[]`, Purview)
 - Retrieval hybride mots-clés (BM25) + vectoriel fusionné par Reciprocal Rank Fusion (RRF) :
   depuis la 2.23.0, la recherche par mots-clés se fait dans Qdrant (1.20 au minimum), sur un
   index plein texte du champ `text`, avec le filtre des groupes autorisés dans la requête ;
   index créé au démarrage s'il manque, sans réindexer. Chaque candidat porte son `chunk_index` pour que l'extension de contexte fonctionne même quand les mots-clés gagnent le RRF. Les mots-clés capturent les termes exacts (noms de fichiers,
   acronymes, commandes) là où la recherche vectorielle seule échoue sur les reformulations.
 - Reranker optionnel (2.23.0, §10.8) : `llama-server --reranking` sur la carte du serveur de modèles (`RERANKER_API=llamacpp`) ou conteneur du Compose ; ordre de la recherche conservé en cas d'échec
-- `TOP_K` configurable (défaut 20), validé en lab pour améliorer le recall sur les gros fichiers .md
+- `CANDIDATS` (défaut 30) : candidats retenus par la recherche avant la construction du contexte ; remplace `TOP_K` depuis la 2.17.2 (`TOP_K` reste dans le `.env`, sans effet)
 - `warmup_judge()` : ping du juge Ollama à chaque requête pour le maintenir chargé en mémoire (sans objet avec vLLM, dont les modèles restent chargés)
 - `JUDGE_KEEP_ALIVE` : durée de rétention du juge après chaque appel (défaut `2h`)
 - Prompt système : citation du nom exact du fichier entre crochets, jamais `[Document X]`
@@ -147,18 +147,24 @@ QDRANT_HOST=http://qdrant:6333
 QDRANT_COLLECTION=documents
 DOCUMENTATION_COLLECTION=documentation  # Collection pour la documentation technique
 DOCUMENTATION_PATHS=                    # Dossiers racine routés vers DOCUMENTATION_COLLECTION (vide = aucun ; lab : DOIT4EVERYONE)
-ORG_NAME=<Nom de l'organisation>
+ORG_NAME='<Nom organisation>'
 API_TOKEN=<token fort>
 ADMIN_TOKEN=<token fort distinct>
+QDRANT_API_KEY=<clé forte>
+LOG_HMAC_KEY=<clé forte>
+OWUI_JWT_SECRET=<secret fort, partagé avec Open WebUI>
+# Ces cinq secrets : la RAG API refuse de démarrer si l'un est vide, garde une
+# valeur d'exemple ou compte moins de 32 caractères, ou si API_TOKEN, ADMIN_TOKEN
+# et OWUI_JWT_SECRET ne sont pas distincts (guide §16.6). Générer : openssl rand -hex 32
 LOG_FILE=/var/log/rag/rag-queries.jsonl
 REPORT_DIR=/var/log/rag
-LDAP_HOST=<DC-FQDN>
+LDAP_HOST=<NOM-DC>.votre-domaine.ch
 LDAP_PORT=636
 LDAP_USE_TLS=true
 LDAP_BASE_DN=DC=votre-domaine,DC=ch
-LDAP_BIND_DN=CN=svc-rag,OU=Services,DC=votre-domaine,DC=ch
-LDAP_BIND_PWD=<mot-de-passe>
-LDAP_DOMAIN=DOMAINE
+LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
+LDAP_BIND_PWD=<mot-de-passe>   # à remplacer : un gabarit <...> est refusé au démarrage
+LDAP_DOMAIN=VOTRE-DOMAINE
 LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 ```
 
@@ -242,7 +248,8 @@ OLLAMA_URL=http://<IP-SERVEUR-MODELES>:11434   # le serveur d'EMBEDDING ; vLLM :
 EMBED_API=ollama                                # « openai » avec vLLM
 VLLM_API_KEY=                                   # avec vLLM
 QDRANT_URL=http://localhost:6333
-ORG_OWNER=<Nom de l'organisation>
+QDRANT_API_KEY=<clé de Qdrant>
+ORG_OWNER='<Nom organisation>'
 EMBED_MODEL=bge-m3
 CHUNK_SIZE=150
 CHUNK_OVERLAP=20
@@ -276,7 +283,7 @@ cd /root/rag-pipeline
 source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 python acl_resolver.py \
-    --share //<NOM-FILESERVER>/FileService \
+    --share //<NOM-FILESERVER>/<PARTAGE> \
     --mount /mnt/corpus-root
 ```
 
@@ -284,9 +291,10 @@ python acl_resolver.py \
 
 ```bash
 QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=<clé de Qdrant>
 SMB_USER=svc-rag
 SMB_PASSWORD=<mot-de-passe>
-SMB_DOMAIN=DOMAINE
+SMB_DOMAIN=VOTRE-DOMAINE
 ```
 
 ---
@@ -407,8 +415,10 @@ msal
 **Sur l'hôte (`/root/rag-pipeline/.venv`) :**
 
 ```bash
-pip install qdrant-client python-docx pdfplumber python-pptx requests
+pip install qdrant-client python-docx pdfplumber python-pptx httpx ldap3 impacket smbprotocol
 ```
+
+Les huit paquets du guide §0 (étape 7).
 
 **Paquet système (dans le `Dockerfile`) :**
 
@@ -440,7 +450,7 @@ Structure du payload stocké pour chaque chunk :
 }
 ```
 
-Les chunks issus de SharePoint (Partie 3) porteront un champ `source_type` égal à `sharepoint`. Les chunks SMB n'ont pas ce champ : `acl_resolver.py` les traite comme `smb`.
+Les chunks issus de SharePoint (Partie 3, §13) portent un champ `source_type` égal à `sharepoint`. Les chunks SMB n'ont pas ce champ : `acl_resolver.py` les traite comme `smb`.
 
 Le champ `autorises` est mis à jour par `acl_resolver.py` indépendamment du contenu. Le champ `interdits` porte les DENY explicites NTFS, prioritaires sur `autorises`.
 
@@ -452,6 +462,6 @@ Scripts publiés sous licence MIT. Libres de réutilisation, d'adaptation et de 
 
 ---
 
-*Validé sur VM-RAG-LAB, Ubuntu Server 26.04 LTS (resolute), Docker 29.7.2, septembre 2026.*
+*Validé sur VM-RAG-LAB, Ubuntu Server 26.04 LTS (resolute), Docker 29.7.2, septembre 2026 ; rejoué sur VM neuve, Docker 29.9.2, 1er novembre 2026 (2.23.0).*
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

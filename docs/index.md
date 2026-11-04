@@ -15,7 +15,7 @@ description: "Procédures de déploiement d'une stack IA locale conçue pour fac
 
 [Retour à l'accueil](../) | [Guides décisionnels](../guides/)
 
-Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, NVIDIA RTX 5060 Ti 16 Go, Ollama natif puis vLLM dans WSL2) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose).
+Les procédures sont publiées après validation en lab, sur l'environnement de référence : LABO-G9 (Windows 11, VMware Workstation, NVIDIA RTX 5060 Ti 16 Go, Ollama natif puis vLLM dans WSL2) et VM-RAG-LAB (Ubuntu Server 26.04, Docker Compose), puis des VM neuves déployées selon le démarrage rapide (§0), en dernier lieu le 1er novembre 2026.
 
 ---
 

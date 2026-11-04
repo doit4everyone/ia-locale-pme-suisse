@@ -17,11 +17,11 @@ description: "Configuration de Cline dans VS Code pour connecter un agent de cod
 
 [Retour au sommaire](index.md) | [Section précédente : §5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | [Section suivante : §7 Pipelines n8n](section-07-n8n.md)
 
-**Statut :** validé sur WIN11-AD-TESTS avec VS Code et Ollama sur LABO-G9, septembre 2026.
+**Statut :** validé sur WIN11-AD-TESTS avec VS Code et Ollama sur LABO-G9, septembre 2026, **sur le processeur**, avant l'installation de la carte graphique. Non revalidé depuis avec la carte, ni avec vLLM.
 
 ---
 
-> **Cette section est indépendante de §5.** Elle ne nécessite qu'Ollama configuré sur LABO-G9 (§4) et VS Code installé sur le poste développeur. Elle peut être lue dans n'importe quel ordre par rapport aux autres sections.
+> **Cette section est indépendante de §5.** Elle ne nécessite qu'Ollama configuré sur LABO-G9 (§2.3) et VS Code installé sur le poste développeur. Elle peut être lue dans n'importe quel ordre par rapport aux autres sections.
 
 > **Note sur Continue.dev :** le guide prévoyait initialement Continue.dev comme copilote développeur. Continue.dev a été acquis par Cursor en juin 2026 et le produit est arrêté (dernière version : v2.0.0-vscode, dépôt en lecture seule, plus de mises à jour). L'outil retenu est **Cline**, le remplaçant direct le plus proche, open source, activement maintenu.
 
@@ -29,7 +29,7 @@ description: "Configuration de Cline dans VS Code pour connecter un agent de cod
 
 Cline est une extension VS Code open source qui connecte l'éditeur à un modèle LLM local. Contrairement à un copilote de complétion en ligne, Cline est un **agent de codage** : il raisonne sur une tâche entière, crée des fichiers, exécute des commandes dans le terminal et gère les erreurs. Un développeur peut lui décrire une tâche en langage naturel et Cline produit le code, les tests, et les exécute.
 
-Dans cette configuration, Cline s'installe sur le poste développeur (WIN11-AD-TESTS) et se connecte à Ollama sur LABO-G9 via le réseau local avec le modèle `qwen2.5:14b`.
+Dans cette configuration, Cline s'installe sur le poste développeur (WIN11-AD-TESTS) et se connecte à Ollama sur LABO-G9 via le réseau local avec le modèle `qwen2.5:14b`. Ce modèle ne fait pas partie de ceux de la stack (§2.1) : le télécharger à part (`ollama pull qwen2.5:14b`). Sur une carte de 16 Go, il ne tient pas en même temps que les modèles de la stack : Ollama décharge l'un pour charger l'autre, et les questions des utilisateurs attendent. Sur un serveur de modèles en service, réserver Cline aux heures creuses, ou utiliser `qwen3:14b`, déjà chargé (non essayé avec Cline).
 
 ---
 
@@ -129,13 +129,13 @@ Cline n'est pas un copilote de complétion en ligne (pas de suggestions en gris 
 | Tâches multi-étapes autonomes | Oui | Non |
 | Modèles nécessaires | 1 | 2 (chat + complétion) |
 
-Pour un développeur seul dans une PME, la capacité à déléguer une tâche entière (écrire la fonction, les tests, les exécuter) est plus utile qu'une complétion caractère par caractère. Avec le GPU, Cline devient réellement fluide.
+Pour un développeur seul dans une PME, la capacité à déléguer une tâche entière (écrire la fonction, les tests, les exécuter) est plus utile qu'une complétion caractère par caractère. Sur le processeur, chaque tâche prend plusieurs minutes ; avec une carte graphique, elle devrait être nettement plus rapide (non mesuré pour Cline).
 
 ---
 
 ## §6.6 Points d'attention
 
-- **OLLAMA_HOST sur LABO-G9 :** Ollama doit écouter sur le réseau. Vérifier que la variable d'environnement `OLLAMA_HOST=0.0.0.0:11434` est définie sur LABO-G9 (déjà configuré si Open WebUI fonctionne).
+- **OLLAMA_HOST sur LABO-G9 :** Ollama doit écouter sur le réseau. Vérifier que la variable d'environnement `OLLAMA_HOST=0.0.0.0:11434` est définie sur LABO-G9 (déjà configuré si la stack fonctionne avec Ollama, §2.3).
 - **Auto-approve :** Cline demande confirmation avant d'écrire des fichiers ou d'exécuter des commandes. Le mode Auto-approve accélère les tâches répétitives mais doit être utilisé avec précaution sur des projets en production.
 - **Workspace Cline :** les fichiers créés par Cline se trouvent dans `%USERPROFILE%\.cline\data\workspaces\chat\` par défaut. Ouvrir un dossier de projet dans VS Code pour que Cline travaille directement dans le bon répertoire.
 
@@ -143,18 +143,20 @@ Pour un développeur seul dans une PME, la capacité à déléguer une tâche en
 
 ## En production sur DGX Spark ou avec GPU local : ce qui change
 
-> **Note :** cette section est documentaire pour le DGX Spark. Avec le GPU RTX 5060 Ti prévu sur LABO-G9, la configuration reste identique, seules les performances changent.
+> **Note :** cette section est documentaire. Ni la carte RTX 5060 Ti installée depuis sur LABO-G9, ni vLLM, ni le DGX Spark n'ont été essayés avec Cline.
 
-Avec GPU, changer uniquement l'URL si vLLM remplace Ollama :
+Si vLLM remplace Ollama (§2.4), Cline peut utiliser le serveur de rédaction de la stack, sous le nom qu'il lui donne :
 
 ```
 Provider : openai (compatible OpenAI)
-Base URL : http://<IP-HOTE-OLLAMA>:8000/v1
-API Key  : <VLLM_API_KEY>
-Model    : Qwen/Qwen3-30B-A3B
+Base URL : http://<IP-SERVEUR-MODELES>:8000/v1
+API Key  : la clé de vLLM (§2.4.4)
+Model    : qwen3:14b
 ```
 
-Les temps de réponse passent de plusieurs minutes (CPU, qwen2.5:14b) à quelques dizaines de secondes (GPU). Ces valeurs seront mesurées et documentées après installation du GPU sur LABO-G9. Le timeout peut être réduit une fois les performances réelles connues.
+Cline partage alors la carte avec les utilisateurs de l'assistant. Sur un DGX Spark, un modèle plus grand est possible (§2.6).
+
+Avec la carte, les temps de réponse devraient passer de plusieurs minutes à quelques dizaines de secondes : ce n'est pas mesuré pour Cline. Le délai d'attente de 5 minutes peut être réduit une fois les performances réelles connues.
 
 ---
 

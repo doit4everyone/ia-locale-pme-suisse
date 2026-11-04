@@ -17,7 +17,7 @@ description: "Connecteur file server Windows SMB, lecture des ACL NTFS, résolut
 
 [Retour au sommaire](index.md) | [Section précédente : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | [Section suivante : §6 Cline : agent de codage](section-06-cline.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026 ; droits par SID depuis la 2.22.0 (§16.5.3), parcours et fichiers illisibles traités depuis la 2.23.0 (§5.4.2b), le tout rejoué sur une VM neuve le 1er novembre 2026. Formats indexés : `.docx`, `.pdf`, `.pptx`, `.txt`, `.md`. Les cas de test documentés ont été reproduits en session avec des comptes et corpus réels.
 
 ---
 
@@ -242,7 +242,7 @@ sudo nano /etc/smbcredentials/svc-rag
 # Contenu du fichier :
 username=svc-rag
 password=<mot-de-passe-fort>
-domain=DOMAINE
+domain=VOTRE-DOMAINE
 
 # Protéger en lecture root uniquement (chmod et chown suivent le lien)
 sudo chmod 600 /etc/smbcredentials/svc-rag
@@ -254,7 +254,7 @@ sudo chown root:root /etc/smbcredentials/svc-rag
 ```bash
 sudo mkdir -p /mnt/corpus-root
 
-sudo mount -t cifs //<NOM-FILESERVER>/FileService /mnt/corpus-root \
+sudo mount -t cifs //<NOM-FILESERVER>/<PARTAGE> /mnt/corpus-root \
     -o credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro
 
 # Vérifier
@@ -266,8 +266,9 @@ ls /mnt/corpus-root/
 # Formats indexés : .docx, .pdf, .pptx, .txt, .md
 # Un fichier dont l'organisation propriétaire n'est pas identifiable est mis en quarantaine
 # (statut "quarantaine" dans le rapport JSON).
-# Un PDF scanné sans couche texte ou un fichier corrompu ne produit aucun chunk
-# (statut "vide"). Un document court est indexé en un seul chunk.
+# Un PDF sans texte extractible (scanné, par exemple) ne produit aucun chunk
+# (statut "vide") ; un fichier illisible ou abîmé est compté en erreur
+# (statut "erreur", code 2, §5.4.2b). Un document court est indexé en un seul chunk.
 # Les tables et SmartArt PowerPoint ne sont pas extraits.
 ```
 
@@ -276,8 +277,8 @@ Pour rendre le montage persistant après redémarrage, ajouter dans `/etc/fstab`
 ```bash
 sudo tee -a /etc/fstab << 'FSTAB'
 
-# Partage SMB FileService (corpus RAG, monté par svc-rag)
-//<NOM-FILESERVER>/FileService /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
+# Partage SMB du corpus RAG, monté par svc-rag (<PARTAGE> : FileService dans le lab)
+//<NOM-FILESERVER>/<PARTAGE> /mnt/corpus-root cifs credentials=/etc/smbcredentials/svc-rag,vers=3.1.1,uid=1000,gid=1000,ro,soft,nofail,_netdev,x-systemd.after=/srv/rag-donnees 0 0
 FSTAB
 ```
 
@@ -287,7 +288,7 @@ Tester sans rebooter :
 
 ```bash
 sudo mount -a
-mount | grep fileservice
+findmnt /mnt/corpus-root
 ls /mnt/corpus-root | head -5
 ```
 
@@ -378,7 +379,7 @@ Le message `[GARDE-FOU]` est aussi écrit sur la sortie d'erreur, que la RAG API
 python acl_resolver.py --share //<NOM-FILESERVER>/PartageInexistant --mount /mnt/corpus-root; echo "code retour : $?"
 ```
 
-Ce test par un partage inexistant n'a pas encore été rejoué en lab.
+Validé au rejeu du 19 octobre 2026 : `[GARDE-FOU] 70/70 fichiers en ACL illisible, abandon sans modification`, code 1, Qdrant intact, compte non verrouillé (§0, étape 16).
 
 ### §5.4.3 Premier lancement en dry-run
 
@@ -386,7 +387,7 @@ Toujours tester en dry-run avant d'écrire dans Qdrant.
 
 ```bash
 python acl_resolver.py \
-    --share //<NOM-FILESERVER>/FileService \
+    --share //<NOM-FILESERVER>/<PARTAGE> \
     --mount /mnt/corpus-root \
     --dry-run
 ```
@@ -407,7 +408,7 @@ Depuis la 2.22.0, les droits sont des **SID** (identifiants de sécurité Window
 
 ```bash
 python acl_resolver.py \
-    --share //<NOM-FILESERVER>/FileService \
+    --share //<NOM-FILESERVER>/<PARTAGE> \
     --mount /mnt/corpus-root
 ```
 
@@ -415,7 +416,7 @@ python acl_resolver.py \
 
 ```bash
 curl -s http://localhost:6333/collections/documents/points/scroll \
-  -H "Content-Type: application/json" \
+  -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
   -d '{
     "filter": {"must": [{"key": "source",
       "match": {"value": "CLIENTS/ClientA/contrat_maintenance.docx"}}]},
@@ -441,7 +442,7 @@ acl_updated_at: 2026-09-10T11:03:30Z
 
 ### §5.4.6 Rapport de quarantaine ACL
 
-Le résolveur signale les fichiers présents sur le partage mais absents de Qdrant. Le rapport JSON est sauvegardé dans le dossier du script.
+Le résolveur signale les fichiers présents sur le partage mais absents de Qdrant. Le rapport JSON est écrit à l'emplacement donné par `--rapport` (par exemple `/var/log/rag/rapport_acl_initial.json`, §0 étape 13).
 
 ```
 RAPPORT ACL RESOLVER
@@ -477,23 +478,23 @@ docker exec rag-api python3 -c "import ldap3; print('ldap3 OK')"
 
 ### §5.5.3 Variables d'environnement
 
-Ajouter dans `/root/rag-stack/.env` :
+Dans `/root/rag-stack/.env` (déjà présentes dans `env.example`) :
 
 ```bash
-LDAP_HOST=<IP-DC>
+LDAP_HOST=<NOM-DC>.votre-domaine.ch
 LDAP_PORT=636
 LDAP_USE_TLS=true
 LDAP_BASE_DN=DC=votre-domaine,DC=ch
 LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
 LDAP_BIND_PWD=<mot-de-passe-fort>
-LDAP_DOMAIN=DOMAINE
+LDAP_DOMAIN=VOTRE-DOMAINE
 # Groupes intégrés, « Tout le monde », « Utilisateurs authentifiés » (§16.5.3) : 0 par défaut
 ACL_SID_ETENDUS=0
 ```
 
 > **`LDAP_BIND_PWD` en clair dans le `.env` :** ce compte lit l'annuaire AD complet pour résoudre les groupes. Traiter le fichier `.env` comme un secret : droits 600, propriétaire root, jamais commité dans Git. En production, préférer un gestionnaire de secrets (HashiCorp Vault, Azure Key Vault) ou les secrets Docker Swarm.
 
-Ajouter dans le service `rag-api` du `docker-compose.yml` :
+`LDAP_HOST` est le **nom** du contrôleur de domaine, pas son adresse IP : la connexion chiffrée vérifie que le certificat présenté porte ce nom. Le service `rag-api` du `docker-compose.yml` du dépôt transmet déjà ces variables :
 
 ```yaml
 rag-api:
@@ -550,10 +551,11 @@ Dans l'interface admin Open WebUI, naviguer vers **Settings → Admin → Authen
 | Paramètre | Valeur |
 |---|---|
 | Étiquette | Annuaire AD |
-| Hôte | `<IP-DC>` |
+| Hôte | `<NOM-DC>.votre-domaine.ch` (le nom, pas l'adresse IP) |
 | Port | 636 |
 | TLS | Activé |
-| Validate Certificate | Désactivé |
+| Validate Certificate | Activé |
+| Chemin du certificat | `/etc/ssl/certs/ad-chain.pem` (§0 étape 4D) |
 | DN de l'application | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
 | Mot de passe DN de l'application | mot de passe de svc-rag |
 | Attribut pour l'e-mail | `userPrincipalName` |
@@ -563,7 +565,7 @@ Dans l'interface admin Open WebUI, naviguer vers **Settings → Admin → Authen
 
 > **Port 636 obligatoire :** le port 389 est refusé par les contrôleurs de domaine Windows Server récents qui exigent LDAP Signing. LDAPS sur le port 636 contourne cette contrainte.
 
-> **Validate Certificate désactivé :** les DC Windows utilisent des certificats auto-signés par défaut. Pour la production, exporter le certificat CA du DC et le pointer via le champ "Chemin du certificat". Voir §9.
+> **Lab sans autorité de certification :** un contrôleur de domaine sans certificat délivré par une autorité de l'entreprise ne peut pas être vérifié. Dans ce seul cas, un lab peut désactiver *Validate Certificate* : la connexion reste chiffrée, mais l'identité du serveur n'est plus contrôlée, et le mot de passe de `svc-rag` pourrait être envoyé à un imposteur. Jamais en production : y installer une autorité, puis exporter son certificat (§0 étape 2, §9.2).
 
 > **Base de recherche `DC=votre-domaine,DC=ch` :** certains comptes sont dans le conteneur `CN=Users` (par défaut Windows) plutôt que dans une OU. La base `OU=UTILISATEURS` ne les trouvera pas. La base racine couvre tous les cas.
 
@@ -713,7 +715,7 @@ Le routage se fait automatiquement à l'indexation selon le chemin relatif du fi
 > **Ces règles sont structurelles.** Leur non-respect produit un routage silencieusement incorrect sans message d'erreur : des documents confidentiels peuvent se retrouver dans `documentation` sans cloisonnement ACL effectif.
 
 **Règle 1 : dossiers de documentation uniquement à la racine du partage.**
-Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine de `\\SERVEUR\FileService`. Le routage compare le **début** du chemin relatif du fichier au nom déclaré : un dossier `CLIENTS\DOIT4EVERYONE\` n'est pas reconnu, et ses fichiers restent dans `documents`. Un chemin avec sous-dossier (`CLIENTS/DOC`) serait reconnu par le code, mais contredit cette règle : `deploy.sh` le refuse.
+Un dossier déclaré dans `DOCUMENTATION_PATHS` doit être directement à la racine du partage indexé (`\\<NOM-FILESERVER>\<PARTAGE>`). Le routage compare le **début** du chemin relatif du fichier au nom déclaré : un dossier `CLIENTS\DOIT4EVERYONE\` n'est pas reconnu, et ses fichiers restent dans `documents`. Un chemin avec sous-dossier (`CLIENTS/DOC`) serait reconnu par le code, mais contredit cette règle : `deploy.sh` le refuse.
 
 **Règle 2 : droits AD sur les dossiers racine.**
 Seul un administrateur peut créer des dossiers à la racine du partage.
@@ -721,8 +723,8 @@ Seul un administrateur peut créer des dossiers à la racine du partage.
 **Règle 3 : modifier `DOCUMENTATION_PATHS` exige une réindexation complète.**
 
 ```bash
-# Modifier .env, puis :
-docker compose build --no-cache rag-api && docker compose up -d rag-api
+# Modifier le .env (le vrai fichier : nano /srv/rag-donnees/secrets/.env), puis :
+cd /root/rag-stack && docker compose up -d rag-api
 cd /root/rag-pipeline && source .venv/bin/activate
 set -a && source /root/rag-stack/.env && set +a
 # --reset efface les collections : refusé (2.23.0) si un dossier est illisible, le corpus vide
@@ -741,8 +743,9 @@ unset TOKEN
 **Règle 4 : vérifier les deux compteurs après chaque réindexation.**
 
 ```bash
-curl -s http://localhost:6333/collections/documents | python3 -m json.tool | grep points_count
-curl -s http://localhost:6333/collections/documentation | python3 -m json.tool | grep points_count
+set -a && source /root/rag-stack/.env && set +a
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents | python3 -m json.tool | grep points_count
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documentation | python3 -m json.tool | grep points_count
 # Les deux compteurs additionnés doivent correspondre au total des chunks indexés.
 ```
 
@@ -752,4 +755,4 @@ curl -s http://localhost:6333/collections/documentation | python3 -m json.tool |
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026. Les commandes et résultats présentés sont issus de sessions de test réelles.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026, puis sur des VM neuves jusqu'au 1er novembre 2026 (2.23.0). Les commandes et résultats présentés sont issus de sessions de test réelles.*

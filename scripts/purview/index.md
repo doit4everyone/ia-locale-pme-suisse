@@ -24,11 +24,11 @@ description: "Sonde de déchiffrement Purview et scripts de test du service mip-
 
 Le code du service lui-même est dans [`../stack-ia-locale/mip-service/`](../stack-ia-locale/mip-service/).
 
+Copier d'abord les deux scripts et le document de test dans `/root/rag-pipeline`, monté dans le conteneur sous `/rag-pipeline`. `MIP_TOKEN` et `MIP_URL` sont déjà dans l'environnement du conteneur (Compose) : ne pas les repasser par `-e`, une variable vide dans le terminal remplacerait le jeton.
+
 ```bash
-# Depuis le conteneur rag-api, par le réseau interne
-docker exec -e MIP_TOKEN=$MIP_TOKEN rag-api python3 /rag-pipeline/test_mip_service.py /rag-pipeline/<document-de-test>.docx
-docker exec -e MIP_TOKEN=$MIP_TOKEN rag-api python3 /rag-pipeline/test_droits.py \
-  <identifiant-etiquette> <proprietaire> <utilisateur1> <utilisateur2>
+docker exec rag-api python3 /rag-pipeline/test_mip_service.py /rag-pipeline/<document-de-test>.docx
+docker exec rag-api python3 /rag-pipeline/test_droits.py <identifiant-etiquette> <proprietaire> <utilisateur1> <utilisateur2>
 ```
 
 Les documents de test copiés dans `/root/rag-pipeline` sont sur le disque système : les supprimer après le test.

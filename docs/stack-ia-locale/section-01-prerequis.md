@@ -17,7 +17,7 @@ description: "Création et configuration de la VM Ubuntu Server 26.04 pour la st
 
 [Retour au sommaire](index.md) | [Section précédente : §0 Démarrage rapide](section-00-quickstart.md) | [Section suivante : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md)
 
-**Statut :** validé sur VM-RAG-LAB, septembre 2026. Machine à un seul disque (§1.5.1) et contrôleur de disque sous VMware Workstation validés sur une VM neuve, octobre 2026 (2.22.3).
+**Statut :** validé sur VM-RAG-LAB, septembre 2026. Machine à un seul disque (§1.5.1) et contrôleur de disque sous VMware Workstation validés sur une VM neuve, octobre 2026 (2.22.3), puis de nouveau sur une VM neuve le 1er novembre 2026 (2.23.0), Docker et volume chiffré compris.
 
 ---
 
@@ -30,6 +30,7 @@ Ce guide a été validé sur la configuration suivante, dans VMware Workstation 
 | vCPU | 4 | 6 | Épingler sur P-cores physiques (voir §1.3) |
 | RAM | 16 Go | 16 Go | Open WebUI + RAG API + Docker Compose complet : environ 8 à 10 Go en charge. Les modèles ne tournent pas dans cette VM, mais sur le serveur de modèles (§2) |
 | Disque | 80 Go | 100 Go | Contrôleur **SCSI** (LSI Logic) dans VMware Workstation, pas NVMe : voir la note ci-dessous |
+| Micrologiciel et TPM | UEFI, TPM 2.0 | UEFI, TPM 2.0 virtuel | Exigés par le déverrouillage automatique du volume chiffré (§1.5). Sous VMware Workstation, l'ajout du TPM chiffre les fichiers de la VM |
 | Réseau | NAT | Réseau lab dédié | Un réseau lab donne accès aux ressources AD, SMB, DNS |
 
 > **Note VMware Workstation :** choisir **1 processeur, 6 cœurs** (et non 2 processeurs × 3 cœurs). Un seul socket évite des problèmes de topologie NUMA. Pilote réseau **vmxnet3** plutôt que e1000.
@@ -117,9 +118,6 @@ echo "deb [arch=$(dpkg --print-architecture) \
 apt update && apt install -y docker-ce docker-ce-cli \
   containerd.io docker-buildx-plugin docker-compose-plugin
 
-# Ajouter l'utilisateur au groupe docker
-usermod -aG docker $USER
-
 # Vérification
 docker --version && docker compose version
 ```
@@ -165,7 +163,7 @@ ls -l /root/rag-stack /etc/rag-certs /etc/rag-tls /var/log/rag
 
 **Deux conséquences à connaître.** Le `.env` est un lien vers un fichier qui n'existe pas encore : `cp` refuse d'y écrire tant qu'on le désigne par le lien, et `sed -i` **remplace** le lien par un vrai fichier, sur le disque système, en clair. On désigne donc toujours le vrai chemin (`/srv/rag-donnees/secrets/.env`, ou `$(readlink -f /root/rag-stack/.env)`), comme à l'étape 7 du §0. De même, le dossier `n8n_data` doit appartenir à l'utilisateur 1000 : `chown -R 1000:1000 /srv/rag-donnees/n8n_data` (sur le vrai dossier, pas sur le lien).
 
-> **Le groupe `docker` équivaut à root** : un compte qui en est membre peut lire toutes les variables des conteneurs (`docker inspect`) et monter n'importe quel fichier de la VM. N'y ajouter aucun compte ordinaire. La commande `usermod -aG docker $USER` de §1.4, exécutée en root, ne concerne que root.
+> **Le groupe `docker` équivaut à root** : un compte qui en est membre peut lire toutes les variables des conteneurs (`docker inspect`) et monter n'importe quel fichier de la VM. N'y ajouter aucun compte ordinaire : les commandes de la stack se lancent en root (`sudo -i`).
 
 ### §1.5.1 Machine à un seul disque
 
@@ -222,4 +220,4 @@ Pour une installation **existante**, déjà en service : voir la migration de §
 
 ---
 
-*Validé sur VM-RAG-LAB, Ubuntu 26.04 LTS (resolute), août 2026. Commandes testées en mode CPU sans GPU.*
+*Validé sur VM-RAG-LAB, Ubuntu 26.04 LTS (resolute), août et septembre 2026, puis sur des VM neuves en octobre et le 1er novembre 2026.*

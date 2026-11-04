@@ -202,7 +202,7 @@ Dans le lab, une seule application détient `Content.SuperUser` : `RAG-Purview-D
 
 ### §14.5.1 Rôle et points d'accès
 
-`mip-service` est un service ASP.NET 8 construit sur le SDK MIP de Microsoft (`File SDK`). Il tourne dans un conteneur, joignable uniquement depuis le réseau Docker de la stack, sans port publié, et exige un jeton à chaque appel.
+`mip-service` est un service ASP.NET 8 construit sur le SDK MIP de Microsoft (`File SDK`). Le support de .NET 8 par Microsoft prend fin le 10 novembre 2026 : la migration vers .NET 10 est à faire, après vérification de la compatibilité du SDK MIP (point 176 du suivi). Il tourne dans un conteneur, joignable uniquement depuis le réseau Docker de la stack, sans port publié, et exige un jeton à chaque appel.
 
 | Point d'accès | Entrée | Sortie |
 |---|---|---|
@@ -374,7 +374,7 @@ Q3 est volontairement écrite **sans accents** : voir §14.8.1.
 | **Étiquette non affichée dans la réponse** | Copilot affiche l'étiquette la plus prioritaire des sources ; ce RAG ne le fait pas encore |
 | **Délai de prise en compte** | Un changement de droits sur une étiquette est appliqué au plus tard après `MIP_CACHE_TTL` |
 | **Double chiffrement** | Non testé ; les documents concernés ne peuvent pas être déchiffrés par le service |
-| **Recherche sensible aux accents** | La recherche par mots-clés compare les mots tels quels : « règlement » et « reglement » sont deux mots différents. Le règlement du lab, rédigé sans accents, n'était pas trouvé avec une question accentuée. Une normalisation des accents est prévue |
+| **Recherche sensible aux accents** (corrigé en 2.23.0) | Lors de cette validation, la recherche par mots-clés comparait les mots tels quels : « règlement » et « reglement » étaient deux mots différents, et le règlement du lab, rédigé sans accents, n'était pas trouvé avec une question accentuée. Depuis la 2.23.0, l'index plein texte de Qdrant ignore accents et majuscules (§8.6) |
 | **Questions vagues** | Avec deux documents très proches (les deux documents de test Finances), une question générale peut faire remonter l'un et écarter l'autre. Ce n'est pas un sujet de sécurité, mais une limite de la recherche |
 
 ### §14.8.2 Tâches d'arrière-plan d'Open WebUI

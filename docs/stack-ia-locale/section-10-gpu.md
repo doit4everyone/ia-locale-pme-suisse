@@ -624,7 +624,7 @@ Le GPU ne porte que les modèles. Tout le reste tourne en mémoire système, et 
 
 | Composant | Mémoire mesurée dans le lab |
 |---|---|
-| VM RAG complète, sans reranker | 2 à 3 Go utilisés ; la VM tourne avec 8 Go |
+| VM RAG complète, sans reranker | 2 à 3 Go utilisés ; la VM du lab tournait alors avec 8 Go (le §1.1 en recommande 16, pour la marge des synchronisations et des mises à jour) |
 | Ollama sur le serveur de modèles, en fin de campagne de mesure (2.23.0) | Cache des prompts par défaut (8 Gio par modèle) : `qwen3:14b` 19 Go de mémoire privée, `qwen3:4b-instruct` 12,9 Go. Avec `LLAMA_ARG_CACHE_RAM=2048` : 12,8 et 6,3 Go, environ 12 Go de moins pour les deux, sans écart net de qualité (80 réponses conformes sur 105 contre 83, sans graine fixée, 0 élément interdit) et durée comparable (18,5 min contre 20,1) |
 | Reranker `bge-reranker-v2-m3`, réglages par défaut | **9 Go**, préchauffage compris |
 | Reranker bridé (`--max-batch-tokens 4096`) | 1,2 à 1,9 Go |
@@ -651,7 +651,7 @@ Les colonnes `si` et `so` (entrées et sorties du swap par seconde) doivent rest
 | Journal d'Ollama après une question riche | `truncated = 0` : aucune coupure du contexte, pour le modèle comme pour le juge |
 | Mémoire partagée (Gestionnaire des tâches) | Quelques centaines de Mo, stable |
 | Jeu de questions | Score comparable à la référence, aucun élément interdit, refus tenus |
-| Test de cloisonnement | 40 sur 40, et en mode complet sur les cas Purview, écriture seule et refus explicite |
+| Test de cloisonnement | Aucune fuite : 40 sur 40 sur le corpus de la première campagne, en mode complet sur les cas Purview, écriture seule et refus explicite ; 207 verdicts, tous OK, avec le corpus de démonstration (§16.3) |
 | Synthèse Teams | Durée et score sur la réunion de test |
 | `vmstat` dans la VM | Pas de swap actif |
 | Avec vLLM | Les contrôles de §2.4.6 à §2.4.8, dont l'accès depuis le conteneur |
@@ -821,7 +821,7 @@ La dernière colonne relit la mesure du 4B comme le faisait la 2.21.8, sans la r
 
 ### Ce que coûte vLLM
 
-Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son pare-feu, un compilateur C, le choix d'un calcul qui se passe du compilateur CUDA, la désactivation d'un échantillonneur, un réglage de la mémoire au centième près, deux serveurs à surveiller, une clé d'API, et l'adaptation de la RAG API à l'API d'OpenAI (`LLM_API=openai`). Ollama, c'est une installation, six variables et trois téléchargements.
+Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son pare-feu, un compilateur C, le choix d'un calcul qui se passe du compilateur CUDA, la désactivation d'un échantillonneur, un réglage de la mémoire au centième près, deux serveurs à surveiller, une clé d'API, et l'adaptation de la RAG API à l'API d'OpenAI (`LLM_API=openai`). Ollama, c'est une installation, sept variables et trois téléchargements.
 
 ### Verdict
 
@@ -834,6 +834,6 @@ Le gain se paie en complexité. La mise en place du lab a demandé : WSL2 et son
 
 [Retour au sommaire](index.md) | [Section précédente : §9 Sécurité et durcissement](section-09-securite.md) | [Section suivante : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md)
 
-*Validé en lab sur VM-RAG-LAB (Ubuntu Server, 8 Go) et LABO-G9 (Intel Core i7-14700, 64 Go, NVIDIA RTX 5060 Ti 16 Go), octobre 2026.*
+*Validé en lab sur VM-RAG-LAB (Ubuntu Server, 8 Go) et LABO-G9 (Intel Core i7-14700, 64 Go, NVIDIA RTX 5060 Ti 16 Go), octobre 2026 ; seconde campagne (§10.7, §10.8) fin octobre 2026, rejouée sur une VM neuve le 1er novembre 2026.*
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

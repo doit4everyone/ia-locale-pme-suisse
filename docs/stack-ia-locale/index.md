@@ -18,7 +18,7 @@ description: "Déploiement complet d'un pipeline RAG local conçu pour faciliter
 
 ---
 
-## §0 Objet, périmètre et avertissements
+## Objet, périmètre et avertissements
 
 ### Architecture validée en lab
 
@@ -43,13 +43,13 @@ Ce guide documente un déploiement avec cloisonnement documentaire réel basé s
 
 Ce guide est adapté aux organisations dont les utilisateurs ont des droits différenciés sur les documents : données RH, financières, clients, direction.
 
-Pour un corpus sans restriction d'accès (base de connaissances commune, documentation technique interne), **ne pas modifier le code** pour retirer le cloisonnement : le jour où un document sensible arrive sur le partage, il serait visible de tous. Donner plutôt la lecture NTFS à un groupe large dont les utilisateurs sont membres. Attention : « Utilisateurs du domaine », groupe principal des comptes, n'est pas lu par la RAG API (point auth.1 du suivi).
+Pour un corpus sans restriction d'accès (base de connaissances commune, documentation technique interne), **ne pas modifier le code** pour retirer le cloisonnement : le jour où un document sensible arrive sur le partage, il serait visible de tous. Donner plutôt la lecture NTFS à un groupe large dont les utilisateurs sont membres. Depuis la 2.22.0, « Utilisateurs du domaine », groupe principal des comptes, est pris en compte : un document lisible par ce groupe est visible de tous les comptes du domaine (§16.5.3).
 
 ### Avertissements
 
 > Tous les secrets présents dans ce guide sont en `changeme-*` : depuis la 2.21.0, la RAG API refuse de démarrer tant qu'il en reste un dans le `.env` (§16.6). Open WebUI et n8n sont servis en HTTPS par Nginx (§9.8), avec un certificat auto-signé tant que celui de l'autorité interne n'est pas installé. C'est une configuration de lab. Ne pas transposer telle quelle en production sans avoir appliqué §9, §15, §16 et §17.
 
-> Le serveur RAG concentre le contenu de plusieurs partages sans les ACL d'origine. Ses sauvegardes deviennent aussi sensibles que les sources. À traiter comme un actif de valeur, pas comme une VM de service ordinaire.
+> Le serveur RAG concentre en un seul endroit le texte de plusieurs partages : chaque extrait garde ses droits d'origine, mais le serveur, ses disques et ses sauvegardes deviennent aussi sensibles que l'ensemble des sources. À traiter comme un actif de valeur, pas comme une VM de service ordinaire.
 
 ### Convention de statut
 
@@ -61,7 +61,7 @@ Chaque section porte en tête une de ces trois lignes :
 
 ### Contexte de validation
 
-Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstation, d'abord sans GPU, puis avec une carte NVIDIA RTX 5060 Ti 16 Go (§10). VM Ubuntu Server 26.04 LTS, 16 Go RAM, 6 vCPU. Les mesures de performance données dans ce guide valent pour cette configuration et ne sont pas transposables à d'autres environnements.
+Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstation, d'abord sans GPU, puis avec une carte NVIDIA RTX 5060 Ti 16 Go (§10). VM Ubuntu Server 26.04 LTS, 16 Go RAM, 6 vCPU (VM-RAG-LAB a tourné avec 8 Go pendant les mesures du §10). Les mesures de performance données dans ce guide valent pour cette configuration et ne sont pas transposables à d'autres environnements.
 
 ---
 
@@ -72,9 +72,9 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 | Section | Contenu | Statut |
 |---|---|---|
 | [§0 Démarrage rapide](section-00-quickstart.md) | Déploiement de bout en bout, de la création de la VM au contrôle final : chiffrement du volume des données et TPM compris (étape 4), Ollama ou vLLM, Microsoft 365 en option (étape 17) | Publié |
-| [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker | Publié |
+| [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker, volume des données chiffré (LUKS2, TPM) | Publié |
 | [§2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | Choisir le moteur selon le nombre d'utilisateurs simultanés, installer Ollama ou vLLM (WSL2), vérifications, pièges, bascule, DGX Spark | Publié |
-| [§3 Infrastructure : Qdrant, n8n, RAG API, Open WebUI](section-03-docker-compose.md) | Docker Compose, Qdrant, n8n, RAG API complète, Open WebUI | Publié |
+| [§3 Docker Compose : stack complète](section-03-docker-compose.md) | Qdrant, n8n, RAG API complète, Open WebUI, Nginx, sauvegarde et restauration de Qdrant | Publié |
 | [§4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md) | Validation backend avec Onyx CE, déploiement Open WebUI, LDAP AD, cloisonnement | Publié |
 | [§5 Connecteurs SMB et cloisonnement documentaire](section-05-connecteurs.md) | Montage SMB, ACL NTFS, résolution LDAP, filtrage Qdrant par identité | Publié |
 | [§6 Cline : agent de codage](section-06-cline.md) | Agent de codage IA, configuration VS Code, Ollama | Publié |
@@ -120,6 +120,7 @@ La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synth
 - **une procédure de mise à jour** d'une installation existante, validée sur la VM connectée à Microsoft 365 ;
 - **le résumé d'un document entier** (lecture par morceaux puis synthèse), que le RAG ne sait pas faire en choisissant des extraits (§10.10) ;
 - **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal) ;
+- **la migration de `mip-service` vers .NET 10**, le support de .NET 8 prenant fin le 10 novembre 2026 (point 176 du suivi) ;
 - **une section « Du lab à la production »**, qui listera ce qu'un déploiement en entreprise exige en plus du lab.
 
 ---

@@ -7,7 +7,7 @@ description: "Procédure de tests à dérouler après toute modification de la s
 
 Les valeurs propres au lab (comptes, documents, nombre de groupes, nombre de cas) sont à remplacer par celles de votre environnement.
 
-Chaque bloc se copie tel quel dans le terminal de la VM, en root. Aucune variable ni fonction à préparer. Après chaque bloc, comparer avec la colonne « Attendu ». Un test en échec arrête la procédure : on corrige, ou on revient en arrière (§11).
+Chaque bloc se copie tel quel dans le terminal de la VM, en root. Aucune variable ni fonction à préparer. Après chaque bloc, comparer avec la colonne « Attendu ». Un test en échec arrête la procédure : on corrige, ou on revient en arrière (point 11 ci-dessous).
 
 ---
 
@@ -52,13 +52,15 @@ cd /root/rag-stack
 docker compose ps
 ```
 
-**Attendu :** cinq lignes, toutes `Up` : `mip-service`, `n8n`, `open-webui`, `qdrant`, `rag-api`.
+**Attendu :** cinq lignes, toutes `Up` : `n8n`, `nginx`, `open-webui`, `qdrant`, `rag-api`. Une sixième, `mip-service`, avec Purview (`COMPOSE_PROFILES=purview`, §14), et `reranker` si le reranker tourne dans le Compose (§10.8).
 
 ```bash
 docker logs rag-api 2>&1 | grep -E "SÉCURITÉ|ERROR|Traceback" | tail -5
 ```
 
 **Attendu :** aucune ligne.
+
+Avec Purview seulement :
 
 ```bash
 docker logs mip-service 2>&1 | grep -i "prêt" | tail -1
@@ -88,7 +90,7 @@ docker exec rag-api python3 -c "import httpx; print(httpx.get('http://localhost:
 
 ## 5. Identité et résolution Entra
 
-Une question au nom d'un compte aux droits limités, puis lecture du journal.
+Une question au nom d'un compte aux droits limités, puis lecture du journal. Sans l'extension Entra ID (`ENTRA_ENABLED=false`), seule la ligne `[AUTH] /v1 user` est attendue.
 
 Depuis la 2.21.0, la RAG API n'accepte que l'identité **signée** par Open WebUI (§16.6 du guide). Les commandes de cette procédure signent elles-mêmes un jeton, avec `OWUI_JWT_SECRET` présent dans l'environnement du conteneur, exactement comme Open WebUI. Une identité transmise dans un en-tête simple est refusée (403).
 
@@ -187,7 +189,7 @@ Construction du contexte :
 docker logs rag-api 2>&1 | grep "Contexte étendu" | tail -1
 ```
 
-**Attendu :** une ligne du type `Contexte étendu : N chunks de '…', 6 document(s) complémentaire(s) (12 extraits), M copie(s) écartée(s)`. Noter le document principal, N et M.
+**Attendu :** une ligne du type `Contexte étendu : N chunks de '…' (idx …) dans 'documents', 6 document(s) complémentaire(s) (E extraits), M copie(s) écartée(s)`, avec au plus 4 extraits par document complémentaire (24 au total). Noter le document principal, N, E et M.
 
 Sources réellement envoyées au modèle :
 
@@ -206,10 +208,10 @@ La réponse varie d'une exécution à l'autre (température 0.2) : relancer ce t
 Réglages réellement appliqués dans le conteneur :
 
 ```bash
-docker exec rag-api printenv | grep -E "CANDIDATS|PRINCIPAL_MAX|CONTEXT_OTHER_DOCS|EXTRAITS_PAR|MAX_CONTEXT_CHUNKS"
+docker exec -i -w /app rag-api python3 -c "import main; print(main.CANDIDATS, main.PRINCIPAL_MAX, main.CONTEXT_OTHER_DOCS, main.EXTRAITS_PAR_COMPLEMENT, main.MAX_CONTEXT_CHUNKS, main.CONTEXT_THRESHOLD)"
 ```
 
-**Attendu :** soit aucune ligne pour les quatre premiers (valeurs par défaut du code : 30, 9, 6, 2), soit les valeurs du `.env` si elles ont été ajoutées au Compose.
+**Attendu :** `30 9 6 4 14 0.01` avec les valeurs du guide (§8.9, §10.6). Un `0.75` en dernière position signifie que `CONTEXT_THRESHOLD` manque au `.env` ou au Compose : le contexte n'est plus étendu autour du document en tête.
 
 ---
 
@@ -293,7 +295,7 @@ docker logs -t --since 2m rag-api 2>&1 | grep -c "\[AUTH\] /v1"
 docker exec -it rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json
 ```
 
-**Attendu :** dernière ligne `Bilan : {'OK': 40}`. Aucune `FUITE`, aucun `ABSENT`, aucun `REFUS À TORT`.
+**Attendu :** dernière ligne `Bilan : {'OK': …}`, avec en plus des `INFO` pour les comptes sans attendu (dans le lab : `{'OK': 79, 'INFO': 2}` ; avec le corpus de démonstration, 207 `OK`, §16.3). Aucune `FUITE`, aucun `ABSENT`, aucun `REFUS À TORT`.
 
 En cas de `FUITE` : arrêter immédiatement le service, puis analyser.
 
@@ -303,7 +305,7 @@ cd /root/rag-stack && docker compose stop rag-api
 
 ### 9.2 Mode complet : deux cas représentatifs
 
-Une à deux minutes par cas. Le `-it` permet d'arrêter le test avec Ctrl+C.
+Une à deux minutes par cas. Le `-it` permet d'arrêter le test avec Ctrl+C. `S14-FIN` et `NTFS-DEPOT` sont des cas du fichier du lab : les remplacer par deux cas du vôtre. Le nombre de `OK` est celui des comptes qui ont un attendu pour ce cas.
 
 ```bash
 docker exec -it rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipeline/cas_cloisonnement.json --mode complet --cas S14-FIN
@@ -319,7 +321,7 @@ docker exec -it rag-api python3 /rag-pipeline/test_cloisonnement.py /rag-pipelin
 
 Un `MANQUÉ` n'est pas un problème de sécurité : le document autorisé n'est simplement pas remonté par la recherche.
 
-### 9.3 Droit retiré et recherche par mots-clés (2.21.3)
+### 9.3 Tests unitaires et droit retiré
 
 Tests unitaires, sans Qdrant ni modèle, quelques secondes :
 
@@ -345,6 +347,15 @@ docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py
 
 **Attendu :** `32 tests OK`.
 
+Contrôle des citations et reclassement (reranker), même principe :
+
+```bash
+docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py
+docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py
+```
+
+**Attendu :** `28 tests OK`, puis `6 tests OK`.
+
 Test sur le vrai Qdrant (§16.5.1), hors de l'heure pleine : un document lisible par le compte. Le test compose la question avec les mots les plus rares du document.
 
 ```bash
@@ -365,7 +376,7 @@ docker exec rag-api pkill -f test_cloisonnement
 
 ### 10.1 Synchronisation
 
-Dans n8n, ouvrir **RAG Stack - Synchronisation corpus**, cliquer **Execute workflow**, attendre la fin, puis :
+Dans n8n, ouvrir **RAG Stack - Synchronisation corpus (Schedule + Email quarantaine)**, cliquer **Execute workflow**, attendre la fin, puis :
 
 ```bash
 docker logs rag-api 2>&1 | grep -E "\[SYNC\] Terminé|\[CLOISONNEMENT\]" | tail -2
@@ -373,7 +384,7 @@ docker logs rag-api 2>&1 | grep -E "\[SYNC\] Terminé|\[CLOISONNEMENT\]" | tail 
 
 **Attendu :**
 - `[SYNC] Terminé : success=True, quarantine=0, errors=0`
-- `[CLOISONNEMENT] 40/40 conformes, fuites=0, refus à tort=0, absents=0, erreurs=0`
+- `[CLOISONNEMENT] N/N conformes, fuites=0, refus à tort=0, absents=0, erreurs=0`, N étant le nombre de `OK` du test 9.1
 
 et **aucun courriel** reçu.
 
@@ -381,11 +392,11 @@ et **aucun courriel** reçu.
 grep -o '"entrees_allowed_sans_lecture": [0-9]*' /var/log/rag/rapport_acl.json
 ```
 
-**Attendu :** `"entrees_allowed_sans_lecture": 2`.
+**Attendu :** le nombre d'entrées d'autorisation qui ne donnent pas la lecture (2 dans le lab) ; il ne doit pas changer après une modification de la stack.
 
 ### 10.2 Synthèse Teams
 
-Dans n8n, ouvrir le workflow Teams, cliquer **Execute workflow**.
+Dans n8n, ouvrir **RAG Stack - Synthèse des réunions Teams (brouillon à l'organisateur)**, cliquer **Execute workflow**.
 
 **Attendu :** exécution terminée sans erreur 401.
 
@@ -434,7 +445,7 @@ Réponse obtenue fin septembre 2026 avec le compte `direction@votre-domaine.ch` 
 | 8 | Open WebUI | | Requêtes par question : |
 | 9.1 | Cloisonnement, mode accès | | |
 | 9.2 | Cloisonnement, mode complet | | |
-| 9.3 | Droit retiré, mots-clés | | Document : |
+| 9.3 | Tests unitaires, droit retiré | | Document : |
 | 10.1 | Synchronisation et contrôle | | |
 | 10.2 | Synthèse Teams | | |
 | 10.3 | Journal | | |

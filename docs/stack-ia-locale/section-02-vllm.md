@@ -82,6 +82,7 @@ C'est la configuration la plus éprouvée du lab. Les détails, et la façon de 
 [Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "1", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "1h", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_NO_CLOUD", "1", "User")
+[Environment]::SetEnvironmentVariable("LLAMA_ARG_CACHE_RAM", "2048", "User")
 ```
 
 | Variable | Effet |
@@ -92,6 +93,7 @@ C'est la configuration la plus éprouvée du lab. Les détails, et la façon de 
 | `OLLAMA_NUM_PARALLEL` | Une question à la fois (voir §2.2) |
 | `OLLAMA_KEEP_ALIVE` | Modèles gardés en mémoire une heure après usage (5 minutes par défaut) |
 | `OLLAMA_NO_CLOUD` | Désactive les modèles hébergés chez Ollama : rien ne doit sortir de vos machines |
+| `LLAMA_ARG_CACHE_RAM` | Limite à 2 Gio par modèle le cache des questions en mémoire centrale (8 Gio par défaut) : environ 12 Go de mémoire du serveur en moins pour les deux modèles, sans perte de qualité mesurée (§10.1). Validé sous Windows ; sous Linux, non essayé |
 
 Quitter ensuite Ollama depuis la zone de notification (clic droit sur l'icône, puis *Quit*), et le relancer : les variables ne sont lues qu'au démarrage.
 
@@ -110,7 +112,7 @@ ollama list
 New-NetFirewallRule -DisplayName "Ollama (stack RAG)" -Direction Inbound -Protocol TCP -LocalPort 11434 -RemoteAddress <IP-VM> -Action Allow
 ```
 
-> **Ollama tourne dans la session de l'utilisateur.** Fermer la fenêtre du Bureau à distance laisse la session ouverte et Ollama actif ; **se déconnecter** ferme la session et arrête Ollama. La stack n'a alors plus de modèle (§10.1).
+> **Ollama tourne dans la session de l'utilisateur.** Fermer la fenêtre du Bureau à distance laisse la session ouverte et Ollama actif ; **se déconnecter** ferme la session et arrête Ollama. La stack n'a alors plus de modèle (§10.1). Sur un poste qui porte aussi les VM sous VMware Workstation, la fermeture de session suspend en plus les VM (constaté dans le lab).
 
 ### Sous Linux
 
@@ -524,7 +526,7 @@ Ce qui précède est validé sur un réseau de lab de confiance. Trois points ne
 |---|---|---|
 | Transport | La VM parle aux deux serveurs en HTTP : la clé d'API et les questions circulent sans chiffrement. La clé protège l'accès, pas le contenu des échanges. | Limiter l'accès aux ports 8000 et 8001 à l'adresse de la VM, placer les deux machines sur un réseau isolé, ou chiffrer le lien (TLS). Non testé en lab. |
 | Modèles téléchargés | Les commandes de §2.4.4 désignent les modèles par leur nom de dépôt, qui renvoie à la version courante au moment du téléchargement. | Relever la révision de chaque modèle et en conserver une copie locale validée (le répertoire `/opt/hf`). vLLM propose l'option `--revision` : à vérifier dans la documentation de votre version, non testé en lab. Aucun des deux modèles du guide n'exige plus `--trust-remote-code` (2.23.0) : un modèle qui l'exigerait exécuterait du code Python fourni avec lui, à lire avant de l'autoriser. |
-| Charge | Seules deux séries de questions simultanées ont été mesurées (§10.12). | Mesurer la charge attendue (par exemple quatre questions simultanées, avec les durées maximales et la mémoire de la carte) avant d'annoncer une capacité. |
+| Charge | Mesurée dans le lab de une à huit questions simultanées (§10.12) : 250 à 350 questions par heure, 8 questions posées à la même seconde toutes servies, la dernière en un peu moins de 2 minutes. Une seule série par palier, sur la carte et le corpus du lab. | Mesurer sur la machine de production, avec le corpus et le mélange de questions de l'organisation (script `s10/charge_s10.py`), avant d'annoncer une capacité. |
 
 ---
 

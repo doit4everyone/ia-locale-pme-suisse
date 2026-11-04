@@ -200,7 +200,7 @@ Qdrant compare les valeurs de `autorises[]` en respectant la casse. `auth.py` et
 
 ## §13.5 Documents chiffrés par Purview
 
-Un document protégé par une étiquette avec chiffrement n'est pas un fichier Office ouvert, mais un **conteneur OLE** chiffré. L'indexeur le détecte, ne l'indexe pas, retire ses éventuels anciens chunks, et le compte dans le rapport (« chiffré, non indexé »). Rien n'est indexé à moitié. Le déchiffrement fera l'objet de la section Purview : il devra respecter à la fois les permissions SharePoint et les droits de l'étiquette.
+Un document protégé par une étiquette avec chiffrement n'est pas un fichier Office ouvert, mais un **conteneur OLE** chiffré. L'indexeur le détecte, ne l'indexe pas, retire ses éventuels anciens chunks, et le compte dans le rapport (« chiffré, non indexé »). Rien n'est indexé à moitié. Le déchiffrement fait l'objet du §14 : il respecte à la fois les permissions SharePoint et les droits de l'étiquette.
 
 > **Le chiffrement protège un fichier, pas son contenu une fois copié.** Dans le lab, les contrats de travail originaux étaient chiffrés, mais le site RH contenait des **copies en clair** : exports PDF et copies Word. Ces copies sont indexées, visibles des seuls membres du site RH, conformément aux droits SharePoint. Mais un outil d'IA rend ce genre de copie beaucoup plus facile à trouver que ne le fait une arborescence de dossiers. Un inventaire du contenu indexé, avant la mise en service, permet de les repérer.
 
@@ -270,13 +270,15 @@ SP_CERT_THUMBPRINT=<EMPREINTE-CERTIFICAT-SHAREPOINT>
 SP_KEY_PATH=/etc/rag-certs/rag-sharepoint.key
 # URL complètes, séparées par des virgules ; vide = étape désactivée
 SP_SITES=https://<tenant>.sharepoint.com/sites/RH,https://<tenant>.sharepoint.com/
-SP_EXCLUDE_DRIVES=Preservation Hold Library
+SP_EXCLUDE_DRIVES='Preservation Hold Library'
 # Au-delà, fichier non indexé ; déjà indexé, ses extraits sont supprimés (2.21.6)
 SP_MAX_FILE_MB=50
 SYNC_TIMEOUT_SHAREPOINT=900
 LLM_NUM_CTX=16384
-JUDGE_NUM_CTX=8192
+JUDGE_NUM_CTX=16384
 ```
+
+La valeur de `SP_EXCLUDE_DRIVES` contient des espaces : elle reste **entre apostrophes**, sinon `source .env` échoue. `JUDGE_NUM_CTX` doit valoir au moins `LLM_NUM_CTX` (§10.6) ; vide, il en prend la valeur.
 
 `SP_SITES` doit contenir exactement les sites accordés en §13.3.2. Un site listé mais non accordé est signalé en erreur dans le rapport ; un site accordé mais non listé n'est pas indexé. **Deux sites ne peuvent pas finir par le même nom** (`/sites/RH` et `/teams/RH`, casse ignorée) : leurs fichiers auraient la même source dans Qdrant (`SharePoint/RH/…`), donc les mêmes identifiants d'extraits, et le nettoyage d'un site pourrait effacer ceux de l'autre. Depuis la 2.23.0, `sp_indexer.py` refuse cette configuration et n'indexe aucun site ; la synchronisation le traite comme une configuration incomplète. De même, aucun dossier de premier niveau du partage de fichiers ne doit s'appeler `SharePoint`.
 
@@ -286,7 +288,8 @@ JUDGE_NUM_CTX=8192
 # Scripts : pas de reconstruction, le dossier est monté dans le conteneur
 sudo cp /home/<utilisateur>/sp_indexer.py /home/<utilisateur>/sharepoint/sonde_sharepoint.py /root/rag-pipeline/
 
-# Variables transmises au conteneur
+# Variables transmises au conteneur (déjà présentes dans le Compose du dépôt ;
+# ces lignes ne servent qu'à une installation antérieure)
 cd /root/rag-stack
 cp docker-compose.yml docker-compose.yml.bak
 grep -q 'SP_CLIENT_ID=' docker-compose.yml || for v in JUDGE_NUM_CTX LLM_NUM_CTX SYNC_TIMEOUT_SHAREPOINT SP_MAX_FILE_MB SP_EXCLUDE_DRIVES SP_SITES SP_KEY_PATH SP_CERT_THUMBPRINT SP_CLIENT_ID; do
@@ -339,7 +342,7 @@ Chaque document de test contient une phrase avec un code unique (par exemple « 
 
 ### §13.7.2 Simulation et indexation
 
-**Validé en lab, septembre 2026 :** 5 sites, 36 fichiers indexés, 10 chiffrés et non indexés, 2 fichiers Excel ignorés, 2 identifiants introuvables (le groupe supprimé et le rôle d'annuaire). Permissions traduites des documents de test toutes conformes avant écriture. Second passage : les 36 fichiers « inchangés », sans téléchargement. Intégration à `/admin/sync` : les trois étapes enchaînées, index BM25 reconstruit (325 chunks dans `documents`, dont 250 issus de SharePoint).
+**Validé en lab, septembre 2026 :** 5 sites, 36 fichiers indexés, 10 chiffrés et non indexés, 2 fichiers Excel ignorés, 2 identifiants introuvables (le groupe supprimé et le rôle d'annuaire). Permissions traduites des documents de test toutes conformes avant écriture. Second passage : les 36 fichiers « inchangés », sans téléchargement. Intégration à `/admin/sync` : les trois étapes enchaînées, index BM25 reconstruit (index en mémoire, jusqu'à la 2.22 ; 325 chunks dans `documents`, dont 250 issus de SharePoint).
 
 ### §13.7.3 Matrice de cloisonnement
 
@@ -362,7 +365,7 @@ Le guide de dépannage existe en deux exemplaires, sur un site réservé au serv
 
 ### §13.8.1 Limites
 
-**Questions générales.** Pendant les tests, « Que dit la politique RH ? » n'a pas trouvé le document, alors que « Combien de jours de vacances prévoit la politique RH ? » l'a trouvé. Le premier diagnostic mettait en cause le découpage : les chunks commencent par leur titre de section (« Temps de travail et congés »), et le titre du document n'apparaît que dans le premier. Mais ce test a eu lieu pendant la panne décrite en §13.8.3 : la copie SMB du même document était alors invisible pour tous. Une fois la lecture du partage rétablie, la même question générale a obtenu une réponse complète et correctement citée. L'effet du titre absent des chunks n'est donc pas démontré : il sera mesuré au §10, en répétant le titre du document en tête de chaque chunk et en comparant les réponses sur un même jeu de questions.
+**Questions générales.** Pendant les tests, « Que dit la politique RH ? » n'a pas trouvé le document, alors que « Combien de jours de vacances prévoit la politique RH ? » l'a trouvé. Le premier diagnostic mettait en cause le découpage : les chunks commencent par leur titre de section (« Temps de travail et congés »), et le titre du document n'apparaît que dans le premier. Mais ce test a eu lieu pendant la panne décrite en §13.8.3 : la copie SMB du même document était alors invisible pour tous. Une fois la lecture du partage rétablie, la même question générale a obtenu une réponse complète et correctement citée. L'effet du titre absent des chunks n'était donc pas démontré. Il a été mesuré depuis : depuis la 2.23.0, chaque extrait porte le nom et le titre de son document (§10.7), ce qui supprime les confusions entre documents de même structure.
 
 **Formats.** Les fichiers Excel ne sont pas indexés, comme pour le SMB.
 
@@ -374,11 +377,11 @@ Le guide de dépannage existe en deux exemplaires, sur un site réservé au serv
 
 ### §13.8.2 Fenêtre de contexte d'Ollama
 
-`main.py` ne demandait pas de fenêtre de contexte : Ollama appliquait sa valeur par défaut, **4 096 tokens** dans le lab, alors que le contexte du RAG (15 chunks, prompt système et réponse) peut la dépasser. Ollama tronque alors **sans erreur**. `main.py` demande maintenant ses fenêtres explicitement : `LLM_NUM_CTX` (16 384, identique à la synthèse Teams, pour éviter un rechargement du modèle) et `JUDGE_NUM_CTX` (8 192, y compris pour l'appel qui maintient le juge en mémoire).
+`main.py` ne demandait pas de fenêtre de contexte : Ollama appliquait sa valeur par défaut, **4 096 tokens** dans le lab, alors que le contexte du RAG (15 chunks, prompt système et réponse) peut la dépasser. Ollama tronque alors **sans erreur**. `main.py` demande maintenant ses fenêtres explicitement : `LLM_NUM_CTX` (16 384, identique à la synthèse Teams, pour éviter un rechargement du modèle) et `JUDGE_NUM_CTX` (8 192 à l'époque, y compris pour l'appel qui maintient le juge en mémoire ; 16 384 depuis, la fenêtre du juge devant couvrir celle du modèle, §10.6).
 
 > **Ne pas utiliser `OLLAMA_CONTEXT_LENGTH` sur le serveur Ollama.** Ce réglage s'applique à tous les modèles, y compris le juge, dont il augmente la mémoire sans raison. Et une valeur écrite à la française, avec une espace fine insécable (« 16 384 »), est **ignorée sans erreur** : Ollama affiche un avertissement, visible seulement avec `ollama ps`, et revient à sa valeur par défaut.
 
-Sur la carte graphique de 16 Go prévue pour le §10, les fenêtres actuelles ne tiendront pas ensemble (16,3 Go mesurés sur CPU) : leur dimensionnement sera fait au §10, sur la base des tokens réellement consommés.
+Sur la carte graphique de 16 Go, les deux fenêtres de 16 384 tokens tiennent ensemble avec les trois modèles, grâce au cache sur 8 bits (§10.2).
 
 ### §13.8.3 Constats de gouvernance
 

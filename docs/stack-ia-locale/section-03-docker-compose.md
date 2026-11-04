@@ -17,7 +17,7 @@ description: "Déploiement de Qdrant, n8n, la RAG API FastAPI et Open WebUI via 
 
 [Retour au sommaire](index.md) | [Section précédente : §2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | [Section suivante : §4 Interfaces utilisateur : Onyx CE et Open WebUI](section-04-onyx.md)
 
-**Statut :** validé sur VM-RAG-LAB, septembre 2026. Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (§11 et suivantes) documente les connecteurs Microsoft 365.
+**Statut :** validé sur VM-RAG-LAB, septembre 2026, puis à chaque rejeu du §0 sur une VM neuve, en dernier lieu le 1er novembre 2026 (2.23.0 : Qdrant 1.20.0, n8n 2.45.6). Ce guide déploie la stack complète avec authentification LDAP AD et filtrage ACL NTFS. La Partie 3 (§11 et suivantes) documente les connecteurs Microsoft 365.
 
 ---
 
@@ -40,7 +40,7 @@ chmod 750 /var/log/rag
 cd ~/rag-stack
 ```
 
-`/var/log/rag` accueille le journal nLPD et les rapports de synchronisation. Ce répertoire doit exister avant le premier lancement, sinon le montage Docker échoue silencieusement. `nginx` reçoit la configuration du frontal (`rag.conf`, §9.8) ; le certificat et sa clé vont dans `/etc/rag-tls`.
+`/var/log/rag` accueille le journal nLPD et les rapports de synchronisation. Ce répertoire doit exister avant le premier lancement, sinon le montage Docker échoue silencieusement. **Avec le volume chiffré** (§1.5, §0 étape 4C), `qdrant_data`, `n8n_data`, `openwebui_data` et `/var/log/rag` existent déjà, sous forme de liens vers `/srv/rag-donnees` : `mkdir -p` les laisse tels quels, mais ne pas lancer `chmod` sur ces liens à la place de leur cible. `nginx` reçoit la configuration du frontal (`rag.conf`, §9.8) ; le certificat et sa clé vont dans `/etc/rag-tls`.
 
 ---
 
@@ -76,8 +76,8 @@ QDRANT_API_KEY=changeme-qdrant-api-key
 DOCUMENTATION_COLLECTION=documentation
 DOCUMENTATION_PATHS=DOIT4EVERYONE
 
-# Identité affichée dans le prompt système
-ORG_NAME=Axonix SA
+# Identité affichée dans le prompt système (entre apostrophes : le nom contient un espace)
+ORG_NAME='Axonix SA'
 
 # Authentification API (générer avec openssl rand -hex 32)
 # Valeur d'exemple, vide, trop courte (< 32 caractères) ou jetons identiques :
@@ -97,37 +97,36 @@ LOG_FILE=/var/log/rag/rag-queries.jsonl
 REPORT_DIR=/var/log/rag
 
 # Annuaire AD (authentification LDAP par les scripts de synchronisation)
-LDAP_HOST=DC01.votre-domaine.ch
+LDAP_HOST=<NOM-DC>.votre-domaine.ch
 LDAP_PORT=636
 LDAP_USE_TLS=true
 LDAP_BASE_DN=DC=votre-domaine,DC=ch
-LDAP_BIND_DN=CN=svc-rag,OU=Services,DC=votre-domaine,DC=ch
+LDAP_BIND_DN=CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch
 LDAP_BIND_PWD=REMPLACER
-LDAP_DOMAIN=VOTREDOMAINE
+LDAP_DOMAIN=VOTRE-DOMAINE
 LDAP_CA_CERT=/etc/ssl/certs/ad-chain.pem
 
 # Synchronisation corpus (§7)
 SYNC_SCRIPTS_DIR=/rag-pipeline
-SMB_SHARE=//SERVEUR/FileService
+SMB_SHARE=//<NOM-FILESERVER>/<PARTAGE>
 SMB_MOUNT=/mnt/corpus-root
 SMB_USER=svc-rag
 SMB_PASSWORD=REMPLACER
-SMB_DOMAIN=VOTREDOMAINE
+SMB_DOMAIN=VOTRE-DOMAINE
 
 # Open WebUI
 WEBUI_SECRET_KEY=changeme-openwebui-secret
 JWT_EXPIRES_IN=4h
 
 # Paramètres avancés du pipeline
+# Obsolète depuis la 2.17.2 (remplacé par CANDIDATS), sans effet.
 TOP_K=20
-# Obsolète depuis v2.17.2 : remplacé par CANDIDATS. Conservé sans effet.
+# Seuil d'extension du contexte (score RRF du premier candidat, au moins 0,011) :
+# à 0.01, l'extension a toujours lieu. Ne pas retirer : le défaut du code, 0.75,
+# la supprimerait.
 CONTEXT_THRESHOLD=0.01
-# Score RRF minimum pour déclencher l'extension de contexte.
-# Les scores RRF sont dans [0, ~0.033] avec k=60 et deux listes.
-# 0.01 déclenche l'extension sur presque toutes les questions.
-# Ne pas dépasser 0.05.
-MAX_CONTEXT_CHUNKS=14
 # Plafond d'extraits envoyés au modèle quand aucun document n'est en tête.
+MAX_CONTEXT_CHUNKS=14
 # Diversité des sources (§8.9) : les valeurs par défaut, validées en lab sur CPU,
 # s'appliquent si ces lignes restent commentées.
 # CANDIDATS=30                 # candidats retenus par la recherche avant sélection
@@ -139,7 +138,6 @@ CHUNK_OVERLAP=20
 MIN_CHUNK_WORDS=8
 # JUDGE_KEEP_ALIVE=2h       → rétention du juge en mémoire Ollama après chaque appel
 #                             Format Ollama : "5m", "2h", "-1" (indéfiniment)
-#                             Passer à -1 une fois le GPU installé
 ```
 
 > **Point critique :** `LLM_BASE_URL` et `EMBED_BASE_URL` doivent utiliser l'adresse réseau du serveur de modèles (ou la passerelle Docker `172.17.0.1` s'il tourne sur la VM elle-même), jamais `localhost`. Depuis l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même. Pour vérifier l'IP de la passerelle Docker : `ip addr show docker0 | grep "inet "`.
@@ -200,7 +198,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py auth.py .
+COPY main.py auth.py teams.py teams_graph.py .
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
@@ -667,16 +665,26 @@ unset TOKEN
 ├── qdrant_data/            ← données Qdrant (persist)
 ├── n8n_data/               ← workflows n8n (persist)
 ├── openwebui_data/         ← données Open WebUI (persist)
+├── nginx/rag.conf          ← frontal HTTPS (§9.8)
+├── mip-service/            ← service Purview, profil facultatif (§14)
 └── api/
     ├── Dockerfile
     ├── requirements.txt
     ├── main.py             ← RAG API complète
-    └── auth.py             ← résolution LDAP
+    ├── auth.py             ← résolution LDAP et Entra ID
+    ├── teams.py            ← synthèse des réunions Teams (§12)
+    └── teams_graph.py
 
 /root/rag-pipeline/         ← scripts d'indexation (montés en lecture seule)
 ├── indexer.py
 ├── acl_resolver.py
+├── sp_indexer.py           ← SharePoint (§13)
+├── test_*.py, diag_sid.py  ← tests de sécurité et diagnostic (§0 étape 16, §16.5)
+├── s10/                    ← campagne de mesure (§10)
 └── .venv/                  ← environnement Python pour lancement hôte
+
+/etc/rag-tls/               ← certificat de Nginx (rag.crt, rag.key)
+/etc/rag-certs/             ← certificats des applications Entra (§11 à §14)
 
 /var/log/rag/               ← logs nLPD et rapports de synchro
 ├── rag-queries.jsonl
@@ -692,4 +700,4 @@ unset TOKEN
 
 ---
 
-*Validé sur VM-RAG-LAB, Ubuntu 26.04 LTS (resolute), Docker 29.7.2, août 2026.*
+*Validé sur VM-RAG-LAB, Ubuntu 26.04 LTS (resolute), Docker 29.7.2, août 2026 ; puis sur une VM neuve le 1er novembre 2026, Docker 29.9.2 et Compose 5.6.1. Avec le volume chiffré (§1.5), `.env`, les dossiers de données, `/var/log/rag`, `/etc/rag-tls` et `/etc/rag-certs` sont des liens vers `/srv/rag-donnees`.*

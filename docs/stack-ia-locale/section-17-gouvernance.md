@@ -157,18 +157,18 @@ La journalisation (§9.4) enregistre qui a interrogé le RAG et quels documents 
 | Les versions des composants : correctifs publiés, alertes de sécurité | Trimestrielle | Revue des versions (§16.8) |
 | La supervision alerte réellement | Semestrielle | Essai : synchronisation suspendue, courriel reçu (§16.10) |
 | Lecture des journaux d'accès : rien d'anormal | Selon le secteur | `/var/log/rag/rag-queries.jsonl` |
-| Qualité des réponses sur un jeu de questions de référence | Périodique | À définir au §10 |
+| Qualité des réponses sur un jeu de questions de référence | Après chaque changement de modèle ou de réglage, et périodiquement | Jeu de questions et `s10/mesure_s10.py` (§10.3), sur des questions tirées du corpus de l'organisation |
 
 > **Un audit utile est un audit qui change quelque chose.** Relever qu'une application détient un droit de déchiffrement injustifié, qu'un compte a gardé une appartenance obsolète, ou qu'un certificat expire dans trois semaines n'a d'intérêt que si une action suit. Chaque contrôle de ce tableau doit avoir un responsable (§17.2) et une suite définie en cas d'anomalie.
 
 ## §17.7 Ce qui relève du passage en production
 
-Ce guide documente un **lab** validé, pas une exploitation en entreprise. Plusieurs exigences de production dépassent son périmètre et feront l'objet d'une section « Du lab à la production ». La 2.21.0 en traite une partie :
+Ce guide documente un **lab** validé, pas une exploitation en entreprise. Plusieurs exigences de production dépassent son périmètre. La 2.21.0 en traite une partie :
 
 | Exigence | État |
 |---|---|
 | Images Docker figées par version et empreinte, dépendances Python verrouillées | **Fait** (2.21.0, §16.8) |
-| Intégration continue, inventaire des composants, analyse des vulnérabilités | À faire |
+| Intégration continue, inventaire des composants, analyse des vulnérabilités | Partiel : contrôles automatiques du dépôt à chaque publication (syntaxe, liens, secrets) ; inventaire des composants et analyse des vulnérabilités à faire |
 | Frontal HTTPS devant Open WebUI et n8n | **Fait** (2.21.0, §9.8) |
 | Identité signée entre Open WebUI et la RAG API | **Fait** (2.21.0, §16.6) |
 | Refus de démarrer sur une valeur d'exemple ou une clé absente | **Fait** (2.21.0, §16.6) |

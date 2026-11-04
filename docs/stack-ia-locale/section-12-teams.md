@@ -17,7 +17,7 @@ description: "Récupération des transcriptions Teams via Microsoft Graph, compt
 
 [Retour au sommaire](index.md) | [Section précédente : §11 Prérequis Microsoft 365](section-11-prerequis-ms365.md) | [Section suivante : §13 Connecteur SharePoint Online](section-13-sharepoint.md)
 
-**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026. Toute la chaîne a été exécutée sur un tenant Microsoft 365 réel, de la réunion Teams jusqu'à l'email reçu par l'organisateur, y compris le déclenchement planifié par n8n sans intervention manuelle.
+**Statut :** validé en lab sur VM-RAG-LAB, septembre 2026, sur le processeur avec `qwen2.5:14b` ; synthèse remesurée sur la carte graphique avec `qwen3:14b` en octobre 2026 (§10.4, §10.5). Toute la chaîne a été exécutée sur un tenant Microsoft 365 réel, de la réunion Teams jusqu'à l'email reçu par l'organisateur, y compris le déclenchement planifié par n8n sans intervention manuelle.
 
 ---
 
@@ -157,7 +157,7 @@ Remove-DistributionGroupMember -Identity "GRP-Teams-CompteRendu-IA" -Member "pre
 
 ### §12.4.2 App Registration `RAG-Teams-Reader`
 
-Troisième application de la Partie 3, dédiée à la lecture des transcriptions. Elle ne donne accès ni à l'annuaire (rôle de `RAG-Identity-Resolver`, §11) ni aux documents SharePoint.
+Application de la Partie 3 dédiée à la lecture des transcriptions. Elle ne donne accès ni à l'annuaire (rôle de `RAG-Identity-Resolver`, §11) ni aux documents SharePoint.
 
 Certificat, généré sur la VM (même procédure qu'en §11.3) :
 
@@ -229,7 +229,7 @@ ApplicationAccessPolicy RAG-Teams-Reader-Policy {RAG-Teams-Reader-Policy}
 
 Les identifiants des transcriptions traitées sont conservés dans `/var/log/rag/teams_state.json`, **jamais leur contenu**, et purgés après 130 jours, au-delà de l'expiration des transcriptions dans Teams. Une transcription n'est marquée comme traitée qu'une fois son brouillon produit.
 
-Le nombre de synthèses par passage est limité (`TEAMS_MAX_PAR_SYNC`, 3 par défaut) : chaque synthèse prend une à deux minutes sur CPU.
+Le nombre de synthèses par passage est limité (`TEAMS_MAX_PAR_SYNC`, 3 par défaut) : chaque synthèse prenait une à deux minutes sur CPU, environ 11 secondes sur la carte graphique pour la réunion de test (§10.4).
 
 ### §12.5.3 Synthèse
 
@@ -269,7 +269,7 @@ TEAMS_STATE_FILE=/var/log/rag/teams_state.json
 
 La lecture du groupe utilise `RAG-Identity-Resolver` : les variables `ENTRA_*` de §11 doivent être renseignées.
 
-Ajout des variables au service `rag-api` du `docker-compose.yml` :
+Le `docker-compose.yml` du dépôt transmet déjà ces variables. Sur une installation antérieure, les ajouter au service `rag-api` :
 
 ```bash
 cd /root/rag-stack
@@ -303,7 +303,7 @@ Toutes les heures → POST /teams/sync
 ```
 
 1. **Import from File** → `n8n-teams-sync.json`. Le workflow est importé inactif.
-2. Nœud **POST /teams/sync** : remplacer `<ADMIN_TOKEN>` par la valeur du `.env`. Le délai d'attente est de 30 minutes, pour laisser le temps à plusieurs synthèses sur CPU.
+2. Nœud **POST /teams/sync** : y sélectionner l'identifiant `RAG API - ADMIN_TOKEN` (type Header Auth, créé au §0, étape 15) ; aucun jeton n'est écrit dans le nœud. Le délai d'attente est de 30 minutes, pour laisser le temps à plusieurs synthèses sur CPU.
 3. Nœuds email : identifiant SMTP, expéditeur et adresse d'alerte.
 4. Tester avec **Execute workflow**, puis activer.
 
@@ -313,7 +313,7 @@ Toutes les heures → POST /teams/sync
 
 **Mention n8n.** Par défaut, n8n ajoute la phrase « This email was sent automatically with n8n » en fin de message. Le fichier fourni la désactive (`appendAttribution: false` dans les options des nœuds email). Validé en lab : la mention n'apparaît plus, même si l'option n'est pas proposée dans la liste « Add option » de ce nœud importé.
 
-**Token.** Comme pour les autres workflows, le token figure en clair dans le nœud HTTP, et donc dans tout export du workflow. L'identifiant n8n de type **Header Auth** (en-tête `Authorization`, valeur `Bearer` suivie du token) le stocke chiffré et le retire des exports. Recommandé en production pour tous les workflows de la stack.
+**Jeton.** Comme les autres workflows du dépôt, celui-ci passe le jeton d'administration par l'identifiant n8n de type **Header Auth** : n8n le stocke chiffré, et il n'apparaît ni dans le nœud ni dans un export du workflow (§16.7). Les premières versions de ce workflow l'écrivaient en clair dans le nœud HTTP.
 
 > **Le serveur d'envoi fait partie du périmètre.** Le brouillon contient des données personnelles. S'il passe par le serveur SMTP du tenant Microsoft 365, il reste dans le même périmètre que la transcription d'origine. Un serveur d'envoi tiers ferait sortir le compte rendu de ce périmètre.
 
@@ -424,9 +424,9 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 **Types de réunions.** Seules les réunions **planifiées** sont prises en charge. Les réunions de canal et les réunions créées sans événement de calendrier ne sont pas renvoyées par l'API.
 
-**Performance sur CPU.** Une à deux minutes pour quelques minutes de réunion. Une réunion d'une heure prendra nettement plus longtemps. Quand le modèle est partagé avec le RAG, qui l'utilise avec une fenêtre de 4 096 tokens, Ollama doit le recharger à chaque changement de taille de fenêtre : environ 50 secondes de différence mesurées en lab. Deux solutions, à évaluer avec un GPU (§10) : une fenêtre commune, ou un modèle dédié à la synthèse (`SUMMARY_MODEL`).
+**Performance sur CPU.** Une à deux minutes pour quelques minutes de réunion. Une réunion d'une heure prendra nettement plus longtemps. Quand le modèle était partagé avec le RAG, qui l'utilisait alors avec une fenêtre de 4 096 tokens, Ollama devait le recharger à chaque changement de taille de fenêtre : environ 50 secondes de différence mesurées en lab. Réglé depuis sur la carte : le RAG et la synthèse utilisent le même modèle avec la même fenêtre de 16 384 tokens, et la synthèse de la réunion de test prend environ 11 secondes (§10.4, §10.5).
 
-**Limites du modèle.** Avec qwen2.5:14b, les ajustements de prompt déplacent les erreurs sans les supprimer. Le gain suivant viendra d'un modèle plus récent de même taille ou d'un matériel plus puissant, à mesurer avec le même fichier et la même grille.
+**Limites du modèle.** Avec qwen2.5:14b, les ajustements de prompt déplacent les erreurs sans les supprimer. `qwen3:14b`, mesuré depuis avec le même fichier et la même grille, obtient 11 sur 14, contre 11 à 12 pour `qwen2.5:14b` : l'écart est dans le bruit (§10.5). Le gain viendra d'un modèle plus grand, à mesurer de la même façon.
 
 **Expiration.** Les transcriptions expirent après 120 jours dans le tenant : une réunion non traitée dans ce délai ne pourra plus l'être.
 
@@ -478,4 +478,4 @@ python3 -c "import json; d=json.load(open('/tmp/teams_sync.json')); print(d['bro
 
 ---
 
-*Validé en lab sur VM-RAG-LAB, septembre 2026, sur un tenant Microsoft 365 synchronisé par Entra Connect, avec qwen2.5:14b sur CPU. Les durées et scores mesurés valent pour cette configuration.*
+*Validé en lab sur VM-RAG-LAB, septembre 2026, sur un tenant Microsoft 365 synchronisé par Entra Connect, avec qwen2.5:14b sur CPU. Les durées et scores mesurés valent pour cette configuration ; sur la carte graphique, avec qwen3:14b : §10.4 et §10.5.*

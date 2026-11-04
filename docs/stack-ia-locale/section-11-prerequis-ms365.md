@@ -133,7 +133,7 @@ La Partie 3 utilise trois App Registrations distinctes, chacune limitée aux dro
 | `RAG-Teams-Reader` | Lire les transcriptions des réunions Teams | Microsoft Graph : `OnlineMeetingTranscript.Read.All`, limitée par une stratégie d'accès applicatif Teams au groupe d'adhésion | §12 |
 | `RAG-SharePoint-Indexer` | Lire les documents SharePoint, leurs permissions et les groupes des sites | Microsoft Graph et SharePoint : `Sites.Selected`, lecture accordée site par site | §13 |
 
-Séparer les applications limite l'impact d'une compromission : le certificat de résolution d'identité ne donne accès à aucun document, celui de la lecture des transcriptions ne donne accès qu'aux réunions des organisateurs du groupe d'adhésion, et celui de l'indexeur ne donne accès ni à l'annuaire complet ni aux sites qui ne lui ont pas été accordés. Le déchiffrement des documents protégés par Purview, à venir, fera l'objet d'une application distincte.
+Séparer les applications limite l'impact d'une compromission : le certificat de résolution d'identité ne donne accès à aucun document, celui de la lecture des transcriptions ne donne accès qu'aux réunions des organisateurs du groupe d'adhésion, et celui de l'indexeur ne donne accès ni à l'annuaire complet ni aux sites qui ne lui ont pas été accordés. Le déchiffrement des documents protégés par Purview fait l'objet d'une application distincte (§14).
 
 > **Ne jamais utiliser `Sites.Read.All`** pour l'indexation : cette permission donne accès à tous les sites du tenant, y compris ceux qui ne doivent pas être indexés. Si une ancienne inscription dispose de cette permission, elle doit être supprimée, ainsi que l'application d'entreprise associée.
 
@@ -191,7 +191,7 @@ Aucun redémarrage n'est nécessaire.
 Une nouvelle fonction `get_entra_groups()` interroge Graph et retourne :
 
 - `entra:usr:<object-id>` pour le compte lui-même ;
-- `entra:grp:<object-id>` pour chaque groupe, imbrications comprises (`transitiveMemberOf`, l'équivalent de la récursion `memberOf` faite côté LDAP). Les rôles d'annuaire et les unités administratives sont écartés.
+- `entra:grp:<object-id>` pour chaque groupe, imbrications comprises (`transitiveMemberOf`, l'équivalent côté Graph de `tokenGroups` lu par LDAP, §16.5.3). Les rôles d'annuaire et les unités administratives sont écartés.
 
 `get_user_groups()` n'appelle cette fonction que si `ENTRA_ENABLED=true`. Le comportement en cas d'échec est conçu pour ne jamais élargir l'accès :
 
@@ -219,7 +219,7 @@ ENTRA_KEY_PATH=/etc/rag-certs/rag-identity.key
 ENTRA_CERT_THUMBPRINT=<EMPREINTE-SHA1-SANS-DEUX-POINTS>
 ```
 
-Ajouts au service `rag-api` du `docker-compose.yml` :
+Le `docker-compose.yml` du dépôt contient déjà ces variables et le montage de `/etc/rag-certs`. Sur une installation antérieure à la Partie 3, les ajouts au service `rag-api` sont les suivants :
 
 ```yaml
     environment:
@@ -302,25 +302,26 @@ Aucun chunk orphelin détecté.
 **Protection des chunks SharePoint.** Un faux chunk `sharepoint`, sans aucun droit d'accès (`autorises` vide, donc invisible pour tous les utilisateurs), est inséré dans Qdrant, puis une synchronisation complète est lancée :
 
 ```bash
+cd /root/rag-stack
+set -a && source .env && set +a     # QDRANT_API_KEY et ADMIN_TOKEN, sans les afficher
 python3 - <<'EOF'
-import json, urllib.request
+import json, os, urllib.request
 base = "http://localhost:6333/collections/documents"
-dim = json.load(urllib.request.urlopen(base))["result"]["config"]["params"]["vectors"]["size"]
+cle = {"api-key": os.environ["QDRANT_API_KEY"]}
+dim = json.load(urllib.request.urlopen(urllib.request.Request(base, headers=cle)))["result"]["config"]["params"]["vectors"]["size"]
 body = {"points": [{"id": "00000000-0000-0000-0000-00000000f001", "vector": [0.01] * dim,
         "payload": {"source": "sharepoint/TEST/test-v4.docx", "source_type": "sharepoint",
                     "text": "test v4", "autorises": [], "interdits": []}}]}
 req = urllib.request.Request(base + "/points?wait=true", data=json.dumps(body).encode(),
-                             method="PUT", headers={"Content-Type": "application/json"})
+                             method="PUT", headers={"Content-Type": "application/json", **cle})
 print(urllib.request.urlopen(req).read().decode())
 EOF
 
-TOKEN=$(grep '^ADMIN_TOKEN=' .env | cut -d= -f2-)
 docker compose exec n8n wget -qO- --post-data='' \
-  --header="Authorization: Bearer $TOKEN" \
+  --header="Authorization: Bearer $ADMIN_TOKEN" \
   http://rag-api:8080/admin/sync | python3 -m json.tool
-unset TOKEN
 
-curl -s http://localhost:6333/collections/documents/points/00000000-0000-0000-0000-00000000f001 \
+curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections/documents/points/00000000-0000-0000-0000-00000000f001 \
   | python3 -m json.tool | head -8
 ```
 
@@ -330,9 +331,9 @@ Nettoyage du chunk de test, puis contrôle des compteurs, qui doivent revenir à
 
 ```bash
 curl -s -X POST "http://localhost:6333/collections/documents/points/delete?wait=true" \
-  -H "Content-Type: application/json" \
+  -H "api-key: $QDRANT_API_KEY" -H "Content-Type: application/json" \
   -d '{"points": ["00000000-0000-0000-0000-00000000f001"]}'
-docker compose exec n8n wget -qO- http://rag-api:8080/stats
+docker compose exec n8n wget -qO- --header="Authorization: Bearer $ADMIN_TOKEN" http://rag-api:8080/stats
 ```
 
 ### §11.6.2 Extension Entra ID
@@ -382,6 +383,7 @@ C'est la démonstration de §11.1.3 : le groupe dynamique « Tous les utilisateu
 **Test 3 : extension activée.**
 
 ```bash
+cd /root/rag-stack
 sed -i --follow-symlinks 's/^ENTRA_ENABLED=false/ENTRA_ENABLED=true/' .env
 docker compose up -d rag-api
 ```
