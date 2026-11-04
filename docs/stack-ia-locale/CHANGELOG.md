@@ -4,6 +4,21 @@ Toutes les modifications notables de ce repo sont documentées ici.
 
 ---
 
+## [2.23.1] : Novembre 2026
+
+Version de documentation : le démarrage rapide (§0) suffit désormais pour un déploiement complet.
+
+### Documentation
+
+- `section-00-quickstart.md` (point 193) : l'étape 4 décrit elle-même la création de la VM (UEFI, TPM virtuel, contrôleur SCSI), l'installation d'Ubuntu et de Docker, le chiffrement du volume des données dans l'espace libre du LVM, l'inscription du TPM, l'ouverture au démarrage sans doublon dans `/etc/crypttab` et `/etc/fstab`, la condition de démarrage de Docker, le déverrouillage de secours, les liens vers le volume, la mise à jour du dbx avant le déploiement et un redémarrage de validation. Ces commandes étaient jusqu'ici réparties entre le §1, le §1.5, le §1.5.1 et le §15.3. L'étape 6 copie aussi `test_revalidation_bm25.py`, `test_echec_droits.py`, `test_reranker.py` et `s10/` ; la checklist contrôle ces tests et le volume chiffré ; l'étape 3A ajoute `LLAMA_ARG_CACHE_RAM` ; le reranker est signalé en option (§10.8).
+- `section-01-prerequis.md` : renvois vers les étapes 4B et 4C du §0.
+
+### Indexation
+
+- `indexer.py` (point 192) : avec `--reset`, le rapport des fichiers en erreur ne prétend plus que l'ancienne version est conservée : les collections ont été effacées. Message seulement.
+
+---
+
 ## [2.23.0] : Novembre 2026
 
 Qdrant passe à la 1.20 : la recherche par mots-clés quitte la mémoire de la RAG API pour l'index plein texte de Qdrant, filtré par les droits dans la requête. Le modèle d'embedding recommandé devient `bge-m3`, chaque extrait porte le nom de son document, et le reranker peut tourner sur la carte du serveur de modèles. Mesures sur un corpus de démonstration enrichi (35 questions, trois passages). Validé sur Qdrant 1.20.0 ; son premier correctif fera l'objet d'une version corrective. Rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque : `deploy.sh`, tests de sécurité, cloisonnement 207 verdicts sans fuite, mesure (76 puis 83 réponses conformes sur 105 avec le reranker, aucun élément interdit), sauvegarde et restauration de Qdrant, redémarrage ; ce rejeu a fait corriger `deploy.sh` (point 189) et quelques points du guide (point 190).

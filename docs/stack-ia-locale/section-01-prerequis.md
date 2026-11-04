@@ -124,13 +124,15 @@ usermod -aG docker $USER
 docker --version && docker compose version
 ```
 
-Les commandes se lancent en root (`sudo -i`). Versions validées : **Docker 29.7.2** et **Compose 5.5.0** sur la première installation du lab, puis **Docker 29.9.0** et **Compose 5.6.0** sur une VM neuve, et **Docker 29.9.2** et **Compose 5.6.1** au rejeu du 1er novembre 2026, sur une VM neuve où le dépôt de Docker pour Ubuntu 26.04 (`resolute`) a fourni les versions les plus récentes sans autre manipulation.
+Les commandes se lancent en root (`sudo -i`) ; le §0 (étape 4B) les reprend sur une ligne chacune. Versions validées : **Docker 29.7.2** et **Compose 5.5.0** sur la première installation du lab, puis **Docker 29.9.0** et **Compose 5.6.0** sur une VM neuve, et **Docker 29.9.2** et **Compose 5.6.1** au rejeu du 1er novembre 2026, sur une VM neuve où le dépôt de Docker pour Ubuntu 26.04 (`resolute`) a fourni les versions les plus récentes sans autre manipulation.
 
 ---
 
 ## §1.5 Disque de données chiffré, avant le déploiement
 
 **Statut :** principe et procédure de chiffrement validés en lab (§15.3), et préparation **avant** le premier déploiement validée sur une VM neuve (octobre 2026) : disque ajouté, chiffré, TPM inscrit, redémarrage avec déverrouillage automatique, Docker démarré sur le disque monté. Machine à **un seul disque** (§1.5.1) validée sur une seconde VM neuve le 24 octobre 2026 : volume chiffré dans l'espace libre du LVM, conteneur chiffré dans un fichier, déploiement complet, **redémarrage avec la stack en service**, mise à jour de la liste de révocation du Secure Boot et récupération.
+
+> **Pas à pas :** depuis la 2.23.1, le §0 (étape 4C) reprend toute cette procédure dans l'ordre, pour le cas validé (une VM à un seul disque, solution A du §1.5.1), avec le résultat attendu de chaque commande, la mise à jour du dbx et le redémarrage de validation. Cette section garde les autres cas et les explications.
 
 La stack stocke des extraits de tous les documents indexés, l'historique des conversations, des identifiants et les clés privées des applications Entra. Tout cela doit être sur un disque chiffré **dès sa création** : un chiffrement ajouté après coup laisse des copies en clair sur le disque système, que la suppression n'efface pas (§15.3.4). Le disque chiffré se prépare donc **ici**, avant `deploy.sh`, avant que le `.env` et les clés n'existent.
 

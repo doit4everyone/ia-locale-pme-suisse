@@ -178,6 +178,8 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | 189 | Recherche par mots-clés inactive après la première indexation : la RAG API crée l'index plein texte à son démarrage et après `/admin/sync`, mais `deploy.sh` (comme le §0, étapes 12 et 13) la démarre avant l'indexation, quand les collections n'existent pas, puis lance l'indexeur directement. Questions en vectoriel seul jusqu'à la première synchronisation n8n, sans message (constaté au rejeu du 1er novembre 2026 sur test-rag2 : aucun index `text` dans les deux collections). `deploy.sh` redémarre la RAG API après l'indexation et vérifie la ligne `Recherche par mots-clés dans Qdrant` ; §0, étape 13, même redémarrage | v2.23.0 | 2026-11-01 |
 | 190 | Rejeu du 1er novembre 2026 (2.23.0) : le contrôle d'entrée de l'étape 4 du §0 ne vérifiait pas les liens du §1.5 (point 2), dont l'oubli fait échouer l'étape 5 ; le filtre LDAP d'Open WebUI sans parenthèses (`objectClass=user`) fait échouer la connexion ; `fwupdmgr get-upgrades` peut masquer la mise à jour du dbx sans `fwupdmgr refresh`, et le nom « UEFI dbx » figure aussi dans la liste des appareils sans mise à jour ; la clé du reranker, en lecture seule, ne se remplace qu'après s'être redonné le contrôle total. §0, §15.3.3 et §10.8 corrigés ; rotation du journal vérifiée (`logrotate --debug` accepte le lien `/var/log/rag`, journal créé en `640`) | v2.23.0 | 2026-11-01 |
 | 191 | `indexer.py` (revue externe du 1er novembre 2026) : avec `--reset`, les collections étaient effacées avant de vérifier que le serveur d'embedding calcule (la dimension de `bge-m3` est connue sans l'appeler) ; et un fichier illisible (extracteur en erreur) était traité comme un document vide, ses anciens extraits supprimés sans erreur comptée. Un premier vecteur est calculé avant toute écriture ; une lecture impossible lève `ErreurExtraction`, comptée en erreur (code 2), anciens extraits gardés ; un vrai vide les supprime toujours. Fichiers `.txt` et `.md` lus en UTF-8, sinon en Windows-1252, au lieu de retirer sans le dire les caractères non UTF-8 ; PDF sans texte extractible gardé comme « sans contenu indexable », choix documenté (§5.4.2b) ; décodage strict du secours DOCX ; `--reset` reste destructif pour un fichier illisible après l'effacement, limite documentée (§5.4.2b). 5 tests de plus dans `test_echec_droits.py` (56), dont un vrai fichier Word abîmé et un texte Windows-1252 | v2.23.0 | 2026-11-01 |
+| 192 | `indexer.py` (revue externe du 1er novembre 2026) : avec `--reset`, le rapport annonçait « ancienne version conservée dans Qdrant » pour les fichiers en erreur, alors que les collections venaient d'être effacées. Le rapport distingue maintenant les deux cas : sans `--reset`, ancienne version conservée ; avec `--reset`, fichiers absents de l'index (§5.4.2b). Message seulement : l'indexation ne change pas | v2.23.1 | 2026-11-04 |
+| 193 | §0 incomplet pour un déploiement de bout en bout : la création de la VM, Docker, le chiffrement du volume des données et l'inscription du TPM n'y figuraient que par renvoi (§1, §1.5, §1.5.1, puis §15.3), l'étape la plus délicate répartie sur trois sections. L'étape 4 les décrit maintenant dans l'ordre (4A à 4D), avec le résultat attendu de chaque commande, des ajouts sans doublon dans `/etc/crypttab` et `/etc/fstab`, la mise à jour du dbx faite avant le déploiement, et un redémarrage de validation. L'étape 6 copie aussi les tests de sécurité exigés par `deploy.sh` et la campagne de mesure ; la checklist les contrôle ; l'étape 3A ajoute `LLAMA_ARG_CACHE_RAM` | v2.23.1 | 2026-11-04 |
 | 44 | Identité transmise par en-têtes simples entre Open WebUI et la RAG API : quiconque connaissait `API_TOKEN` pouvait écrire l'adresse d'un autre compte. Open WebUI signe l'identité (`FORWARD_USER_INFO_HEADER_JWT_SECRET`, jeton HS256 de cinq minutes), la RAG API vérifie signature, émetteur et échéance, et ignore les en-têtes simples (403). Validé : compte de test avec ses 17 groupes, en-tête simple refusé, cloisonnement 6/6 | v2.21.0 | 2026-10-18 |
 
 ---
@@ -326,6 +328,15 @@ Ce document suit les points identifiés par audit de sécurité sur le code et l
 | §2 | Réécrit : le serveur de modèles, Ollama ou vLLM ; le contenu sur vLLM en mode CPU est retiré | v2.20.0 |
 | §10.3, §10.4, §10.11, §10.12 | Piège de la synchronisation pendant une mesure, durées actuelles, moteur dans la configuration recommandée, comparaison mesurée d'Ollama et de vLLM | v2.20.0 |
 | Index, §1, §3 | Les deux moteurs ; mémoire de la VM sans vLLM ; extraits du `.env` et du Compose | v2.20.0 |
+
+---
+
+## Corrections documentaires v2.23.1 (novembre 2026)
+
+| Section | Correction | Version |
+|---|---|---|
+| §0 | Étape 4 complète : création de la VM (4A), Docker (4B), volume chiffré, TPM, dbx et redémarrage de validation (4C), accès au domaine (4D) ; tests de sécurité copiés à l'étape 6 et contrôlés dans la checklist ; `LLAMA_ARG_CACHE_RAM` à l'étape 3A ; reranker signalé en option ; fermeture de session Windows (point 193) | v2.23.1 |
+| §1.4, §1.5 | Renvoi vers les étapes 4B et 4C du §0 | v2.23.1 |
 
 ---
 
@@ -583,4 +594,4 @@ Issues du rejeu complet de la 2.22.2 sur une VM neuve à un seul disque (test-ra
 
 ---
 
-*Dernière mise à jour : 1er novembre 2026.*
+*Dernière mise à jour : 4 novembre 2026.*

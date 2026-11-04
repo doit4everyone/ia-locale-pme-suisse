@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). La version 2.23.0 a été rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 51 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. L'essai avec vLLM sur une VM neuve reste à refaire.
+**Statut :** validé en lab, octobre 2026, avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). La procédure a été rejouée deux fois de bout en bout sur une VM Ubuntu 26.04 neuve (disque chiffré, certificats, `deploy.sh`, indexation, droits, Open WebUI, n8n, test de cloisonnement, redémarrages, sauvegarde et restauration de Qdrant). Le second rejeu, du 15 au 17 octobre 2026, a fait corriger le script et ce guide (version 2.20.4). La version 2.21.1, qui ajoute le frontal HTTPS (Nginx), l'identité signée et les versions figées, a été rejouée de bout en bout le 19 octobre 2026 avec Ollama : déploiement, certificat de l'autorité interne, indexation, droits, Open WebUI, n8n, cloisonnement (72 verdicts, aucune fuite), usurpation refusée, garde-fou, ports exposés, redémarrage et supervision. Ce rejeu a fait corriger quelques points (version 2.21.2). La version 2.22.2 a été rejouée de bout en bout les 23 et 24 octobre 2026 sur une VM neuve **à un seul disque** (§1.5.1), avec Ollama et un certificat délivré par l'autorité interne : déploiement par `deploy.sh`, indexation (1 692 extraits), synchronisation, Open WebUI en LDAPS, n8n et courriel d'alerte, refus par adresse IP, usurpation refusée, redémarrage avec la stack en service, supervision, cloisonnement (81 verdicts : 79 OK, 2 INFO, aucune fuite). Ce rejeu a fait corriger quelques points (version 2.22.3). La version 2.23.0 a été rejouée de bout en bout le 1er novembre 2026 sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 56 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. L'essai avec vLLM sur une VM neuve reste à refaire. **Depuis la 2.23.1**, l'étape 4 décrit elle-même la création de la VM, l'installation de Docker, le chiffrement du volume des données et l'inscription du TPM, mise à jour du dbx comprise : ce §0 suffit pour un déploiement complet. Elle reprend les commandes du §1.4, du §1.5.1 (solution A) et du §15.3, telles qu'elles ont été rejouées le 1er novembre 2026 ; sa nouvelle présentation n'a pas encore été rejouée telle quelle.
 
 ---
 
@@ -69,7 +69,7 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 ## Avant de commencer
 
 - **Les droits d'administrateur** sur l'Active Directory et sur le serveur de fichiers.
-- **Une VM Ubuntu Server 26.04** préparée selon le §1 : 6 vCPU, 16 Go de mémoire, 100 Go de disque (contrôleur SCSI sous VMware Workstation, §1.1), Docker installé (§1.4). Préparer aussi le **disque de données chiffré** (§1.5, ou §1.5.1 pour une machine à un seul disque) **avant l'étape 5** : préparé après coup, il laisse des copies en clair des secrets et des données sur le disque système.
+- **De quoi héberger la VM de la stack** : un hyperviseur (VMware Workstation dans le lab) capable de lui donner 6 vCPU, 16 Go de mémoire, 100 Go de disque, un démarrage **UEFI** et un **TPM 2.0** virtuel. L'étape 4 crée la VM, installe Ubuntu Server 26.04 et Docker, et chiffre le volume des données.
 - **Une carte graphique NVIDIA d'au moins 16 Go** sur le serveur de modèles (le lab : une RTX 5060 Ti 16 Go). Sans carte, Ollama fonctionne sur le processeur, mais une question prend une à deux minutes (§10.4) ; vLLM exige une carte.
 - **Un accès à Internet** pendant l'installation : paquets, images Docker, modèles.
 - **Les informations de votre réseau** : l'adresse IP de la VM, celle du serveur de modèles, le nom DNS du contrôleur de domaine, le nom du serveur de fichiers et du partage à indexer.
@@ -87,7 +87,7 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 | 1 | Windows, Active Directory | Créer le compte de service `svc-rag` |
 | 2 | Windows, Active Directory | Exporter le certificat de l'autorité de certification |
 | 3 | Serveur de modèles | Installer **Ollama (3A)** ou **vLLM (3B)** |
-| 4 | VM | Préparer la VM |
+| 4 | Hyperviseur, puis VM | Créer la VM, installer Ubuntu et Docker (4A, 4B), chiffrer le volume des données et inscrire le TPM (4C), préparer l'accès au domaine (4D) |
 | 5 | VM | Monter le partage de fichiers |
 | 6 | VM | Récupérer les scripts du dépôt |
 | 7 | VM | Remplir le fichier de configuration `.env` |
@@ -166,9 +166,9 @@ $racine = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -
 Export-Certificate -Cert $racine -FilePath "C:\Temp\ad-root-ca.cer" -Type CERT
 ```
 
-Copier `ad-root-ca.cer` sur la VM, dans `/tmp` (par `scp` ou par un partage). Il sera converti à l'étape 4.
+Copier `ad-root-ca.cer` sur la VM, dans `/tmp` (par `scp` ou par un partage). Il sera converti à l'étape 4D.
 
-> **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter de la même façon le certificat de l'autorité intermédiaire (`C:\Temp\ad-sub-ca.cer`, magasin `Cert:\LocalMachine\CA`). Les deux seront réunis dans le même fichier à l'étape 4. Le lab compte deux niveaux : le certificat du contrôleur de domaine y est délivré directement par la racine, et le fichier de chaîne contient la racine et l'autorité intermédiaire.
+> **PKI à deux niveaux** (autorité racine et autorité émettrice) : exporter de la même façon le certificat de l'autorité intermédiaire (`C:\Temp\ad-sub-ca.cer`, magasin `Cert:\LocalMachine\CA`). Les deux seront réunis dans le même fichier à l'étape 4D. Le lab compte deux niveaux : le certificat du contrôleur de domaine y est délivré directement par la racine, et le fichier de chaîne contient la racine et l'autorité intermédiaire.
 
 ---
 
@@ -189,9 +189,10 @@ Suivre **3A** ou **3B** selon le moteur choisi. Les explications de chaque régl
 [Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "1", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "1h", "User")
 [Environment]::SetEnvironmentVariable("OLLAMA_NO_CLOUD", "1", "User")
+[Environment]::SetEnvironmentVariable("LLAMA_ARG_CACHE_RAM", "2048", "User")
 ```
 
-Puis quitter Ollama depuis la zone de notification et le relancer : les réglages ne sont lus qu'au démarrage.
+Puis quitter Ollama depuis la zone de notification et le relancer : les réglages ne sont lus qu'au démarrage. `LLAMA_ARG_CACHE_RAM` limite le cache des questions que chaque modèle garde en mémoire centrale : environ 12 Go de mémoire du serveur de modèles en moins pour les deux modèles, sans perte de qualité mesurée (§10.1). Le rôle de chaque réglage, et le contrôle dans le journal d'Ollama : §10.1.
 
 **3. Télécharger les trois modèles :**
 
@@ -204,7 +205,7 @@ ollama list
 
 **Attendu :** les trois modèles dans la liste. La vérification depuis la VM vient à l'étape 8.
 
-> **Ollama tourne dans la session Windows ouverte.** Se déconnecter de la session l'arrête. Fermer simplement la fenêtre du Bureau à distance le laisse tourner. Ollama sous Linux : §2.3.
+> **Ollama tourne dans la session Windows ouverte.** Se déconnecter de la session l'arrête, et sur un poste qui porte aussi les VM (VMware Workstation), la fermeture de session suspend en plus les VM (constaté dans le lab). Fermer simplement la fenêtre du Bureau à distance, ou verrouiller le poste, laisse tout tourner. Ollama sous Linux : §2.3.
 
 ### 3B : vLLM
 
@@ -293,17 +294,249 @@ vllm serve BAAI/bge-m3 --runner pooling \
 
 > **Les deux serveurs s'arrêtent si on ferme leur terminal.** Les laisser ouverts pendant tout le déploiement. Le démarrage automatique par des services systemd est décrit au §2.4.7 ; validé dans WSL2, il ne dispense pas de garder un terminal Ubuntu ouvert, car WSL2 s'arrête quand le dernier se ferme. Si un démarrage échoue, les messages rencontrés et leur solution sont au §2.4.9.
 
+> **Facultatif, après la mise en service : le reranker.** Il reclasse les extraits trouvés avant la rédaction de la réponse. Dans le lab, sur la carte du serveur de modèles : 83 réponses conformes sur 105 au lieu de 76, plus aucun élément interdit, 0,2 seconde par question. Il est désactivé par défaut ; installation, clé et démarrage automatique : §10.8.
+
 ---
 
-## Étape 4 : préparer la VM
+## Étape 4 : créer et préparer la VM
 
-Ouvrir une session root (`sudo -i`). Docker doit déjà être installé (§1.4), et le volume chiffré monté (§1.5) : les deux prérequis se sautent facilement, et le rejeu du 23 octobre 2026 en a oublié un. Contrôle :
+Quatre parties, **dans cet ordre** :
+
+| Partie | Quoi |
+|---|---|
+| 4A | Créer la VM et installer Ubuntu Server 26.04 |
+| 4B | Installer Docker |
+| 4C | Chiffrer le volume des données et inscrire le TPM |
+| 4D | Paquets, DNS du domaine et certificat de l'autorité |
+
+Le chiffrement (4C) vient **avant** tout le reste : tout ce qui serait écrit avant lui (secrets, `.env`, données) resterait en clair sur le disque système, et la suppression ne l'efface pas (§15.3.4).
+
+Cette étape décrit le cas validé dans le lab : une VM sous VMware Workstation, **un seul disque**, le volume chiffré créé dans l'espace libre du LVM. Pour un second disque dédié aux données, ou une machine sans espace libre (DGX Spark, serveur déjà installé), seule la désignation du volume change dans 4C : voir §1.5 et §1.5.1 (solution B).
+
+### 4A : créer la VM et installer Ubuntu Server 26.04
+
+**Créer la VM** (VMware Workstation ; avec un autre hyperviseur, les réglages équivalents) :
+
+| Réglage | Valeur | Pourquoi |
+|---|---|---|
+| Système invité | Ubuntu 64 bits | |
+| Micrologiciel | **UEFI** | Exigé par le TPM |
+| TPM | **Ajouter un TPM virtuel** (*Trusted Platform Module*) | Il ouvre le volume chiffré au démarrage, sans saisie (4C). VMware Workstation chiffre alors les fichiers de la VM et demande un mot de passe : le ranger dans le gestionnaire de mots de passe de l'organisation |
+| Processeurs | **1 processeur, 6 cœurs** | Un seul socket, pas 2 × 3 (§1.1) |
+| Mémoire | 16 Go | Les modèles ne tournent pas dans cette VM |
+| Disque | **100 Go, contrôleur SCSI (LSI Logic)**, pas NVMe | Avec NVMe, des écritures se bloquent 30 secondes (constat du lab, §1.1). Le contrôleur d'une VM avec TPM ne se change plus facilement : le choisir dès la création |
+| Réseau | Carte vmxnet3, sur le réseau qui joint le contrôleur de domaine et le serveur de fichiers | |
+
+**Installer Ubuntu Server 26.04 LTS** depuis son image ISO :
+
+- **Disque** : disposition proposée par défaut, **LVM activé**, sans agrandir le volume système. L'installateur n'en attribue au système qu'environ la moitié (48,5 Go sur 97 Go dans le lab) : l'espace restant accueillera le volume chiffré (4C). **Ne pas l'étendre.**
+- **Réseau** : adresse IP fixe, et comme serveur DNS **uniquement celui du domaine** (l'adresse du contrôleur de domaine), jamais un DNS public (explication en 4D).
+- **SSH** : cocher l'installation du serveur OpenSSH, pour travailler depuis un poste.
+- Un compte d'administration, avec un mot de passe fort.
+
+Après le redémarrage, se connecter en SSH depuis un poste, puis :
+
+```bash
+sudo -i
+apt update && apt upgrade -y && apt install -y curl gnupg
+```
+
+Contrôler ensuite le micrologiciel, le TPM et l'espace libre :
+
+```bash
+[ -d /sys/firmware/efi ] && echo "Démarrage UEFI"; systemd-cryptenroll --tpm2-device=list; vgs
+```
+
+**Attendu :** `Démarrage UEFI`, une ligne avec `/dev/tpmrm0`, puis le groupe `ubuntu-vg` avec **au moins 30 Go** dans la colonne `VFree`. Sans `Démarrage UEFI` ou sans `/dev/tpmrm0`, la VM démarre en BIOS ou n'a pas de TPM : la corriger (ou la recréer) avant d'aller plus loin, car 4C échouerait. Sans espace libre, voir §1.5.1 (solution B).
+
+### 4B : installer Docker
+
+Depuis le dépôt officiel de Docker, en root :
+
+```bash
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+docker --version && docker compose version
+```
+
+**Attendu :** les deux versions. Validé au rejeu du 1er novembre 2026 : Docker 29.9.2 et Compose 5.6.1, fournis sans autre manipulation par le dépôt de Docker pour Ubuntu 26.04 (`resolute`). **N'ajouter aucun compte au groupe `docker`** : ce groupe équivaut à root (§1.5).
+
+### 4C : chiffrer le volume des données et inscrire le TPM
+
+La stack conserve des extraits de tous les documents indexés, l'historique des conversations, le journal nLPD, des mots de passe et des clés privées. Tout cela va sur un volume **chiffré avec LUKS2**, monté sur `/srv/rag-donnees`. Au démarrage, le **TPM** de la VM libère la clé sans saisie ; une **phrase secrète** reste la clé de secours. Principe et limites : §15.3.1.
+
+> **Deux règles pour toute cette partie.** Une commande qui demande la phrase secrète se lance **seule** : collée avec d'autres, les lignes suivantes seraient lues comme la phrase. Et chaque commande se termine avant de passer à la suivante.
+
+**1. Choisir la phrase secrète, avant tout le reste.** Cinq ou six mots tirés au hasard, séparés par des tirets, avec un chiffre. Éviter les lettres dont la place change selon le clavier (y, z), les accents et les caractères spéciaux autres que le tiret : la phrase devra peut-être être saisie un jour depuis une console. **La ranger dans le gestionnaire de mots de passe avant le formatage** : sans elle, un refus du TPM rend les données irrécupérables.
+
+**2. Créer le volume**, ici de 30 Go (la taille du lab ; il s'agrandit plus tard, voir §1.5.1) :
+
+```bash
+apt install -y cryptsetup tpm2-tools
+lvcreate -L 30G -n rag-donnees ubuntu-vg
+wipefs -n /dev/ubuntu-vg/rag-donnees
+```
+
+**Attendu :** `Logical volume "rag-donnees" created.`, puis **aucune sortie** pour `wipefs` (le volume est vierge).
+
+**3. Le chiffrer.** Cette commande, **seule** : taper `YES` en majuscules, puis la phrase deux fois.
+
+```bash
+cryptsetup luksFormat --type luks2 /dev/ubuntu-vg/rag-donnees
+```
+
+Puis l'ouvrir, **seule** aussi (la phrase est demandée) :
+
+```bash
+cryptsetup open /dev/ubuntu-vg/rag-donnees rag-donnees
+```
+
+Puis créer le système de fichiers et le monter :
+
+```bash
+mkfs.ext4 -L rag-donnees /dev/mapper/rag-donnees
+mkdir -p /srv/rag-donnees && mount /dev/mapper/rag-donnees /srv/rag-donnees
+findmnt /srv/rag-donnees
+```
+
+**Attendu :** une ligne `/srv/rag-donnees /dev/mapper/rag-donnees ext4`.
+
+**4. Inscrire le TPM.** Relever d'abord l'identifiant du volume :
+
+```bash
+UUID=$(cryptsetup luksUUID /dev/ubuntu-vg/rag-donnees); echo "$UUID"
+```
+
+Puis cette commande, **seule** (la phrase est demandée) :
+
+```bash
+systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 /dev/disk/by-uuid/$UUID
+```
+
+**Attendu :** `New TPM2 token enrolled as key slot 1.` Contrôle :
+
+```bash
+cryptsetup luksDump /dev/disk/by-uuid/$UUID | grep -E "^  [0-9]+: (luks2|systemd-tpm2)"
+```
+
+**Attendu :** deux lignes `luks2` (l'emplacement 0, la phrase, et 1, le TPM) et une ligne `systemd-tpm2`. `--tpm2-pcrs=7` lie la clé à l'état du démarrage sécurisé : elle résiste aux mises à jour du noyau, mais pas à celles de la liste de révocation du Secure Boot (point 9). Ne pas modifier non plus le réglage du démarrage sécurisé de la VM après l'inscription.
+
+**5. Ouvrir et monter le volume à chaque démarrage.** Chaque ligne n'est ajoutée que si elle manque : relancée, la commande ne crée pas de doublon (une ligne en double dans `/etc/fstab` a été constatée au rejeu du 1er novembre 2026).
+
+```bash
+grep -q '^rag-donnees ' /etc/crypttab || echo "rag-donnees UUID=$UUID none luks,discard,tpm2-device=auto,nofail" >> /etc/crypttab
+grep -q ' /srv/rag-donnees ' /etc/fstab || echo "/dev/mapper/rag-donnees /srv/rag-donnees ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2" >> /etc/fstab
+systemctl daemon-reload
+grep -c rag-donnees /etc/crypttab /etc/fstab
+```
+
+**Attendu :** `/etc/crypttab:1` et `/etc/fstab:1`, avec l'UUID affiché au point 4 dans `/etc/crypttab`. `nofail` garantit que la VM démarre même si le volume ne s'ouvre pas : elle reste alors joignable en SSH pour le déverrouillage de secours (point 7).
+
+**6. Docker ne démarre qu'avec le volume monté**, sans déclencher lui-même le déverrouillage :
+
+```bash
+mkdir -p /etc/systemd/system/docker.service.d
+printf '[Unit]\nAfter=srv-rag\\x2ddonnees.mount var-log-rag.mount\nConditionPathIsMountPoint=/srv/rag-donnees\n' > /etc/systemd/system/docker.service.d/rag-donnees.conf
+systemctl daemon-reload
+systemctl cat docker | grep Condition
+```
+
+**Attendu :** une seule ligne, `ConditionPathIsMountPoint=/srv/rag-donnees`. Sans cette condition, Docker démarrerait sur un volume fermé, dans des dossiers **vides** : Qdrant repartirait avec une base vide. Ne pas utiliser `RequiresMountsFor`, qui déclenche le déverrouillage et provoque une demande de phrase à la console à chaque démarrage (§15.3.7).
+
+**7. Le déverrouillage de secours**, pour le jour où le TPM refuse la clé :
+
+```bash
+cat > /usr/local/sbin/rag-deverrouiller <<'EOF'
+#!/bin/bash
+# Déverrouille le disque de données chiffré, le monte, puis démarre Docker.
+set -e
+UUID=$(awk '$1=="rag-donnees"{sub("UUID=","",$2);print $2}' /etc/crypttab)
+cryptsetup status rag-donnees >/dev/null 2>&1 || cryptsetup open /dev/disk/by-uuid/$UUID rag-donnees
+mountpoint -q /srv/rag-donnees || mount /srv/rag-donnees
+if grep -q " /var/log/rag " /etc/fstab; then
+  mountpoint -q /var/log/rag || mount /var/log/rag
+fi
+# Partage du corpus : ses identifiants sont sur le volume chiffré (§0, étape 5)
+if grep -q " /mnt/corpus-root " /etc/fstab; then
+  mountpoint -q /mnt/corpus-root || mount /mnt/corpus-root || echo "Partage non monté : vérifier le réseau, puis mount /mnt/corpus-root"
+fi
+systemctl start docker
+echo "Disque déverrouillé et monté, Docker démarré"
+EOF
+chmod 700 /usr/local/sbin/rag-deverrouiller
+```
+
+Il se lance **seul**, en SSH : `rag-deverrouiller`. Il demande la phrase, ouvre et monte le volume, remonte le partage de fichiers (étape 5), puis démarre Docker.
+
+**8. Préparer les dossiers de la stack sur le volume.** La stack les trouvera à leurs emplacements habituels, sous forme de liens vers le volume chiffré :
+
+```bash
+mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/rag-certs,secrets/rag-tls}
+chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs /srv/rag-donnees/secrets/rag-tls
+chown -R 1000:1000 /srv/rag-donnees/n8n_data
+mkdir -p /root/rag-stack
+for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
+ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env
+ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ln -s /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls
+ln -s /srv/rag-donnees/log-rag           /var/log/rag
+ls -l /root/rag-stack /etc/rag-certs /etc/rag-tls /var/log/rag
+```
+
+**Attendu :** sept liens vers `/srv/rag-donnees` : `qdrant_data`, `openwebui_data`, `n8n_data` et `.env` dans `/root/rag-stack`, puis `/etc/rag-certs`, `/etc/rag-tls` et `/var/log/rag`. Le lien `.env` désigne un fichier qui n'existe pas encore : c'est normal, il est créé à l'étape 7. `n8n_data` appartient à l'utilisateur 1000, sous lequel tourne n8n : sinon, il redémarre en boucle (`EACCES`). Si `/var/log/rag` existe déjà en dossier ordinaire, `ln` le signale : le retirer (`rmdir /var/log/rag`, il est vide) et relancer la ligne.
+
+> **Avec le `.env` en lien, deux pièges.** `sed -i` sur `/root/rag-stack/.env` **remplace le lien par un vrai fichier**, sur le disque système, en clair ; `cp` refuse d'écrire tant que la cible n'existe pas. Toujours désigner le vrai fichier : `/srv/rag-donnees/secrets/.env`, ou `$(readlink -f /root/rag-stack/.env)`, comme à l'étape 7.
+
+**9. La liste de révocation du Secure Boot (dbx), à mettre à jour maintenant.** Ubuntu propose cette mise à jour de sécurité par `fwupd`. Le PCR 7 la mesure : **après elle, le TPM refuse la clé** au redémarrage suivant. Mieux vaut l'appliquer maintenant, sur un volume encore vide, que plus tard sur une stack en service. Chercher d'abord :
+
+```bash
+fwupdmgr refresh --force
+fwupdmgr get-upgrades
+```
+
+**Attendu :** soit aucune mise à jour (rien à faire, passer au point 10), soit un appareil **UEFI dbx** avec une flèche de version, par exemple `Current version: 20230501` puis `New version: 20260707`. Sans `refresh --force`, des métadonnées périmées peuvent masquer la mise à jour. Et le nom « UEFI dbx » figure aussi dans la liste des appareils **sans** mise à jour : seule la flèche de version fait foi (constat du rejeu du 1er novembre 2026).
+
+S'il y a une mise à jour : `fwupdmgr update`, puis redémarrer (`reboot`). Au redémarrage, le volume reste fermé : c'est attendu. En SSH, ouvrir le volume avec la phrase, **seul** :
+
+```bash
+rag-deverrouiller
+```
+
+Le message `TPM policy does not match current system state` est attendu. Puis réinscrire le TPM, **seul** aussi (la phrase est redemandée) :
+
+```bash
+systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 /dev/disk/by-uuid/$(awk '$1=="rag-donnees"{sub("UUID=","",$2);print $2}' /etc/crypttab)
+```
+
+**Attendu :** l'ancienne inscription effacée et une nouvelle créée ; le contrôle du point 4 montre de nouveau deux lignes `luks2` et une seule ligne `systemd-tpm2`. Après un refus du TPM, systemd attend la phrase du volume et l'affiche dans les sessions root : une invite « Please enter passphrase for disk … » peut apparaître dans un terminal SSH sans qu'aucune commande l'ait posée. Y répondre ouvre aussi le volume.
+
+**10. Redémarrer pour valider :**
+
+```bash
+reboot
+```
+
+Puis, en SSH, sans rien lancer d'autre :
+
+```bash
+sudo -i
+findmnt /srv/rag-donnees && systemctl is-active docker && ls -l /root/rag-stack
+```
+
+**Attendu :** `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees` **sans aucune saisie**, `active`, puis les liens du point 8. Si le volume est fermé : `rag-deverrouiller`, puis reprendre l'inscription du TPM (point 4, avec `--wipe-slot=tpm2` comme au point 9).
+
+**Prendre un snapshot de la VM arrêtée** (`shutdown -h now`) : une VM chiffrée, avec Docker et le TPM, est un bon point de reprise avant le déploiement.
+
+### 4D : paquets, DNS du domaine et certificat de l'autorité
+
+Ouvrir une session root (`sudo -i`). Contrôle de 4B et 4C, utile aussi en reprenant après une pause :
 
 ```bash
 docker compose version && systemctl show docker -p DropInPaths && findmnt /srv/rag-donnees && ls -la /root/rag-stack /var/log/rag /etc/rag-certs /etc/rag-tls | grep -- '->'
 ```
 
-**Attendu :** la version de Compose, le fichier `rag-donnees.conf` de §15.3.3, `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees`, puis les liens du §1.5 (point 2) : `qdrant_data`, `openwebui_data`, `n8n_data`, `.env`, `/var/log/rag`, `/etc/rag-certs` et `/etc/rag-tls` vers `/srv/rag-donnees`. Sans eux, l'étape 5 échoue : le dossier des identifiants n'existe pas (oubli constaté au rejeu du 1er novembre 2026). Puis :
+**Attendu :** la version de Compose, le fichier `rag-donnees.conf` (4C, point 6), `/srv/rag-donnees` monté depuis `/dev/mapper/rag-donnees`, puis les liens de 4C (point 8). Sans eux, l'étape 5 échoue : le dossier des identifiants n'existe pas (oubli constaté au rejeu du 1er novembre 2026). Puis :
 
 ```bash
 apt update && apt install -y \
@@ -420,12 +653,12 @@ cd /root
 git clone https://github.com/doit4everyone/ia-locale-pme-suisse.git
 cd ia-locale-pme-suisse/scripts/stack-ia-locale
 
-# Dossiers de la stack (déjà présents, sous forme de liens, si le disque chiffré du §1.5 est prêt)
+# Dossiers de la stack (déjà présents, sous forme de liens, depuis l'étape 4C)
 mkdir -p /root/rag-stack/{qdrant_data,n8n_data,openwebui_data} /root/rag-pipeline /var/log/rag
 mkdir -p /etc/rag-certs && chmod 700 /etc/rag-certs
 
 # n8n tourne sous l'utilisateur « node » (uid 1000) : sans ce droit, il redémarre en boucle (EACCES).
-# readlink -f : suivre le lien du §1.5 jusqu'au vrai dossier, sinon chown change le lien et pas le dossier.
+# readlink -f : suivre le lien de l'étape 4C jusqu'au vrai dossier, sinon chown change le lien et pas le dossier.
 chown -R 1000:1000 "$(readlink -f /root/rag-stack/n8n_data)"
 
 # La stack : Compose, configuration d'exemple, RAG API, service Purview
@@ -439,14 +672,18 @@ cp -r mip-service/. /root/rag-stack/mip-service/
 # Les scripts d'indexation, des droits et de contrôle
 cp anon_indexer.py /root/rag-pipeline/indexer.py
 cp anon_acl_resolver.py /root/rag-pipeline/acl_resolver.py
-cp sp_indexer.py test_cloisonnement.py test_citations.py test_sid.py diag_sid.py cas_cloisonnement.exemple.json /root/rag-pipeline/
+cp sp_indexer.py test_cloisonnement.py diag_sid.py cas_cloisonnement.exemple.json /root/rag-pipeline/
+
+# Les tests de sécurité (étape 16), le test du reranker et la campagne de mesure du §10
+cp test_citations.py test_sid.py test_revalidation_bm25.py test_echec_droits.py test_reranker.py /root/rag-pipeline/
+mkdir -p /root/rag-pipeline/s10 && cp s10/*.py s10/*.json /root/rag-pipeline/s10/
 
 ls /root/rag-stack /root/rag-stack/api /root/rag-pipeline
 ```
 
-**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `test_citations.py`, `test_sid.py` et `diag_sid.py` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
+**Attendu :** `main.py`, `auth.py`, `teams.py`, `teams_graph.py`, `Dockerfile` et `requirements.txt` dans `api/` ; `indexer.py`, `acl_resolver.py`, `sp_indexer.py`, `test_cloisonnement.py`, `diag_sid.py`, les cinq tests (`test_citations.py`, `test_sid.py`, `test_revalidation_bm25.py`, `test_echec_droits.py`, `test_reranker.py`) et le dossier `s10` dans `/root/rag-pipeline`. `teams.py`, `teams_graph.py`, `sp_indexer.py` et `mip-service` servent à Microsoft 365 : ils restent inactifs tant que leurs réglages sont vides.
 
-> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
+> **Variante automatisée : `deploy.sh`.** Le script du dépôt enchaîne les étapes 5 à 11 (montage, fichiers, `.env`, lancement, Python) en posant des questions, dont le choix du moteur. **Les étapes 1 à 4 restent à faire à la main**, chiffrement compris : le script vérifie seulement que le volume chiffré est monté et que chaque chemin sensible y aboutit, et demande confirmation s'il ne l'est pas ; il vérifie que les noms du contrôleur de domaine et du serveur de fichiers se résolvent, signale un DNS public dans la configuration de la VM, et contrôle que la stack joint le serveur de modèles. Il demande aussi le nom de la stack (`RAG_FQDN`), vérifie qu'il se résout vers la VM, et utilise le certificat placé dans `/etc/rag-tls` ou, à défaut, génère un certificat auto-signé (point 5 de l'étape 7). Il demande de confirmer par **o** (ou `oui`) : toute autre réponse annule le déploiement, avec un message. À la fin, il contrôle que les cinq conteneurs tournent sans redémarrage et que la RAG API répond à travers Nginx ; sinon il liste les problèmes et se termine en erreur au lieu d'annoncer « Déploiement terminé ». Il propose enfin de lancer la première indexation et la synchronisation des droits (étapes 12 et 13), avec un journal dans `/var/log/rag` ; un échec à ce stade n'annule pas le déploiement. Il peut être relancé après une erreur passagère (téléchargement interrompu, par exemple). S'il trouve un `.env` existant, il demande confirmation avant de le remplacer et en garde une copie datée (2.21.1) : le remplacer change tous les jetons, donc l'identifiant n8n et la clé de la connexion d'Open WebUI sont à refaire, et efface les réglages Microsoft 365. **Ne pas relancer `deploy.sh` sur une installation en service.** **Statut :** rejoué cinq fois sur une VM neuve, en dernier lieu en version 2.23.0 le 1er novembre 2026, avec un certificat auto-signé (en 2.22.2, le 24 octobre 2026, avec un certificat fourni par l'autorité interne) ; une relance par erreur a été annulée par le garde-fou du `.env`, sans rien modifier. Lancement, depuis ce dossier, en root, avec un journal complet : `chmod +x deploy.sh && ./deploy.sh 2>&1 | tee -a /root/deploy.log`. L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance efface la trace du premier déploiement (cas vécu).
 
 ---
 
@@ -458,7 +695,7 @@ Le fichier `.env` réunit tous les réglages et secrets de la stack. Il ne doit 
 
 ```bash
 cd /root/rag-stack
-# Avec le disque chiffré du §1.5, .env est un lien : on travaille sur le vrai fichier.
+# Avec le volume chiffré de l'étape 4C, .env est un lien : on travaille sur le vrai fichier.
 # (sed -i remplace le fichier : appliqué au lien, il le détruirait et laisserait le .env en clair sur le disque système.)
 ENVF=$(readlink -f /root/rag-stack/.env)
 cp env.example "$ENVF"
@@ -519,7 +756,7 @@ getent hosts "$FQDN"
 sed "s/<NOM-STACK>/${FQDN}/g" /root/ia-locale-pme-suisse/scripts/stack-ia-locale/nginx/rag.conf > nginx/rag.conf
 grep -c "$FQDN" nginx/rag.conf
 
-# Dossier du certificat : sur le disque chiffré si le lien du §1.5 existe
+# Dossier du certificat : sur le volume chiffré (lien de l'étape 4C)
 [ -e /etc/rag-tls ] || mkdir -p /etc/rag-tls
 chmod 700 "$(readlink -f /etc/rag-tls)"
 ls -l /etc/rag-tls/
@@ -574,7 +811,7 @@ docker compose up -d
 docker compose ps
 ```
 
-**Attendu :** `qdrant`, `n8n` et `nginx` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les trois autres. Seul `nginx` publie des ports sur le réseau (80, 443, 5678) ; `qdrant` publie le sien sur `127.0.0.1` seulement, pour les scripts d'indexation lancés depuis la VM (étapes 12 et 13), et il n'est pas joignable d'une autre machine. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent un secret refusé, ligne `[SÉCURITÉ]`, une variable manquante dans `.env`, ou le certificat de l'étape 4 absent). Si `nginx` s'arrête : `docker logs nginx` (certificat absent de `/etc/rag-tls`, ou `nginx/rag.conf` manquant).
+**Attendu :** `qdrant`, `n8n` et `nginx` en `Up`, `rag-api` et `open-webui` en `Up (healthy)` après une minute environ. Seuls ces deux services déclarent un contrôle de santé : `Up` sans mention est normal pour les trois autres. Seul `nginx` publie des ports sur le réseau (80, 443, 5678) ; `qdrant` publie le sien sur `127.0.0.1` seulement, pour les scripts d'indexation lancés depuis la VM (étapes 12 et 13), et il n'est pas joignable d'une autre machine. Si `rag-api` redémarre en boucle : `docker logs rag-api 2>&1 | tail -30` montre la cause (le plus souvent un secret refusé, ligne `[SÉCURITÉ]`, une variable manquante dans `.env`, ou le certificat de l'étape 4D absent). Si `nginx` s'arrête : `docker logs nginx` (certificat absent de `/etc/rag-tls`, ou `nginx/rag.conf` manquant).
 
 ```bash
 curl -sk https://$(grep '^RAG_FQDN=' .env | cut -d= -f2)/sante
@@ -715,7 +952,7 @@ Ouvrir `https://<RAG_FQDN>` (par exemple `https://rag.votre-domaine.ch`) depuis 
 | Search Base | Base de recherche | `DC=votre-domaine,DC=ch` |
 | Search Filters | Filtres de recherche | `(objectClass=user)`, **avec les parenthèses** : sans elles, la connexion échoue (constaté au rejeu du 1er novembre 2026) |
 | Certificate Path | Chemin du certificat | `/etc/ssl/certs/ad-chain.pem` |
-| Validate Certificate | Validate Certificate (non traduit) | Activé : la chaîne de l'étape 4 permet la validation (le §5.6.2 décrit le cas d'un lab sans certificat) |
+| Validate Certificate | Validate Certificate (non traduit) | Activé : la chaîne de l'étape 4D permet la validation (le §5.6.2 décrit le cas d'un lab sans certificat) |
 | Ciphers | Chiffres | Valeur par défaut |
 
 > **L'attribut du courriel doit être `userPrincipalName`.** Open WebUI transmet l'adresse de l'utilisateur à la RAG API, qui la cherche dans ce champ de l'annuaire. Avec un autre attribut, la recherche échoue et tout le monde est refusé (403). L'attribut du **nom d'utilisateur** est celui que la personne tape pour se connecter : `sAMAccountName` permet de saisir `blaise` plutôt que `blaise@votre-domaine.ch`.
@@ -810,6 +1047,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 
 | Contrôle | Commande ou action | Attendu |
 |---|---|---|
+| Volume chiffré et TPM | `findmnt /srv/rag-donnees` et le contrôle de l'étape 4C, point 4 | Monté depuis `/dev/mapper/rag-donnees` ; deux `luks2`, un `systemd-tpm2` |
 | Serveur de modèles, depuis la stack | Étape 10 | `200` deux fois |
 | Collections Qdrant | `curl -s -H "api-key: $QDRANT_API_KEY" http://localhost:6333/collections` | `documents` et `documentation` |
 | Extraits indexés | Étape 12 | Plus de 0 dans les deux collections |
@@ -821,6 +1059,9 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Ports exposés | `docker compose ps` | `nginx` : 80, 443, 5678 ; `qdrant` : `127.0.0.1:6333` seulement |
 | Contrôle des citations | `docker exec -w /app rag-api python3 /rag-pipeline/test_citations.py` | `28 tests OK` |
 | Droits par SID | `docker exec -w /app rag-api python3 /rag-pipeline/test_sid.py` | `32 tests OK` |
+| Droits et recherche par mots-clés | `docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py` | `27 tests OK` |
+| Échecs d'écriture des droits, indexation | `docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py` | `56 tests OK` |
+| Reclassement (reranker) | `docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py` | `6 tests OK` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
 | Recherche par mots-clés | `docker logs rag-api \| grep BM25` | `Recherche par mots-clés dans Qdrant : documentation, documents` (après la première synchronisation) |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
@@ -918,7 +1159,7 @@ resolvectl status | grep -E "Current DNS Server|DNS Servers"
 getent hosts <NOM-DC>.votre-domaine.ch <NOM-FILESERVER>
 ```
 
-Si `Current DNS Server` est un DNS public, le retirer de la configuration réseau (étape 4). Le partage peut rester monté et lisible : il a été monté au démarrage, par son adresse ; ce sont les connexions suivantes, par le nom, qui échouent.
+Si `Current DNS Server` est un DNS public, le retirer de la configuration réseau (étape 4D). Le partage peut rester monté et lisible : il a été monté au démarrage, par son adresse ; ce sont les connexions suivantes, par le nom, qui échouent.
 
 **Le compte `svc-rag` est verrouillé**
 
@@ -1023,6 +1264,6 @@ Plus de 20 % des fichiers étaient illisibles : le résolveur refuse alors de to
 
 ---
 
-*Validé en lab sur VM-RAG-LAB (Ubuntu Server 26.04) et LABO-G9 (NVIDIA RTX 5060 Ti 16 Go), avec Ollama puis vLLM 0.31.0, octobre 2026.*
+*Validé en lab sur VM-RAG-LAB (Ubuntu Server 26.04) et LABO-G9 (NVIDIA RTX 5060 Ti 16 Go), avec Ollama puis vLLM 0.31.0, octobre 2026. Rejoué sur une VM neuve le 1er novembre 2026 (2.23.0) ; étape 4 complétée en novembre 2026 (2.23.1).*
 
 ℹ️ *Références, structuration et aide à la rédaction assistées par IA, avec validation humaine finale.*

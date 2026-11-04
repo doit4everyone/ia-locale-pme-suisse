@@ -852,7 +852,8 @@ def index_file(
     target_collection = get_collection_for_path(source_name)
 
     # Une lecture impossible lève ErreurExtraction (2.23.0) : l'appelant la
-    # compte comme erreur et l'ancienne version reste en place.
+    # compte comme erreur et l'ancienne version reste en place (sauf avec
+    # --reset, qui a déjà effacé les collections).
     blocks = extract_blocks(filepath)
     if not blocks:
         # Fichier réellement vide (aucun texte extractible) : l'ancien contenu
@@ -1129,7 +1130,11 @@ def index_corpus(
             print(f"  {r['fichier']}")
 
     if erreurs:
-        print(f"\nFICHIERS EN ERREUR ({len(erreurs)}) : ancienne version conservée dans Qdrant")
+        if reset:
+            print(f"\nFICHIERS EN ERREUR ({len(erreurs)}) : absents de l'index "
+                  f"(--reset a effacé les collections, voir §5.4.2b)")
+        else:
+            print(f"\nFICHIERS EN ERREUR ({len(erreurs)}) : ancienne version conservée dans Qdrant")
         for r in erreurs:
             print(f"  {r['fichier']} : {r['erreur']}")
 
