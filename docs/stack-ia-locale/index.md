@@ -71,7 +71,7 @@ Hôte Intel Core i7-14700 (8 P-cores + 12 E-cores, 64 Go DDR5), VMware Workstati
 
 | Section | Contenu | Statut |
 |---|---|---|
-| [§0 Démarrage rapide](section-00-quickstart.md) | Déploiement de bout en bout, de la création de la VM au contrôle final : chiffrement du volume des données et TPM compris (étape 4), Ollama ou vLLM, Microsoft 365 en option (étape 17) | Publié |
+| [§0 Démarrage rapide](section-00-quickstart.md) | Déploiement de bout en bout, de la création de la VM au contrôle final : chiffrement du volume des données et TPM compris (étape 4), Ollama ou vLLM, reranker (étape 17) et Microsoft 365 (étape 18) en option | Publié |
 | [§1 Prérequis et création de la VM](section-01-prerequis.md) | Sizing, installation Ubuntu 26.04, épinglage CPU, Docker, volume des données chiffré (LUKS2, TPM) | Publié |
 | [§2 Le serveur de modèles : Ollama ou vLLM](section-02-vllm.md) | Choisir le moteur selon le nombre d'utilisateurs simultanés, installer Ollama ou vLLM (WSL2), vérifications, pièges, bascule, DGX Spark | Publié |
 | [§3 Docker Compose : stack complète](section-03-docker-compose.md) | Qdrant, n8n, RAG API complète, Open WebUI, Nginx, sauvegarde et restauration de Qdrant | Publié |

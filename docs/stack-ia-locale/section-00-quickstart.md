@@ -17,7 +17,7 @@ description: "Déployer la stack RAG locale de bout en bout : Active Directory, 
 
 [Retour au sommaire](index.md) | [Section suivante : §1 Prérequis et création de la VM](section-01-prerequis.md)
 
-**Statut :** validé en lab avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). **Dernier rejeu de bout en bout : version 2.23.0, le 1er novembre 2026**, sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 56 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. **Depuis la 2.23.1**, l'étape 4 décrit elle-même la création de la VM, l'installation de Docker, le chiffrement du volume des données et l'inscription du TPM, mise à jour du dbx comprise : ce §0 suffit pour un déploiement complet. Elle reprend les commandes du §1.4, du §1.5.1 (solution A) et du §15.3, telles qu'elles ont été rejouées le 1er novembre 2026 ; sa nouvelle présentation n'a pas encore été rejouée telle quelle. **Non rejoué sur une VM neuve :** le déploiement complet avec vLLM (validé dans le lab sur une installation existante, §2.4). Rejeux précédents : du 15 au 17 octobre 2026 (2.20.4), le 19 octobre 2026 avec le frontal HTTPS et l'identité signée (2.21.1, 72 verdicts de cloisonnement), les 23 et 24 octobre 2026 sur une première VM à un seul disque avec un certificat de l'autorité interne (2.22.2, 81 verdicts) ; chacun a fait corriger le script et ce guide (CHANGELOG).
+**Statut :** validé en lab avec les deux moteurs du serveur de modèles, Ollama et vLLM (§2). **Dernier rejeu de bout en bout : version 2.23.0, le 1er novembre 2026**, sur une VM neuve à un seul disque, avec Ollama, `bge-m3`, le reranker sur la carte du serveur de modèles et un certificat auto-signé : volume chiffré et TPM (mise à jour du dbx et réinscription comprises), `deploy.sh`, indexation (1 616 extraits), tests de sécurité (28, 32, 27, 56 et 6 tests OK), Open WebUI en LDAPS, n8n et synchronisation, cloisonnement (207 verdicts, tous OK), usurpation refusée, refus par adresse IP, mesure du §10 (76 réponses conformes sur 105 sans reranker, 83 avec, aucun élément interdit), sauvegarde et restauration de Qdrant 1.20, redémarrage avec la stack en service. Ce rejeu a fait corriger `deploy.sh` (recherche par mots-clés à activer après la première indexation) et quelques points du guide. **Depuis la 2.23.1**, l'étape 4 décrit elle-même la création de la VM, l'installation de Docker, le chiffrement du volume des données et l'inscription du TPM, mise à jour du dbx comprise : ce §0 suffit pour un déploiement complet. Elle reprend les commandes du §1.4, du §1.5.1 (solution A) et du §15.3, telles qu'elles ont été rejouées le 1er novembre 2026 ; l'étape 17 reprend de même la mise en place du reranker du §10.8. Leur nouvelle présentation n'a pas encore été rejouée telle quelle. **Non rejoué sur une VM neuve :** le déploiement complet avec vLLM (validé dans le lab sur une installation existante, §2.4). Rejeux précédents : du 15 au 17 octobre 2026 (2.20.4), le 19 octobre 2026 avec le frontal HTTPS et l'identité signée (2.21.1, 72 verdicts de cloisonnement), les 23 et 24 octobre 2026 sur une première VM à un seul disque avec un certificat de l'autorité interne (2.22.2, 81 verdicts) ; chacun a fait corriger le script et ce guide (CHANGELOG).
 
 ---
 
@@ -100,7 +100,8 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 | 14 | Navigateur | Configurer Open WebUI |
 | 15 | Navigateur | Configurer n8n |
 | 16 | VM et navigateur | Contrôles finaux |
-| 17 | Microsoft 365, facultatif | Entra ID, Teams, SharePoint |
+| 17 | Serveur de modèles, puis VM, facultatif | Le reranker, sur la carte du serveur de modèles |
+| 18 | Microsoft 365, facultatif | Entra ID, Teams, SharePoint |
 
 Les étapes 5 à 11 peuvent aussi être enchaînées par le script `deploy.sh` : voir « Avant l'étape 5 ».
 
@@ -296,7 +297,7 @@ vllm serve BAAI/bge-m3 --runner pooling \
 
 > **Les deux serveurs s'arrêtent si on ferme leur terminal.** Les laisser ouverts pendant tout le déploiement. Le démarrage automatique par des services systemd est décrit au §2.4.7 ; validé dans WSL2, il ne dispense pas de garder un terminal Ubuntu ouvert, car WSL2 s'arrête quand le dernier se ferme. Si un démarrage échoue, les messages rencontrés et leur solution sont au §2.4.9.
 
-> **Facultatif, après la mise en service : le reranker.** Il reclasse les extraits trouvés avant la rédaction de la réponse. Dans le lab, sur la carte du serveur de modèles : 83 réponses conformes sur 105 au lieu de 76, plus aucun élément interdit, 0,2 seconde par question. Il est désactivé par défaut ; installation, clé et démarrage automatique : §10.8.
+> **Facultatif, après la mise en service : le reranker.** Il reclasse les extraits trouvés avant la rédaction de la réponse. Dans le lab, sur la carte du serveur de modèles : 83 réponses conformes sur 105 au lieu de 76, plus aucun élément interdit, 0,2 seconde par question. Il est désactivé par défaut ; sa mise en place est l'étape 17.
 
 ---
 
@@ -1093,6 +1094,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Droits et recherche par mots-clés | `docker exec -w /app rag-api python3 /rag-pipeline/test_revalidation_bm25.py` | `27 tests OK` |
 | Échecs d'écriture des droits, indexation | `docker exec -w /app rag-api python3 /rag-pipeline/test_echec_droits.py` | `56 tests OK` |
 | Reclassement (reranker) | `docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py` | `6 tests OK` |
+| Reranker, si activé (étape 17) | Une question, puis `docker logs rag-api --since 5m 2>&1 \| grep RERANK` | `[RERANK] N extraits reclassés`, aucun `Échec` |
 | SID d'un compte | `docker exec -w /app rag-api python3 /rag-pipeline/diag_sid.py <compte>` | `Lecture de tokenGroups : OK` (§16.5.3) |
 | Recherche par mots-clés | `docker logs rag-api \| grep BM25` | `Recherche par mots-clés dans Qdrant : documentation, documents` (après le redémarrage de l'étape 13) |
 | Accès autorisé | Question sur un document accessible | Réponse avec citation |
@@ -1110,7 +1112,86 @@ curl -sk https://<IP-VM>/; echo "code $?"
 
 ---
 
-## Étape 17 (facultative) : Microsoft 365
+## Étape 17 (facultative) : le reranker
+
+Le reranker reclasse les extraits trouvés par la recherche avant que le modèle rédige la réponse. Dans le lab, avec Ollama, `bge-m3` et `qwen3:14b` : **83 réponses conformes sur 105 au lieu de 76, plus aucun élément interdit, 0,2 seconde par question** (§10.8, rejeu du 1er novembre 2026). Il tourne sur la carte du serveur de modèles, à côté d'Ollama, et occupe environ 0,7 Go : vérifier d'abord que les modèles d'Ollama restent à `100% GPU` (`ollama ps`). Sans lui, la stack fonctionne : la RAG API garde l'ordre de la recherche.
+
+Le serveur est `llama-server`, de llama.cpp, avec le modèle `bge-reranker-v2-m3` converti au format GGUF dans le lab, pour connaître l'origine du fichier. Les explications de chaque choix sont au §10.8.
+
+> **Avec vLLM**, le reranker est un troisième serveur vLLM sur la carte (port 8002), et la part de mémoire du modèle principal passe de 0,87 à 0,82 : commande et réglages au §10.8, « Avec vLLM : un troisième serveur sur la carte ». Validé dans le lab à la limite d'une carte de 16 Go (37 Mio libres) : en service, prévoir une carte plus grande. Le reste de cette étape concerne Ollama.
+
+**1. Installer `llama-server`**, sur le serveur de modèles. Depuis la page de la version b11934 de llama.cpp ([github.com/ggml-org/llama.cpp/releases/tag/b11934](https://github.com/ggml-org/llama.cpp/releases/tag/b11934)), télécharger `llama-b11934-bin-win-cuda-13.4-x64.zip` et `cudart-llama-bin-win-cuda-13.4-x64.zip`, version utilisée dans le lab. Contrôler leurs empreintes SHA-256 (`Get-FileHash <fichier>`) avec celles publiées sur la page de la version, puis extraire les deux archives dans `C:\IA\llama.cpp`, et créer le dossier du reranker :
+
+```powershell
+New-Item -ItemType Directory -Force C:\IA\reranker | Out-Null; Test-Path C:\IA\llama.cpp\llama-server.exe
+```
+
+**Attendu :** `True`.
+
+**2. Convertir le modèle**, une seule fois, dans Ubuntu sous WSL2. Avec vLLM, c'est celui de l'étape 3B. Avec Ollama seul, installer WSL2 comme à l'étape 3B, point 1 (la règle de pare-feu de vLLM n'est pas nécessaire), puis `uv` comme au point 2 (`curl -LsSf https://astral.sh/uv/install.sh | sh` et `source ~/.local/bin/env`). Le convertisseur de llama.cpp, à un commit figé, dans un environnement Python à part :
+
+```bash
+sudo mkdir -p /opt/llama.cpp-conv && sudo chown $USER /opt/llama.cpp-conv && git clone -q https://github.com/ggml-org/llama.cpp /opt/llama.cpp-conv/src && cd /opt/llama.cpp-conv/src && git checkout -q 9ff0d7e90 && uv venv -q --python 3.12 --seed /opt/llama.cpp-conv/.venv && uv pip install -q --python /opt/llama.cpp-conv/.venv/bin/python -r requirements/requirements-convert_hf_to_gguf.txt
+```
+
+Puis, depuis `/opt/llama.cpp-conv/src`, le téléchargement du modèle, la conversion en Q8 et la copie vers Windows :
+
+```bash
+sudo mkdir -p /opt/hf && sudo chown $USER /opt/hf && HF_HOME=/opt/hf /opt/vllm/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
+```
+
+**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt du modèle et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. La commande utilise l'outil `hf` installé avec vLLM. **Sans vLLM** (non rejoué dans le lab), l'installer dans l'environnement de conversion, `uv pip install -q --python /opt/llama.cpp-conv/.venv/bin/python huggingface_hub`, et remplacer `/opt/vllm/.venv/bin/hf` par `/opt/llama.cpp-conv/.venv/bin/hf`.
+
+**3. Créer la clé et ouvrir le port**, dans PowerShell en administrateur, **avec le compte qui fait tourner Ollama**. La clé (64 caractères aléatoires) est écrite dans un fichier lisible par ce seul compte ; `llama-server` la reçoit par une variable, et elle n'apparaît pas dans la ligne de commande du processus :
+
+```powershell
+$k = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'); Set-Content -Path C:\IA\reranker\cle.txt -Value $k -NoNewline; icacls C:\IA\reranker\cle.txt /inheritance:r /grant:r "$($env:USERNAME):R" | Out-Null; Remove-Variable k
+New-NetFirewallRule -DisplayName 'Reranker llama-server (lab)' -Direction Inbound -Protocol TCP -LocalPort 8091 -RemoteAddress <IP-VM-STACK> -Action Allow
+```
+
+`<IP-VM-STACK>` est l'adresse de la VM **telle que le serveur de modèles la voit** : derrière un routeur qui traduit les adresses, c'est celle du routeur (§16.7). La clé ne s'affiche jamais : ne pas la coller dans un message ou un ticket.
+
+**4. Le démarrage automatique.** Copier `demarrer-reranker.ps1`, fourni dans le dépôt (`scripts/stack-ia-locale/reranker/`), dans `C:\IA\reranker`. Il lit la clé, puis lance `llama-server` sur le port 8091, avec le modèle sur la carte. La tâche planifiée le lance à l'ouverture de session, comme Ollama, sans fenêtre :
+
+```powershell
+$a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\IA\reranker\demarrer-reranker.ps1'; $t = New-ScheduledTaskTrigger -AtLogOn -User "$env:COMPUTERNAME\$env:USERNAME"; $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries; Register-ScheduledTask -TaskName 'Reranker llama-server (lab)' -Description 'bge-reranker-v2-m3 sur la carte, port 8091 (§10.8)' -Action $a -Trigger $t -Settings $s
+Start-ScheduledTask -TaskName 'Reranker llama-server (lab)'
+```
+
+**Attendu :** après quelques secondes, `llama-server.exe` dans `nvidia-smi`, et la ligne `listening on http://0.0.0.0:8091` dans `C:\IA\reranker\reranker.log`. Comme Ollama, le serveur s'arrête quand la session Windows est **fermée** et repart seul à sa réouverture (vérifié dans le lab : à l'écoute 2,5 secondes après l'ouverture de session). Arrêt, redémarrage et changement de clé : §10.8.
+
+**5. Activer le reranker dans la stack**, sur la VM. Relire la clé sur le serveur de modèles, depuis le même compte (`Get-Content C:\IA\reranker\cle.txt`), puis ouvrir le vrai fichier `.env` :
+
+```bash
+nano /srv/rag-donnees/secrets/.env
+```
+
+Dans le bloc « Reranker optionnel », ajouter ces trois lignes, sans `#` devant :
+
+```
+RERANKER_URL=http://<IP-SERVEUR-MODELES>:8091
+RERANKER_API=llamacpp
+RERANKER_API_KEY=<clé lue à l'instant>
+```
+
+Puis recréer la RAG API, qui relit le `.env` :
+
+```bash
+cd /root/rag-stack && docker compose up -d rag-api
+```
+
+**6. Vérifier.** Poser une question dans Open WebUI, puis, sur la VM :
+
+```bash
+docker logs rag-api --since 5m 2>&1 | grep RERANK
+docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py
+```
+
+**Attendu :** une ligne `[RERANK] N extraits reclassés (fusion) en 0.2 s, premier : '…'` par question, puis `6 tests OK`. Une ligne `[RERANK] Échec, ordre de la recherche conservé` signale un reranker injoignable ou une clé refusée : la question est servie quand même, sans reclassement. Contrôler alors la tâche planifiée, la règle de pare-feu et la clé. Le Compose reclasse les 20 meilleurs candidats et fusionne les deux classements (`RERANK_CANDIDATS=20`, `RERANK_MODE=fusion`), les réglages des mesures du §10.8.
+
+---
+
+## Étape 18 (facultative) : Microsoft 365
 
 Cette étape relie la stack à un tenant Microsoft 365 synchronisé avec l'Active Directory par Entra Connect. Les trois modules sont indépendants, mais le premier est requis par les deux autres. Le `docker-compose.yml` du dépôt transmet déjà toutes les variables : il suffit de les renseigner dans `.env`, puis de redémarrer la RAG API :
 
@@ -1127,7 +1208,7 @@ chmod 600 <nom>.key
 openssl x509 -in <nom>.crt -noout -fingerprint -sha1 | tr -d ':' | cut -d= -f2    # empreinte pour .env
 ```
 
-### 17.1 Groupes Entra ID (§11), prérequis des modules suivants
+### 18.1 Groupes Entra ID (§11), prérequis des modules suivants
 
 1. Certificat `rag-identity` ;
 2. App Registration `RAG-Identity-Resolver` : certificat chargé, autorisations **d'application** Microsoft Graph `User.Read.All` et `GroupMember.Read.All`, consentement administrateur ;
@@ -1136,7 +1217,7 @@ openssl x509 -in <nom>.crt -noout -fingerprint -sha1 | tr -d ':' | cut -d= -f2  
 
 Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
 
-### 17.2 Synthèse des réunions Teams (§12)
+### 18.2 Synthèse des réunions Teams (§12)
 
 1. Centre d'administration Teams : transcription active dans la stratégie de réunion, et **Transcript API access** activé avec l'attribution des intervenants (désactivé par défaut : sans lui, toute requête est refusée) ;
 2. Groupe d'adhésion `GRP-Teams-CompteRendu-IA`, de type sécurité à extension messagerie, créé en PowerShell Exchange Online, avec les organisateurs concernés ;
@@ -1148,7 +1229,7 @@ Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
 
 Détail : [§12 Synthèse des réunions Teams](section-12-teams.md).
 
-### 17.3 Connecteur SharePoint Online (§13)
+### 18.3 Connecteur SharePoint Online (§13)
 
 1. Inventaire des permissions avec les scripts de [`scripts/sharepoint/`](../../scripts/sharepoint/) : bibliothèques de conservation, membres atypiques, partages ;
 2. Certificat `rag-sharepoint` et App Registration `RAG-SharePoint-Indexer` : autorisations d'application `Sites.Selected` pour **Microsoft Graph et SharePoint**, consentement ;
