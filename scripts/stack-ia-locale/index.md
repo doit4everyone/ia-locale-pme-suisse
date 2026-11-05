@@ -88,7 +88,7 @@ Les scripts `indexer.py` et `acl_resolver.py` sont stockés sur l'hôte Ubuntu, 
 | `test_reranker.py` | Tests unitaires du reclassement : formats Text Embeddings Inference et `llama-server`, clé, repli sur l'ordre de la recherche (2.23.0) | `docker exec -w /app rag-api python3 /rag-pipeline/test_reranker.py` |
 | `comparer_vecteurs.py` | Compare les vecteurs de Qdrant à ceux du serveur d'embedding vLLM, 50 extraits par collection (§2.5, 2.23.0) | Dans le conteneur `rag-api` |
 | [`reranker/demarrer-reranker.ps1`](reranker/demarrer-reranker.ps1) | Lance `llama-server --reranking` sur le serveur de modèles Windows, clé lue dans un fichier (§10.8, 2.23.0) | Tâche planifiée, sur le serveur de modèles (§0, étape 17) |
-| [`corpus-demo/`](corpus-demo/generer.py) | Générateur du corpus de démonstration Axonix SA (fictif), de ses droits et du jeu de questions du §10 (2.23.0) | `python3 generer.py <dossier>`, puis `Droits-Corpus-Axonix.ps1` sur le serveur de fichiers |
+| [`corpus-demo/`](corpus-demo/generer.py) | Générateur du corpus de démonstration Axonix SA (fictif), des droits de ses trois dossiers nouveaux, du jeu de questions du §10 et des cas de cloisonnement du lab (2.23.0) ; le test de cloisonnement suppose le partage et l'annuaire du lab (§16.3) | `python3 generer.py <dossier>`, puis `Droits-Corpus-Axonix.ps1` sur le serveur de fichiers |
 | `nginx/rag.conf` | Frontal HTTPS de la stack : Open WebUI sur le port 443, n8n sur le port 5678, `/sante` pour la supervision, refus des requêtes par adresse IP ou autre nom | Conteneur `nginx`, `deploy.sh` remplace `<NOM-STACK>`, voir §9.8 |
 | `cas_cloisonnement.exemple.json` | Exemple de fichier de cas, à adapter puis copier en `/rag-pipeline/cas_cloisonnement.json` | Voir §16.3 |
 
