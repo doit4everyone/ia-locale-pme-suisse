@@ -145,7 +145,7 @@ Créer un compte de service dédié avec accès lecture à tous les dossiers à 
 New-ADUser -Name "svc-rag" `
     -SamAccountName "svc-rag" `
     -UserPrincipalName "svc-rag@votre-domaine.ch" `
-    -AccountPassword (ConvertTo-SecureString "<mot-de-passe-fort>" -AsPlainText -Force) `
+    -AccountPassword (Read-Host "Mot de passe de svc-rag" -AsSecureString) `
     -PasswordNeverExpires $false `
     -CannotChangePassword $true `
     -Enabled $true `

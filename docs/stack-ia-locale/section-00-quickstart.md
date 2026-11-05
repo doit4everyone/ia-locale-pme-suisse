@@ -116,7 +116,7 @@ Les étapes 5 à 11 peuvent aussi être enchaînées par le script `deploy.sh` :
 New-ADUser -Name "svc-rag" `
     -SamAccountName "svc-rag" `
     -UserPrincipalName "svc-rag@votre-domaine.ch" `
-    -AccountPassword (ConvertTo-SecureString "<mot-de-passe-fort-20-caracteres>" -AsPlainText -Force) `
+    -AccountPassword (Read-Host "Mot de passe de svc-rag (20 caractères au moins, sans apostrophe)" -AsSecureString) `
     -PasswordNeverExpires $false `
     -CannotChangePassword $true `
     -Enabled $true `
@@ -148,7 +148,7 @@ Get-ADPrincipalGroupMembership -Identity "svc-rag" | Select Name
 
 ## Étape 2 : exporter le certificat de l'autorité de certification (Windows)
 
-La VM vérifie l'identité du contrôleur de domaine avant de lui envoyer le mot de passe de `svc-rag` (connexion LDAP chiffrée). Pour cela, elle a besoin du certificat de l'autorité de certification du domaine. Sans lui, tout le monde est refusé (erreur 403).
+La VM vérifie l'identité du contrôleur de domaine avant de lui envoyer le mot de passe de `svc-rag` (connexion LDAP chiffrée). Pour cela, elle a besoin du certificat de l'autorité de certification du domaine. Avec ce certificat (`LDAP_CA_CERT` désigne un fichier non vide), la RAG API exige un certificat valide du contrôleur (`CERT_REQUIRED`). Sans lui, ou avec un fichier vide, elle se connecte quand même, **sans vérifier l'identité du serveur** (`CERT_NONE`, avertissement dans son journal) : la liaison reste chiffrée, mais un poste qui se ferait passer pour le contrôleur recevrait le mot de passe de `svc-rag`. Réservé à un lab, jamais en service ; dans ce cas, créer un fichier **vide** avant de lancer la stack (`touch /etc/ssl/certs/ad-chain.pem`, comme le propose `deploy.sh`) : si le fichier manque, Docker crée un **dossier** à sa place, que la RAG API prend pour un certificat, et la connexion à l'annuaire échoue (d'après le code, non rejoué). Open WebUI a son propre réglage de validation du certificat (étape 14).
 
 Commencer par **lister** les certificats, sans rien exporter, pour choisir le bon en connaissance de cause :
 
@@ -479,15 +479,15 @@ mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/r
 chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs /srv/rag-donnees/secrets/rag-tls
 chown -R 1000:1000 /srv/rag-donnees/n8n_data
 mkdir -p /root/rag-stack
-for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
-ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env
-ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
-ln -s /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls
-ln -s /srv/rag-donnees/log-rag           /var/log/rag
+for d in qdrant_data openwebui_data n8n_data; do ln -sT /srv/rag-donnees/$d /root/rag-stack/$d; done
+ln -sT /srv/rag-donnees/secrets/.env      /root/rag-stack/.env
+ln -sT /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ln -sT /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls
+ln -sT /srv/rag-donnees/log-rag           /var/log/rag
 ls -l /root/rag-stack /etc/rag-certs /etc/rag-tls /var/log/rag
 ```
 
-**Attendu :** sept liens vers `/srv/rag-donnees` : `qdrant_data`, `openwebui_data`, `n8n_data` et `.env` dans `/root/rag-stack`, puis `/etc/rag-certs`, `/etc/rag-tls` et `/var/log/rag`. Le lien `.env` désigne un fichier qui n'existe pas encore : c'est normal, il est créé à l'étape 7. `n8n_data` appartient à l'utilisateur 1000, sous lequel tourne n8n : sinon, il redémarre en boucle (`EACCES`). Si `/var/log/rag` existe déjà en dossier ordinaire, `ln` le signale : le retirer (`rmdir /var/log/rag`, il est vide) et relancer la ligne.
+**Attendu :** sept liens vers `/srv/rag-donnees` : `qdrant_data`, `openwebui_data`, `n8n_data` et `.env` dans `/root/rag-stack`, puis `/etc/rag-certs`, `/etc/rag-tls` et `/var/log/rag`. Le lien `.env` désigne un fichier qui n'existe pas encore : c'est normal, il est créé à l'étape 7. `n8n_data` appartient à l'utilisateur 1000, sous lequel tourne n8n : sinon, il redémarre en boucle (`EACCES`). `-T` est indispensable : sans lui, si `/var/log/rag` (ou un autre nom) existe déjà en dossier, `ln` crée le lien **à l'intérieur**, sans erreur, et la stack écrirait sur le disque système. Avec `-T`, `ln` refuse (`File exists`) : retirer le dossier (`rmdir /var/log/rag`, il est vide) et relancer la ligne.
 
 > **Avec le `.env` en lien, deux pièges.** `sed -i` sur `/root/rag-stack/.env` **remplace le lien par un vrai fichier**, sur le disque système, en clair ; `cp` refuse d'écrire tant que la cible n'existe pas. Toujours désigner le vrai fichier : `/srv/rag-donnees/secrets/.env`, ou `$(readlink -f /root/rag-stack/.env)`, comme à l'étape 7.
 
@@ -596,10 +596,10 @@ grep -c "BEGIN CERTIFICATE" /etc/ssl/certs/ad-chain.pem
 **Attendu :** `2`. Contrôler ensuite que le contrôleur de domaine présente un certificat que cette chaîne valide :
 
 ```bash
-openssl s_client -connect <NOM-DC>.votre-domaine.ch:636 -CAfile /etc/ssl/certs/ad-chain.pem </dev/null 2>/dev/null | grep -E "Verify return code|Verification"
+openssl s_client -connect <NOM-DC>.votre-domaine.ch:636 -verify_hostname <NOM-DC>.votre-domaine.ch -CAfile /etc/ssl/certs/ad-chain.pem </dev/null 2>/dev/null | grep -E "Verify return code|Verification"
 ```
 
-**Attendu :** `Verify return code: 0 (ok)`. Une autre valeur indique un certificat manquant dans la chaîne, ou un nom de contrôleur qui ne correspond pas à celui du certificat.
+**Attendu :** `Verify return code: 0 (ok)`. Une autre valeur indique un certificat manquant dans la chaîne, ou, avec `-verify_hostname`, un nom de contrôleur qui ne correspond pas à celui du certificat (`62 (hostname mismatch)`).
 
 ---
 
@@ -751,7 +751,7 @@ Pour toute modification ultérieure du `.env`, utiliser le même chemin (`$ENVF`
 | `LDAP_HOST` | Le nom DNS complet du contrôleur de domaine, pas son adresse IP | `dc01.votre-domaine.ch` |
 | `LDAP_BASE_DN` | Le domaine, en notation LDAP | `DC=votre-domaine,DC=ch` |
 | `LDAP_BIND_DN` | Le compte `svc-rag`, avec son OU | `CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch` |
-| `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5 | |
+| `LDAP_BIND_PWD`, `SMB_PASSWORD` | Le mot de passe de `svc-rag`, le même aux deux endroits et dans le fichier de l'étape 5, **entre apostrophes** : un `$` ou un espace casserait sinon `source .env`. Pour la même raison, le mot de passe ne contient pas d'apostrophe (`deploy.sh` la refuse) | `'<mot de passe>'` |
 | `LDAP_DOMAIN`, `SMB_DOMAIN` | Le nom NetBIOS du domaine | `VOTRE-DOMAINE` |
 | `SMB_SHARE` | Le partage à indexer, le même qu'à l'étape 5 | `//<NOM-FILESERVER>/<PARTAGE>` (lab : `FileService`) |
 | `DOCUMENTATION_PATHS` | Facultatif. Le ou les dossiers de documentation technique (guides, procédures, manuels), **à la racine** du partage, séparés par des virgules. Leur contenu va dans la collection `documentation`, tout le reste dans `documents` ; les droits NTFS s'appliquent de la même façon aux deux. **Vide** : tout le partage va dans `documents`. Changer ce réglage après l'indexation exige une réindexation complète (§5.9) | `DOCUMENTATION` (lab : `DOIT4EVERYONE`) |
@@ -893,11 +893,13 @@ Tester ensuite les deux accès de `svc-rag`, à l'annuaire et au partage :
 set -a && source /root/rag-stack/.env && set +a
 
 LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem \
-    ldapwhoami -H ldaps://${LDAP_HOST}:${LDAP_PORT} -D "${LDAP_BIND_DN}" -w "${LDAP_BIND_PWD}" 2>&1
-smbclient //<NOM-FILESERVER>/<PARTAGE> -W "${SMB_DOMAIN}" -U "svc-rag%${SMB_PASSWORD}" -c "ls" 2>&1 | head -10
+    ldapwhoami -x -H ldaps://${LDAP_HOST}:${LDAP_PORT} -D "${LDAP_BIND_DN}" -y <(printf '%s' "${LDAP_BIND_PWD}") 2>&1
+PASSWD="${SMB_PASSWORD}" smbclient //<NOM-FILESERVER>/<PARTAGE> -W "${SMB_DOMAIN}" -U svc-rag -c "ls" 2>&1 | head -10
 ```
 
-**Attendu :** `dn:CN=svc-rag,...`, puis la liste des dossiers du partage. Sur un domaine Active Directory, `smbclient` exige `-W <DOMAINE>` : sans lui, l'erreur est `NT_STATUS_LOGON_FAILURE` alors que le mot de passe est correct.
+Les deux commandes lisent le mot de passe dans le `.env` sans le placer dans la ligne de commande, visible de tous les comptes de la VM pendant l'exécution : `ldapwhoami` le lit dans un fichier temporaire (`-y`), `smbclient` dans la variable `PASSWD`. `-x` impose l'authentification simple par le DN et le mot de passe, celle qu'utilise la RAG API ; sans lui, l'outil tente une authentification SASL.
+
+**Attendu :** `u:<DOMAINE>\svc-rag` (réponse d'Active Directory), puis la liste des dossiers du partage. Validé le 5 novembre 2026 sur la VM de test, avec le `.env` en service : `u:<DOMAINE>\svc-rag` (avec `-x`), le contenu du partage, et `Verify return code: 0 (ok)` pour le contrôle de l'étape 4D avec `-verify_hostname`. Sur un domaine Active Directory, `smbclient` exige `-W <DOMAINE>` : sans lui, l'erreur est `NT_STATUS_LOGON_FAILURE` alors que le mot de passe est correct.
 
 ---
 
@@ -1142,7 +1144,7 @@ sudo mkdir -p /opt/llama.cpp-conv && sudo chown $USER /opt/llama.cpp-conv && git
 Puis, depuis `/opt/llama.cpp-conv/src`, le téléchargement du modèle, la conversion en Q8 et la copie vers Windows :
 
 ```bash
-sudo mkdir -p /opt/hf && sudo chown $USER /opt/hf && HF_HOME=/opt/hf /opt/llama.cpp-conv/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
+sudo mkdir -p /opt/hf && sudo chown $USER /opt/hf && HF_HOME=/opt/hf /opt/llama.cpp-conv/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --revision 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
 ```
 
 **Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt du modèle et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. Le téléchargement utilise l'outil `hf` de Hugging Face installé avec les dépendances du convertisseur, dans le même environnement : vLLM n'est pas nécessaire. Rejoué le 5 novembre 2026 avec ce seul environnement, dans un dossier vide : téléchargement en deux minutes, révision `953dc6f6`, fichier de 635 673 664 octets et **empreinte identique** à celle du fichier en service : la conversion est reproductible.
@@ -1230,7 +1232,7 @@ Détail : [§11 Prérequis Microsoft 365](section-11-prerequis-ms365.md).
 4. Stratégie d'accès applicatif Teams attribuée au groupe (`New-CsApplicationAccessPolicy`, puis `Grant-CsApplicationAccessPolicy -Group <ID-objet-du-groupe>`) ;
 5. `.env` : `TEAMS_CLIENT_ID`, `TEAMS_CERT_THUMBPRINT`, `TEAMS_GROUP_ID` ;
 6. n8n : importer `n8n-teams-sync.json`, expéditeur = compte SMTP authentifié ;
-7. Validation : `docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_graph.py` (script de [`scripts/teams-test/`](../../scripts/teams-test/), copié dans `/root/rag-pipeline`).
+7. Validation : copier d'abord les deux tests de [`scripts/teams-test/`](../../scripts/teams-test/), qui ne le sont pas à l'étape 6 : `cp /root/ia-locale-pme-suisse/scripts/teams-test/test_teams_*.py /root/rag-pipeline/`, puis `docker exec -e PYTHONPATH=/app -w /app rag-api python3 /rag-pipeline/test_teams_graph.py`.
 
 Détail : [§12 Synthèse des réunions Teams](section-12-teams.md).
 
@@ -1260,9 +1262,11 @@ Le plus souvent : une variable manquante dans `.env`, le certificat `/etc/ssl/ce
 
 **Tout le monde est refusé (403)**
 
+`-W` demande le mot de passe de `svc-rag`, sans l'écrire dans la ligne de commande :
+
 ```bash
-LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem ldapwhoami -H ldaps://<NOM-DC>.votre-domaine.ch:636 \
-    -D "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" -w "<mot-de-passe>" 2>&1
+LDAPTLS_CACERT=/etc/ssl/certs/ad-chain.pem ldapwhoami -x -H ldaps://<NOM-DC>.votre-domaine.ch:636 \
+    -D "CN=svc-rag,OU=COMPTES-SERVICE,DC=votre-domaine,DC=ch" -W 2>&1
 ```
 
 Causes : mot de passe de `svc-rag` erroné ou changé, compte verrouillé, certificat de l'autorité de certification incorrect, attribut LDAP d'Open WebUI autre que `userPrincipalName`, ou nom du contrôleur de domaine qui ne se résout plus (DNS public dans la configuration de la VM, voir plus bas).
@@ -1352,7 +1356,7 @@ docker exec rag-api python3 -c "import urllib.request; print(urllib.request.urlo
 
 **`smbclient` : `NT_STATUS_LOGON_FAILURE` avec un mot de passe correct**
 
-Ajouter le domaine : `smbclient //<NOM-FILESERVER>/<PARTAGE> -W <DOMAINE> -U "svc-rag%<mot-de-passe>"`.
+Ajouter le domaine : `smbclient //<NOM-FILESERVER>/<PARTAGE> -W <DOMAINE> -U svc-rag -c ls`, qui demande le mot de passe.
 
 **Le montage du partage tombe après un redémarrage**
 

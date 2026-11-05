@@ -456,8 +456,9 @@ services:
 sudo mkdir -p /var/log/rag
 sudo chmod 750 /var/log/rag
 
-# Certificat CA du DC : le fichier doit exister avant docker compose up,
-# même vide, sinon le montage Docker bloque le démarrage de rag-api et open-webui.
+# Certificat CA du DC : le fichier doit exister avant docker compose up, même vide.
+# S'il manque, Docker crée un dossier à sa place (syntaxe courte du Compose),
+# qu'auth.py prend pour un certificat : la connexion LDAP échoue.
 # auth.py détecte un fichier vide et retombe sur CERT_NONE avec un avertissement.
 # Une fois le vrai certificat exporté depuis le DC (§9.2), redémarrer les conteneurs :
 #   docker compose restart rag-api open-webui
@@ -490,7 +491,7 @@ docker compose down
 
 > **Point critique :** sans `chown -R 1000:1000` sur `n8n_data`, n8n redémarre en boucle avec `EACCES: permission denied`. Le conteneur n8n tourne sous l'utilisateur `node` (uid 1000), mais le répertoire est créé par root lors du `mkdir`. Si `n8n_data` est un lien (§1.5), `chown -R` appliqué au lien ne change pas le dossier : d'où `readlink -f`. L'adresse annoncée par n8n vient de `RAG_FQDN` dans le `.env` (2.21.0 ; auparavant `N8N_WEBHOOK_URL`).
 >
-> **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent, Docker refuse de démarrer `rag-api` et `open-webui`. Créer un certificat auto-signé temporaire pour débloquer le démarrage, puis remplacer par le vrai certificat du DC (§9.2) avant toute connexion LDAP.
+> **Point critique :** si `/etc/ssl/certs/ad-chain.pem` est absent au lancement, Docker crée un **dossier** à sa place (syntaxe courte des montages du Compose), que la RAG API prend pour un certificat : la connexion à l'annuaire échoue (d'après le code, non rejoué). En lab sans certificat, créer un fichier vide (`touch`, ci-dessus) : la RAG API se connecte alors sans vérifier le contrôleur (`CERT_NONE`, avertissement au journal). Sinon, installer le vrai certificat de l'autorité (§0, étape 4D, ou §9.2) avant le premier lancement. Si le dossier a déjà été créé : arrêter la stack, `rmdir /etc/ssl/certs/ad-chain.pem`, puis créer le bon fichier.
 
 ```bash
 # Certificat temporaire pour débloquer le démarrage (à remplacer par le vrai)

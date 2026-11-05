@@ -487,7 +487,7 @@ La séquence se suit dans cet ordre, **sans pause entre l'étape 2 et l'étape 5
 
 ```powershell
 Set-ADAccountPassword -Identity svc-rag -Reset `
-    -NewPassword (ConvertTo-SecureString "<nouveau-mdp>" -AsPlainText -Force)
+    -NewPassword (Read-Host "Nouveau mot de passe de svc-rag" -AsSecureString)
 ```
 
 **Étape 3 :** mettre à jour le fichier credentials CIFS sur VM-RAG-LAB :

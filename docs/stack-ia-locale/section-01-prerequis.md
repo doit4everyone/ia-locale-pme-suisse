@@ -151,11 +151,11 @@ Le déverrouillage automatique exige une machine en **UEFI avec un TPM 2.0**. Se
 mkdir -p /srv/rag-donnees/{qdrant_data,openwebui_data,n8n_data,log-rag,secrets/rag-certs,secrets/rag-tls}
 chmod 700 /srv/rag-donnees/secrets /srv/rag-donnees/secrets/rag-certs /srv/rag-donnees/secrets/rag-tls
 mkdir -p /root/rag-stack
-for d in qdrant_data openwebui_data n8n_data; do ln -s /srv/rag-donnees/$d /root/rag-stack/$d; done
-ln -s /srv/rag-donnees/secrets/.env      /root/rag-stack/.env     # lien vers un fichier qui n'existe pas encore : normal
-ln -s /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
-ln -s /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls        # certificat de Nginx (§9.8)
-ln -s /srv/rag-donnees/log-rag           /var/log/rag
+for d in qdrant_data openwebui_data n8n_data; do ln -sT /srv/rag-donnees/$d /root/rag-stack/$d; done
+ln -sT /srv/rag-donnees/secrets/.env      /root/rag-stack/.env     # lien vers un fichier qui n'existe pas encore : normal
+ln -sT /srv/rag-donnees/secrets/rag-certs /etc/rag-certs
+ln -sT /srv/rag-donnees/secrets/rag-tls   /etc/rag-tls        # certificat de Nginx (§9.8)
+ln -sT /srv/rag-donnees/log-rag           /var/log/rag
 ls -l /root/rag-stack /etc/rag-certs /etc/rag-tls /var/log/rag
 ```
 
