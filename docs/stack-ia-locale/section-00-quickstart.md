@@ -1123,10 +1123,15 @@ Le serveur est `llama-server`, de llama.cpp, avec le modèle `bge-reranker-v2-m3
 **1. Installer `llama-server`**, sur le serveur de modèles. Depuis la page de la version b11934 de llama.cpp ([github.com/ggml-org/llama.cpp/releases/tag/b11934](https://github.com/ggml-org/llama.cpp/releases/tag/b11934)), télécharger `llama-b11934-bin-win-cuda-13.4-x64.zip` et `cudart-llama-bin-win-cuda-13.4-x64.zip`, version utilisée dans le lab. Contrôler leurs empreintes SHA-256 (`Get-FileHash <fichier>`) avec celles publiées sur la page de la version, puis extraire les deux archives dans `C:\IA\llama.cpp`, et créer le dossier du reranker :
 
 ```powershell
-New-Item -ItemType Directory -Force C:\IA\reranker | Out-Null; Test-Path C:\IA\llama.cpp\llama-server.exe
+New-Item -ItemType Directory -Force C:\IA\reranker | Out-Null; Test-Path C:\IA\llama.cpp\llama-server.exe; Get-ChildItem C:\IA\llama.cpp -Filter 'cu*.dll' | Select-Object Name
 ```
 
-**Attendu :** `True`.
+**Attendu :** `True`, puis `cublas64_13.dll`, `cublasLt64_13.dll` et `cudart64_13.dll` : les bibliothèques de CUDA sont à côté de `llama-server.exe`. Empreintes des deux archives dans le lab, identiques à celles publiées (contrôle du 5 novembre 2026) :
+
+| Archive | SHA-256 |
+|---|---|
+| `llama-b11934-bin-win-cuda-13.4-x64.zip` | `1950a4a667c85121e6adf936c9a51b578df4fd9f169465e6a22676aac53d6e07` |
+| `cudart-llama-bin-win-cuda-13.4-x64.zip` | `738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668` |
 
 **2. Convertir le modèle**, une seule fois, dans Ubuntu sous WSL2. Avec vLLM, c'est celui de l'étape 3B. Avec Ollama seul, installer WSL2 comme à l'étape 3B, point 1 (la règle de pare-feu de vLLM n'est pas nécessaire), puis `uv` comme au point 2 (`curl -LsSf https://astral.sh/uv/install.sh | sh` et `source ~/.local/bin/env`). Le convertisseur de llama.cpp, à un commit figé, dans un environnement Python à part :
 
@@ -1137,10 +1142,10 @@ sudo mkdir -p /opt/llama.cpp-conv && sudo chown $USER /opt/llama.cpp-conv && git
 Puis, depuis `/opt/llama.cpp-conv/src`, le téléchargement du modèle, la conversion en Q8 et la copie vers Windows :
 
 ```bash
-sudo mkdir -p /opt/hf && sudo chown $USER /opt/hf && HF_HOME=/opt/hf /opt/vllm/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
+sudo mkdir -p /opt/hf && sudo chown $USER /opt/hf && HF_HOME=/opt/hf /opt/llama.cpp-conv/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
 ```
 
-**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt du modèle et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. La commande utilise l'outil `hf` installé avec vLLM. **Sans vLLM** (non rejoué dans le lab), l'installer dans l'environnement de conversion, `uv pip install -q --python /opt/llama.cpp-conv/.venv/bin/python huggingface_hub`, et remplacer `/opt/vllm/.venv/bin/hf` par `/opt/llama.cpp-conv/.venv/bin/hf`.
+**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt du modèle et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. Le téléchargement utilise l'outil `hf` de Hugging Face installé avec les dépendances du convertisseur, dans le même environnement : vLLM n'est pas nécessaire. Rejoué le 5 novembre 2026 avec ce seul environnement, dans un dossier vide : téléchargement en deux minutes, révision `953dc6f6`, fichier de 635 673 664 octets et **empreinte identique** à celle du fichier en service : la conversion est reproductible.
 
 **3. Créer la clé et ouvrir le port**, dans PowerShell en administrateur, **avec le compte qui fait tourner Ollama**. La clé (64 caractères aléatoires) est écrite dans un fichier lisible par ce seul compte ; `llama-server` la reçoit par une variable, et elle n'apparaît pas dans la ligne de commande du processus :
 

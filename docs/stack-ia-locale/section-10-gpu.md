@@ -447,7 +447,7 @@ Puis, depuis `/opt/llama.cpp-conv/src`, le téléchargement du modèle (sans sa 
 HF_HOME=/opt/hf /opt/vllm/.venv/bin/hf download BAAI/bge-reranker-v2-m3 --exclude "onnx/*" && D=$(ls -d /opt/hf/hub/models--BAAI--bge-reranker-v2-m3/snapshots/*) && mkdir -p /opt/hf/gguf && /opt/llama.cpp-conv/.venv/bin/python convert_hf_to_gguf.py "$D" --outtype q8_0 --outfile /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && sha256sum /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf && mkdir -p /mnt/c/IA/reranker && cp /opt/hf/gguf/bge-reranker-v2-m3-q8_0.gguf /mnt/c/IA/reranker/
 ```
 
-**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. `hf` est l'outil de Hugging Face installé avec vLLM (§2) ; sans vLLM, il s'installe avec le paquet `huggingface_hub`.
+**Attendu :** un fichier de 636 Mo ; dans le lab, révision `953dc6f6` du dépôt et empreinte `a525387ce1faf3d7a31f60120f064d0f53e994304f5da36cfa56cbc0b4607ff7`. `hf` est l'outil de Hugging Face installé avec vLLM (§2). L'environnement de conversion contient aussi le sien, installé avec les dépendances du convertisseur : `/opt/llama.cpp-conv/.venv/bin/hf` remplace celui de vLLM sur un serveur qui n'en a pas (version 0.36.2 ; le §0, étape 17, l'utilise). Conversion rejouée le 5 novembre 2026 avec ce seul environnement, dans un dossier vide : même révision, même empreinte.
 
 **La clé et la règle de pare-feu**, dans PowerShell en administrateur. La clé (64 caractères aléatoires) est écrite dans un fichier dont l'héritage des droits est coupé, lisible par le seul compte qui lance le service :
 
