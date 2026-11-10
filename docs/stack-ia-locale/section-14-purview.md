@@ -202,7 +202,7 @@ Dans le lab, une seule application détient `Content.SuperUser` : `RAG-Purview-D
 
 ### §14.5.1 Rôle et points d'accès
 
-`mip-service` est un service ASP.NET 8 construit sur le SDK MIP de Microsoft (`File SDK`). Le support de .NET 8 par Microsoft prend fin le 10 novembre 2026 : la migration vers .NET 10 est à faire, après vérification de la compatibilité du SDK MIP (point 176 du suivi). Il tourne dans un conteneur, joignable uniquement depuis le réseau Docker de la stack, sans port publié, et exige un jeton à chaque appel.
+`mip-service` est un service ASP.NET 8 construit sur le SDK MIP de Microsoft (`File SDK`). **Le support de .NET 8 par Microsoft a pris fin le 10 novembre 2026** : plus de correctif de sécurité. La migration vers .NET 10 n'est pas encore faite ni validée avec le SDK MIP (point 176 du suivi). D'ici là, ne pas considérer cette extension comme prête pour une exploitation durable : la migration, puis les tests de déchiffrement et de droits (§14.7, checklist du §14.9), sont à faire d'abord. Il tourne dans un conteneur, joignable uniquement depuis le réseau Docker de la stack, sans port publié, et exige un jeton à chaque appel.
 
 | Point d'accès | Entrée | Sortie |
 |---|---|---|

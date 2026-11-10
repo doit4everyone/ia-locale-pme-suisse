@@ -15,7 +15,7 @@ description: "Service interne de déchiffrement Purview (.NET 8, SDK MIP, image 
 
 [Retour](../) | [§14 Documents protégés par Purview](../../../docs/stack-ia-locale/section-14-purview.html)
 
-Service interne de déchiffrement Purview (.NET 8, SDK MIP, image Ubuntu 24.04), construit avec le profil Compose `purview`. Voir §14.5 du guide. Le support de .NET 8 prend fin le 10 novembre 2026 : migration vers .NET 10 à faire (point 176 du suivi).
+Service interne de déchiffrement Purview (.NET 8, SDK MIP, image Ubuntu 24.04), construit avec le profil Compose `purview`. Voir §14.5 du guide. Le support de .NET 8 a pris fin le 10 novembre 2026 : migration vers .NET 10 à faire et à valider avec le SDK MIP (point 176 du suivi).
 
 | Fichier | Rôle |
 |---|---|

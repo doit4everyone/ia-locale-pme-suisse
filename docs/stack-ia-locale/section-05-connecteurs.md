@@ -172,7 +172,7 @@ Une permission posée sur un dossier n'atteint pas les sous-dossiers et fichiers
 1. crée le groupe dédié s'il n'existe pas et y ajoute `svc-rag` ;
 2. accorde la lecture (`RX`, héritée) sur chaque dossier de premier niveau de la racine, sauf ceux exclus ;
 3. recherche les sous-dossiers et fichiers à héritage coupé, et accorde la lecture sur chacun ;
-4. contrôle, fichier par fichier, que le groupe a bien la lecture partout ;
+4. contrôle, fichier par fichier, y compris les fichiers indexables posés à la racine, que le groupe a une autorisation de lecture et qu'aucun refus ne vise `svc-rag` (le compte, ses groupes imbriqués compris, « Tout le monde », « Utilisateurs authentifiés ») ; c'est un contrôle des droits posés, pas un essai de lecture : la synchronisation du RAG reste le contrôle effectif (« acl_illisible »). Un élément illisible pendant le parcours est signalé, et le script sort avec le code 4 (inventaire incomplet) ;
 5. liste les autres groupes de `svc-rag`, qui ne sont plus nécessaires à l'indexation.
 
 ```powershell

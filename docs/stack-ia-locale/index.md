@@ -120,7 +120,7 @@ La **Partie 3** est complète, de §11 à §17 : prérequis Microsoft 365, synth
 - **une procédure de mise à jour** d'une installation existante, validée sur la VM connectée à Microsoft 365 ;
 - **le résumé d'un document entier** (lecture par morceaux puis synthèse), que le RAG ne sait pas faire en choisissant des extraits (§10.10) ;
 - **le RAG visuel** (recherche directe dans les pages de PDF complexes, tableaux et schémas, par un modèle multimodal) ;
-- **la migration de `mip-service` vers .NET 10**, le support de .NET 8 prenant fin le 10 novembre 2026 (point 176 du suivi) ;
+- **la migration de `mip-service` vers .NET 10**, le support de .NET 8 ayant pris fin le 10 novembre 2026 (point 176 du suivi) ;
 - **une section « Du lab à la production »**, qui listera ce qu'un déploiement en entreprise exige en plus du lab.
 
 ---

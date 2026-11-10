@@ -15,7 +15,7 @@ description: "Déchiffre un seul document de test dans un conteneur jetable, et 
 
 [Retour](../) | [§14 Documents protégés par Purview](../../../docs/stack-ia-locale/section-14-purview.html)
 
-Déchiffre un seul document de test dans un conteneur jetable, et affiche son étiquette, son propriétaire et le début de son texte. Voir §14.7.1 du guide. Comme `mip-service`, la sonde est en .NET 8, dont le support prend fin le 10 novembre 2026 (point 176 du suivi).
+Déchiffre un seul document de test dans un conteneur jetable, et affiche son étiquette, son propriétaire et le début de son texte. Voir §14.7.1 du guide. Comme `mip-service`, la sonde est en .NET 8, dont le support a pris fin le 10 novembre 2026 (point 176 du suivi).
 
 | Fichier | Rôle |
 |---|---|

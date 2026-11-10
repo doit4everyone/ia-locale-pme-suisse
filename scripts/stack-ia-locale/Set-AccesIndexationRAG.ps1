@@ -14,7 +14,13 @@
   3. Recherche les sous-dossiers et fichiers dont l'héritage est coupé : une
      permission posée sur le dossier parent ne les atteint pas. Accorde la
      lecture sur chacun.
-  4. Vérifie, fichier par fichier, que le groupe a bien la lecture partout.
+  4. Vérifie, fichier par fichier, y compris les fichiers indexables posés à
+     la racine, que le groupe a une autorisation de lecture et qu'aucun refus
+     ne vise le compte de service (le compte, ses groupes imbriqués compris,
+     « Tout le monde », « Utilisateurs authentifiés »). Contrôle des droits
+     posés, pas un essai de lecture : la synchronisation du RAG reste le
+     contrôle effectif (fichiers « acl_illisible »). Un dossier illisible
+     pendant le parcours rend l'inventaire incomplet, et le script le signale.
   5. Liste les autres groupes du compte de service : une fois la lecture en
      place, ils ne sont plus nécessaires à l'indexation.
   6. Affiche les permissions du partage SMB et signale un partage plus
@@ -53,6 +59,9 @@
 
 .NOTES
   À exécuter en administrateur sur le serveur de fichiers.
+  Codes de sortie : 0 tout est en place ; 2 fichiers sans autorisation du
+  groupe ou avec un refus visant le compte ; 3 partage plus restrictif que les
+  NTFS ; 4 parcours incomplet (dossiers illisibles), résultat non fiable.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Racine,
@@ -66,6 +75,9 @@ param(
 $ErrorActionPreference = "Stop"
 $Domaine = $env:USERDOMAIN
 $lecture = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
+$lectureDonnees = [System.Security.AccessControl.FileSystemRights]::ReadData
+# Extensions lues par indexer.py : seuls ces fichiers comptent à la racine
+$extensionsIndexees = @('.docx', '.pdf', '.pptx', '.txt', '.md')
 $mode = if ($Verifier) { "VÉRIFICATION (aucune modification)" } else { "APPLICATION" }
 Write-Host "Racine : $Racine  |  Groupe : $Domaine\$Groupe  |  Mode : $mode" -ForegroundColor Cyan
 
@@ -118,6 +130,29 @@ function Test-Lecture([string]$Chemin) {
     return $false
 }
 
+# SID du jeton du compte de service : le compte, ses groupes (tokenGroups,
+# groupes imbriqués compris), « Tout le monde » et « Utilisateurs authentifiés ».
+# Un refus de lecture visant l'un d'eux l'emporte sur l'autorisation du groupe.
+$sidsJeton = @()
+if ($moduleAD) {
+    # tokenGroups est un attribut calculé : lisible seulement par une recherche de portée Base
+    $dnCompte = (Get-ADUser $CompteService).DistinguishedName
+    $u = Get-ADUser -SearchBase $dnCompte -SearchScope Base -Filter * -Properties tokenGroups
+    $sidsJeton = @($u.SID.Value) + @($u.tokenGroups | ForEach-Object { $_.Value }) + @('S-1-1-0', 'S-1-5-11')
+} else {
+    Write-Warning "Module ActiveDirectory absent : les refus visant $CompteService ne sont pas recherchés."
+}
+
+function Test-Refus([string]$Chemin) {
+    if (-not $sidsJeton) { return $false }
+    $regles = (Get-Acl -LiteralPath $Chemin).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    foreach ($r in $regles) {
+        if ($r.AccessControlType -eq "Deny" -and ($sidsJeton -contains $r.IdentityReference.Value) -and
+            (($r.FileSystemRights -band $lectureDonnees) -ne 0)) { return $true }
+    }
+    return $false
+}
+
 function Grant-Lecture([string]$Chemin, [bool]$EstDossier) {
     $droit = if ($EstDossier) { "(OI)(CI)RX" } else { "RX" }
     $sortie = & icacls $Chemin /grant "${Domaine}\${Groupe}:$droit" 2>&1
@@ -134,7 +169,7 @@ if ($Exclure) { Write-Host "Dossiers exclus  : $($Exclure -join ', ')" }
 $cibles = New-Object System.Collections.Generic.List[object]
 foreach ($d in $dossiers) {
     $cibles.Add($d)
-    Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable +erreursParcours |
         Where-Object { (Get-Acl -LiteralPath $_.FullName).AreAccessRulesProtected } |
         ForEach-Object { $cibles.Add($_) }
 }
@@ -161,15 +196,34 @@ foreach ($c in $cibles) {
 # ─────────────────────────────────────────
 Write-Host "`nContrôle de tous les fichiers..."
 $sansAcces = New-Object System.Collections.Generic.List[string]
+$refus = New-Object System.Collections.Generic.List[string]
 $total = 0
-foreach ($d in $dossiers) {
-    Get-ChildItem -LiteralPath $d.FullName -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
-        $total++
-        if (-not (Test-Lecture $_.FullName)) { $sansAcces.Add($_.FullName) }
-    }
+function Test-Fichier($f) {
+    $script:total++
+    if (-not (Test-Lecture $f.FullName)) { $sansAcces.Add($f.FullName) }
+    if (Test-Refus $f.FullName) { $refus.Add($f.FullName) }
 }
-Write-Host "  $total fichier(s) contrôlé(s), $($sansAcces.Count) sans lecture pour $Groupe"
-foreach ($f in $sansAcces) { Write-Host "    $f" -ForegroundColor Yellow }
+# Fichiers indexables posés directement à la racine : indexer.py les lit aussi,
+# mais ce script n'accorde la lecture que sur les dossiers de premier niveau.
+$aLaRacine = @(Get-ChildItem -LiteralPath $Racine -File -Force -ErrorAction SilentlyContinue -ErrorVariable +erreursParcours |
+    Where-Object { $extensionsIndexees -contains $_.Extension.ToLower() })
+foreach ($f in $aLaRacine) { Test-Fichier $f }
+foreach ($d in $dossiers) {
+    Get-ChildItem -LiteralPath $d.FullName -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +erreursParcours |
+        ForEach-Object { Test-Fichier $_ }
+}
+Write-Host "  $total fichier(s) contrôlé(s) : $($sansAcces.Count) sans autorisation de lecture pour $Groupe, $($refus.Count) avec un refus visant $CompteService"
+foreach ($f in $sansAcces) { Write-Host "    Sans autorisation : $f" -ForegroundColor Yellow }
+foreach ($f in $refus) { Write-Host "    Refus : $f" -ForegroundColor Yellow }
+if ($aLaRacine.Count -gt 0) {
+    Write-Warning ("$($aLaRacine.Count) fichier(s) indexable(s) à la racine de $Racine : indexés comme les autres, mais " +
+                   "hors des dossiers traités par ce script. Les ranger dans un dossier, ou régler la lecture à la racine.")
+}
+if ($erreursParcours.Count -gt 0) {
+    Write-Warning "$($erreursParcours.Count) élément(s) illisible(s) pendant le parcours : inventaire incomplet, résultat non fiable."
+    $erreursParcours | Select-Object -First 20 | ForEach-Object { Write-Host "    $($_.TargetObject) : $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+Write-Host "  Contrôle des droits posés, pas un essai de lecture : la synchronisation du RAG reste le contrôle effectif (« acl_illisible »)."
 
 # ─────────────────────────────────────────
 # 5. Autres groupes du compte de service
@@ -236,5 +290,7 @@ if ($Verifier) {
     Write-Host "$ajouts droit(s) ajouté(s)." -ForegroundColor Cyan
     Write-Host "Sur la VM : remonter le partage (la session SMB garde l'ancien jeton du compte), puis /admin/sync."
 }
-if ($sansAcces.Count -gt 0) { exit 2 }
+if ($erreursParcours.Count -gt 0) { exit 4 }
+if ($sansAcces.Count -gt 0 -or $refus.Count -gt 0) { exit 2 }
 if ($partageRestreint) { exit 3 }
+exit 0

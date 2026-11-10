@@ -68,7 +68,7 @@ Mesuré dans le lab : avec vLLM, deux personnes qui posent leurs questions en m�
 
 ## Avant de commencer
 
-- **Les droits d'administrateur** sur l'Active Directory et sur le serveur de fichiers.
+- **Les droits d'administrateur** sur l'Active Directory et sur le serveur de fichiers, qui doit **accepter l'authentification NTLM** pour `svc-rag` (étape 5).
 - **De quoi héberger la VM de la stack** : un hyperviseur (VMware Workstation dans le lab) capable de lui donner 6 vCPU, 16 Go de mémoire, 100 Go de disque, un démarrage **UEFI** et un **TPM 2.0** virtuel. L'étape 4 crée la VM, installe Ubuntu Server 26.04 et Docker, et chiffre le volume des données.
 - **Une carte graphique NVIDIA d'au moins 16 Go** sur le serveur de modèles (le lab : une RTX 5060 Ti 16 Go). Sans carte, Ollama fonctionne sur le processeur, mais une question prend une à deux minutes (§10.4) ; vLLM exige une carte.
 - **Un accès à Internet** pendant l'installation : paquets, images Docker, modèles.
@@ -635,6 +635,8 @@ L'option `-a` ajoute au journal au lieu de l'écraser : sans elle, une relance e
 
 ## Étape 5 : monter le partage de fichiers
 
+> **Le serveur de fichiers doit accepter NTLM.** Cette version authentifie `svc-rag` en NTLM pour le montage du partage et pour la lecture des droits (`smbcacls`, une connexion par fichier à chaque synchronisation : dans le lab, 294 authentifications en deux heures, que le SIEM signale). Si la politique de sécurité désactive NTLM sur le serveur de fichiers, la lecture des droits échoue et les documents sont retirés de la recherche, sans fuite. L'authentification Kerberos pour ces deux opérations est identifiée, ni intégrée ni validée (point 198 du suivi). À vérifier avec la sécurité avant le déploiement.
+
 Le mot de passe de `svc-rag` va dans un fichier lisible par root seulement, jamais dans une ligne de commande, et **sur le volume chiffré** : comme le `.env`, le fichier réel est dans `/srv/rag-donnees/secrets`, avec un lien à l'emplacement habituel. Jusqu'à la 2.22.2, ce fichier était créé dans `/etc/smbcredentials`, sur le disque système, en clair (constat du rejeu du 23 octobre 2026).
 
 ```bash
@@ -1106,7 +1108,7 @@ curl -sk https://<IP-VM>/; echo "code $?"
 | Synchronisation horaire | n8n, dernière exécution | Réussie |
 | Échéance du certificat | `openssl x509 -in /etc/rag-tls/rag.crt -noout -enddate` | Notée au calendrier des rotations (§17.3) |
 | Garde-fou des droits | `python acl_resolver.py --share //<NOM-FILESERVER>/PartageInexistant --mount /mnt/corpus-root --rapport /var/log/rag/rapport_acl_gardefou.json` | Code 1, `[GARDE-FOU]`, Qdrant intact |
-| Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans lecture |
+| Lecture du partage | `.\Set-AccesIndexationRAG.ps1 ... -Verifier` | 0 fichier sans autorisation, 0 refus, aucun élément illisible, code 0 |
 | Avec vLLM : la clé est exigée | Étape 3B, point 5 | `401` sans la clé |
 | Redémarrage complet | `reboot`, puis §15.3.5 et `getent hosts <NOM-DC>.votre-domaine.ch <NOM-FILESERVER>` | Disque ouvert sans saisie, conteneurs `Up`, les deux noms résolus |
 | Sauvegarde | Snapshot de la VM arrêtée, puis snapshots Qdrant copiés hors de `qdrant_data` (§3.7) | Fichiers `.snapshot` présents dans la copie |
