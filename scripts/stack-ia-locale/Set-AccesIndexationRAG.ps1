@@ -61,7 +61,9 @@
   À exécuter en administrateur sur le serveur de fichiers.
   Codes de sortie : 0 tout est en place ; 2 fichiers sans autorisation du
   groupe ou avec un refus visant le compte ; 3 partage plus restrictif que les
-  NTFS ; 4 parcours incomplet (dossiers illisibles), résultat non fiable.
+  NTFS ; 4 parcours incomplet (dossiers illisibles), résultat non fiable ;
+  5 module ActiveDirectory absent : appartenance de svc-rag au groupe et refus
+  visant ses groupes non vérifiés, contrôle incomplet (installer RSAT).
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Racine,
@@ -293,4 +295,8 @@ if ($Verifier) {
 if ($erreursParcours.Count -gt 0) { exit 4 }
 if ($sansAcces.Count -gt 0 -or $refus.Count -gt 0) { exit 2 }
 if ($partageRestreint) { exit 3 }
+if (-not $moduleAD) {
+    Write-Warning "Contrôle incomplet : sans module ActiveDirectory, l'appartenance de $CompteService à $Groupe et les refus visant ses groupes ne sont pas vérifiés (installer RSAT, Active Directory)."
+    exit 5
+}
 exit 0
