@@ -1,4 +1,4 @@
-title: "IA locale pour PME suisse, guide décisionnel et procédures"
+title: "IA locale pour PME suisse | DoIt4Everyone"
 description: "Guide de déploiement d'une stack RAG locale pour PME suisses : Ollama ou vLLM, Qdrant, Open WebUI, réponses limitées aux droits NTFS et SharePoint de chaque utilisateur, mesures de qualité. Lab validé, conçu pour faciliter la conformité à la nLPD."
 url: "https://doit4everyone.github.io"
 baseurl: "/ia-locale-pme-suisse"

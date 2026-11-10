@@ -1,5 +1,5 @@
 ---
-title: "IA locale pour PME suisse : stack RAG, guide et scripts | DoIt4Everyone"
+title: "Stack RAG locale : guide et scripts"
 description: "Déployer une IA locale dans une PME suisse : une stack RAG sur votre infrastructure, des réponses limitées aux droits de chaque utilisateur, des mesures de qualité. Guide pas à pas, scripts et corpus de test, gratuits."
 ---
 
