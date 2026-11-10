@@ -1,6 +1,6 @@
 ---
-title: "IA locale pour PME suisse : guide décisionnel et procédures | DoIt4Everyone"
-description: "RTX Spark, DGX Spark, RTX PRO 6000, H100 : architectures IA locales pour PME suisses. TCO réel sur 3 ans en CHF, performances d'inférence mesurées, ingénierie RAG, sécurité et conformité nLPD. Procédures opérationnelles publiées progressivement."
+title: "IA locale pour PME suisse : stack RAG, guide et scripts | DoIt4Everyone"
+description: "Déployer une IA locale dans une PME suisse : une stack RAG sur votre infrastructure, des réponses limitées aux droits de chaque utilisateur, des mesures de qualité. Guide pas à pas, scripts et corpus de test, gratuits."
 ---
 
 <style>
